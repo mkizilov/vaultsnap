@@ -11,6 +11,7 @@ publish = false
 
 [workspace.dependencies]
 argon2 = "0.5"
+blake3 = "1"
 chacha20poly1305 = "0.10"
 clap = { version = "4.5", features = ["derive", "env"] }
 getrandom = "0.2"
@@ -25,6 +26,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 vaultsnap-core = { path = "crates/vaultsnap-core" }
 zeroize = "1"
+zstd = { version = "0.13", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

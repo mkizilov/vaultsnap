@@ -15,9 +15,9 @@ A reliable encrypted incremental backup utility written in Rust.
 | `check`     | Not implemented                                                        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
-Key management and a streaming content-defined chunker are in place, but **file data is not
-chunked into the repository or encrypted yet** because nothing can be backed up yet. Do not rely
-on this tool for real data.
+Key management, a streaming content-defined chunker, and an encrypted, deduplicating chunk store
+are in place, but **nothing yet reads your files into the repository** because `backup` does not
+exist. Do not rely on this tool for real data.
 
 ### Chunking
 
@@ -36,6 +36,32 @@ while let Some(chunk) = chunker.next_chunk()? {
 ```
 
 The exact algorithm is specified in [`docs/FORMAT.md`](docs/FORMAT.md).
+
+### Chunk store
+
+`vaultsnap_core::chunk_store::ChunkStore` stores chunks as encrypted objects in `data/<xx>/<id>`:
+
+- **Addressing**: the id is a keyed BLAKE3 hash of the plaintext, keyed with a secret derived from
+  the repository key. Identical chunks deduplicate within a repository; without the key nobody
+  can test whether a known file is present, or link two repositories.
+- **Encryption**: each chunk is compressed with zstd only when that makes it smaller, then sealed
+  with XChaCha20-Poly1305 under a fresh random nonce. The object header and the chunk id are
+  authenticated, so objects cannot be edited or moved to another id.
+- **Integrity**: reads authenticate, decrypt, decompress within the authenticated length, and
+  check that the content hashes to the id. Truncated, extended, modified, misplaced, and
+  wrong-key objects are all rejected as corrupt.
+- **Atomic and concurrency-safe**: objects are published with a single no-overwrite step; when
+  several writers store the same chunk exactly one creates it and the rest see a duplicate.
+
+```rust
+let keys = repo.unlock(&passphrase).await?;
+let chunks = repo.chunk_store(&keys)?;
+let stored = chunks.put(b"chunk bytes")?;      // PutOutcome::Stored or ::Duplicate
+let bytes = chunks.get(&stored.id)?;           // verified plaintext
+```
+
+The byte-level format and the reasoning behind each cryptographic choice are in
+[`docs/FORMAT.md`](docs/FORMAT.md) ("Chunk objects").
 
 The design is specified before the code that implements it:
 
@@ -74,14 +100,15 @@ no way to recover a lost passphrase.
 
 | Crate             | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, snapshot ids, retention, operations |
+| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, snapshot ids, retention, operations |
 | `vaultsnap-cli`   | Binary `vaultsnap`: `clap` argument parsing and output          |
 
 Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiserror` (errors),
 `tokio` (async runtime; repository operations are `async` and run blocking file I/O on Tokio's
 blocking pool), `getrandom` (OS randomness), `argon2`, `hkdf` + `sha2`, `chacha20poly1305`
-(RustCrypto key derivation and authenticated encryption), `zeroize` (clearing secrets), and
-`rpassword` (reading a passphrase without echo).
+(RustCrypto key derivation and authenticated encryption), `blake3` (keyed chunk ids), `zstd`
+(compression; the C library is compiled from source, so a C compiler is needed to build),
+`zeroize` (clearing secrets), and `rpassword` (reading a passphrase without echo).
 
 ## Usage
 

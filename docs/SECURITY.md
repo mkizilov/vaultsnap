@@ -2,9 +2,11 @@
 
 Status: **partly implemented**. Repository creation, the local store (permissions, symlink
 refusal, atomic writes), locking, and key management exist: the master key is random, protected by
-an Argon2id-derived key, and per-purpose keys are derived with HKDF. File data and metadata are
-not encrypted yet because backup does not exist yet, so nothing user-supplied is stored at all.
-The `config` file is plaintext by design and holds no secret. This document defines what the
+an Argon2id-derived key, and per-purpose keys are derived with HKDF. The encrypted chunk store
+exists: chunks are named by a keyed hash, compressed when beneficial, and sealed with
+XChaCha20-Poly1305. Nothing yet feeds file data into it (backup does not exist), and file names,
+directory structure, and snapshot metadata have no storage format yet, so their protection is
+still a requirement, not a fact. The `config` file is plaintext by design and holds no secret. This document defines what the
 implementation must guarantee, and what it deliberately does not. See `FORMAT.md` for the data
 layout.
 
@@ -32,15 +34,28 @@ current one.
 
 ## Information that is not hidden
 
-Total repository size, number and approximate size of packs, object timestamps as set by the
-storage, and the repository format version. Chunk sizes are bounded and packs are padded only to
-the extent documented in `FORMAT.md` once defined.
+Total repository size, the number of chunk objects, the exact size of every chunk object and
+therefore (to within the 52-byte overhead) of every chunk, object timestamps as set by the
+storage, and the repository format version. The chunk length is also stored in clear in the
+object header (authenticated, not secret). Objects are not padded.
+
+**Compression leaks compressibility.** Chunks are compressed before encryption, so an object's
+size shows roughly how well its chunk compressed: highly repetitive data yields tiny objects,
+random or already-compressed data yields objects as large as the chunk. This is inherent to
+compress-then-encrypt. It is limited to per-chunk granularity because every chunk is compressed
+on its own, never together with other data, which is what makes the CRIME/BREACH style of attack
+(an attacker injecting guesses next to a secret in one compression context) inapplicable.
+
+**Deduplication is visible.** Two chunks with the same content have the same id and share one
+file. Someone who can see the storage can tell which snapshots reuse which chunks and how much
+data is shared, but cannot link chunks across repositories (ids are keyed per repository) or
+confirm the content of a chunk.
 
 **Chunk boundaries are a fingerprint.** The chunker's gear table is fixed and public, so the
 sequence of chunk sizes of a file is a deterministic function of its content. Someone who can see
 the stored (encrypted) chunk lengths and already has a candidate file can chunk it and compare
 the size sequence to confirm the file is probably in the repository. Chunk *ids* do not have this
-problem (they will be keyed with the `ContentId` key), but lengths do. Mitigation under
+problem (they are keyed with the repository's `ContentId` key), but lengths do. Mitigation under
 consideration: derive the gear table from a per-repository secret, and/or pad chunks. Until then
 this is a known limitation for users whose threat model includes confirming known files against
 storage-side metadata.
@@ -93,7 +108,14 @@ as untrusted for path purposes:
 
 - Object names and snapshot ids are 64 lowercase hex characters, checked before building paths
   (`SnapshotId`). This prevents path traversal through user input.
-- Lengths and counts read from the repository are bounded before allocating.
+- Lengths and counts read from the repository are bounded before allocating. Chunk object files
+  larger than the largest valid object are never read; a declared chunk length above 64 MiB is
+  rejected; decompression is capped at the authenticated declared length.
+- Chunk objects are verified completely before any byte is returned: magic and version, lengths,
+  the AEAD tag over header, chunk id, and ciphertext, the decompressed length, and finally that
+  the keyed hash of the content equals the id. Truncated, extended, modified, misplaced, and
+  wrong-key objects all fail with a corruption error and release no data. Chunk object names are
+  built only from a parsed 32-byte id, never from free text.
 - The repository format version is checked before any other parsing of repository contents.
 
 ## Filesystem handling (built)

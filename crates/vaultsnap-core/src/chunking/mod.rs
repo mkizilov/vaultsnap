@@ -26,7 +26,7 @@ mod config;
 mod gear;
 mod stream;
 #[cfg(test)]
-mod test_util;
+pub(crate) mod test_util;
 
 pub use config::ChunkerConfig;
 pub use stream::{Chunk, ChunkBuf, Chunker};

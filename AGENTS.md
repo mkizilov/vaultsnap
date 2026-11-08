@@ -52,8 +52,11 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   `KdfParams`, HKDF `KeyPurpose`/`derive_key`, XChaCha20-Poly1305 `seal`/`open`), `keys`
   (`RepositoryKeys`, key files, unlocking), `chunking` (`ChunkerConfig`, `Chunker`: FastCDC over
   any `Read`, no storage coupling; its algorithm and gear table are part of the repository format,
-  so never change them without updating `docs/FORMAT.md` and bumping the format version). No CLI
-  or terminal concerns here. All repository file
+  so never change them without updating `docs/FORMAT.md` and bumping the format version),
+  `chunk_store` (`ChunkStore`, `ChunkId`; `object` is the byte format of one chunk object: header
+  and chunk id are AEAD associated data, keyed BLAKE3 ids, optional zstd; `store` is the
+  dedup/atomic-write/verified-read logic; the format is specified in `docs/FORMAT.md` and any
+  change to it needs a version bump). No CLI or terminal concerns here. All repository file
   access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
   through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
@@ -62,8 +65,8 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   add tests). Tests use `testing::fast_kdf()` (cheap Argon2 parameters); production code never
   does.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
-  chunking engine. `backup`, `snapshots`, `restore`, `check`, `prune` are stubs. Nothing chunks or
-  encrypts file data on disk yet.
+  chunking engine, the encrypted chunk store. `backup`, `snapshots`, `restore`, `check`, `prune`
+  are stubs. Nothing reads files into the chunk store yet.
 - Tests and benchmarks: chunking property tests live in `crates/vaultsnap-core/tests/chunking.rs`
   (`proptest`; only properties that are provable, plus fixed-seed statistical tests with wide
   margins, to avoid flaky tests); the benchmark is `crates/vaultsnap-core/benches/chunking.rs`

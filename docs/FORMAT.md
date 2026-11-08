@@ -2,8 +2,9 @@
 
 Status: **partly implemented**. `init`, the `config` file, the local store, locking, and key
 management (master key, key files, derived keys, authenticated encryption) exist and are marked
-*built*. Chunking, packs, indexes, and snapshot objects, and therefore encryption of file data and
-metadata, are still *planned*; `backup`, `snapshots`, `restore`, `check`, and `prune` return "not
+*built*, as are chunking and the encrypted, deduplicated chunk store. Packs, indexes, and snapshot
+objects, and therefore encryption of metadata and the connection from files to chunks, are still
+*planned*; `backup`, `snapshots`, `restore`, `check`, and `prune` return "not
 implemented". Code that lands later must follow this document, and changes to the format must
 update it first and bump `FORMAT_VERSION` (`crates/vaultsnap-core/src/repository.rs`).
 
@@ -28,7 +29,7 @@ implemented by VaultSnap itself.
 ```
 <repo>/
   config            plaintext header: format version, repository id (built)
-  data/             object storage; encrypted pack files <xx>/<id>, <xx> = first two hex chars
+  data/<xx>/<id>    encrypted chunk objects (built); <xx> = first two hex chars of the chunk id
   snapshots/        snapshot metadata; one encrypted snapshot object per snapshot
   locks/<id>.lock   advisory lock files (built)
   keys/<id>         key files: the master key wrapped by a passphrase-derived key (built)
@@ -112,8 +113,12 @@ the file so an operator can delete it after confirming no VaultSnap process is r
 
 - **Snapshot id**: 256-bit digest of the snapshot object's stored bytes, as 64 lowercase hex
   characters (`SnapshotId`). Pack and index ids are derived the same way.
-- **Chunk id**: keyed BLAKE3 of the plaintext chunk, keyed with a subkey derived from the master
-  key. Keying prevents a storage-side party from confirming that a known file is present.
+- **Chunk id** (built): `BLAKE3-keyed-hash(key = ContentId key, plaintext chunk)`, 256 bits, as 64
+  lowercase hex characters (`ChunkId`). The `ContentId` key is derived from the master key (see
+  *Keys and encryption*), so ids are specific to one repository and cannot be computed without
+  it: a party who can read the repository cannot test whether a file they already have is stored
+  in it. Identical chunks have identical ids within a repository, which is what deduplication
+  uses.
 
 ## Chunking and deduplication (chunker built; storing chunks planned)
 
@@ -157,12 +162,80 @@ one constant length, so they deduplicate perfectly.
 **Known limitation.** The gear table is fixed and public, so chunk sizes in a repository reveal
 the cut pattern of the data to someone who can see the storage (see `SECURITY.md`).
 
-## Pack files
+## Chunk objects (built)
 
-A pack holds many encrypted chunks plus an encrypted trailer listing them (chunk id, offset,
-length). Packs are written to a temporary name inside the repository, flushed to disk, and then
-renamed into `data/`. A pack becomes visible only when an index object that references it is
-written.
+Each chunk is stored as one file, `data/<xx>/<id>`, where `<id>` is the chunk id in hex and `<xx>`
+its first two hex digits (256 shard directories, created `0700` on demand). Layout, all integers
+little endian:
+
+```
+offset  size  field
+0       4     magic "VSCO"
+4       1     format version = 1
+5       1     object kind = 1 (chunk)
+6       1     compression: 0 = none, 1 = zstd
+7       1     flags, reserved, must be 0
+8       4     plaintext length of the chunk in bytes (u32)
+12      24    XChaCha20-Poly1305 nonce, random per object
+36      n     ciphertext of the payload (n = payload length)
+36+n    16    Poly1305 tag
+```
+
+- **Key**: the `DataEncryption` key. **Associated data**: the 12 header bytes followed by the 32
+  raw bytes of the chunk id. The header is therefore readable but cannot be changed, and an
+  object cannot be filed under a different id, without authentication failing.
+- **Payload**: the chunk itself, or `zstd(chunk)` (level 3, one frame) if that is *strictly
+  shorter*; otherwise stored uncompressed. Both the compressed and the plain forms add the same
+  52 bytes of overhead.
+- **Limits**: a chunk is at most 64 MiB (the chunker's limit). A reader refuses a larger declared
+  length, refuses files larger than the largest valid object before reading them, and
+  decompresses with an output cap equal to the authenticated declared length, so a malicious
+  object cannot expand beyond it.
+- **Verification on read**, in this order, failing at the first problem: (1) at least 5 bytes
+  and the magic; (2) the format version (an unknown version is reported as such, nothing else is
+  guessed); (3) minimum length, object kind, compression code, flags, declared length within
+  limits, and a body length consistent with the declared length (exactly `24 + length + 16` for
+  uncompressed objects, at most that for compressed ones); (4) the AEAD tag over header, id, and
+  ciphertext; (5) decompression within the declared length and an exact length match; (6) the
+  keyed BLAKE3 hash of the result must equal the id the object was requested by. Only then is
+  the chunk returned. Steps 1-3 reject truncated and extended files cheaply; step 4 catches
+  every modification of the stored bytes; step 6 additionally catches an authentic object that
+  holds the wrong content.
+- **Atomic, deduplicating write**: the chunk id is computed, and if `data/<xx>/<id>` exists
+  nothing else happens (*duplicate*). Otherwise the object is staged in a `.tmp-` file in the
+  shard directory, flushed with `fsync`, and published with a no-overwrite hard link (see *Local
+  store*), then the directory is synced. If that publish finds the name already taken, another
+  writer got there first and the result is again *duplicate*. Exactly one of any number of
+  concurrent writers of the same chunk creates the object; the others leave nothing behind.
+- **Trust in existing objects**: deduplication decides by the presence of the object and does
+  not re-verify it. Damage is detected when the chunk is read and by the repository check
+  (planned), not hidden. Repairing a damaged chunk means deleting its object and storing the
+  chunk again.
+- Stale `.tmp-` files left by a crash are ignored and can be removed by a future repository
+  check.
+
+### Cryptographic format decisions
+
+| Decision | Reason |
+|----------|--------|
+| Chunk ids are a *keyed* hash (BLAKE3 keyed mode with a derived subkey) | An unkeyed content hash lets anyone with read access confirm that a known file is in the repository and link repositories. A MAC-style PRF keeps deduplication and removes both. BLAKE3 keyed mode is a standard PRF/MAC, needs no custom construction, and is fast on large chunks. |
+| The id key and the encryption key are separate HKDF outputs | Independent keys per purpose: a flaw or leak in one use cannot be turned against the other. |
+| XChaCha20-Poly1305 with a fresh random 192-bit nonce per object | 192 bits make random nonce collisions negligible for any repository size, so no counter or nonce state needs coordinating between concurrent writers or machines. Encrypting the same chunk twice gives different bytes. |
+| No convergent (deterministic) encryption | It would make equal chunks produce equal ciphertexts and defeat the keyed-id design. Deduplication happens through ids, before encryption. |
+| Header in clear but authenticated; chunk id in the associated data | Readers can dispatch on version, compression, and length before decrypting, and nothing in the header or the file's name can be altered or swapped undetected. |
+| Compress, then encrypt, per chunk | Encrypted data does not compress, so compression must come first. Compressing each chunk alone, with no secret or attacker-influenced data in the same context, avoids the CRIME/BREACH class of attacks. It does reveal approximate compressibility through the object size (see `SECURITY.md`). |
+| Compression only when strictly smaller | Incompressible data (encrypted, already compressed) pays no decompression cost and no expansion. |
+| Decompression capped by the authenticated length | A modified object fails authentication before anything is decompressed, and even an object written by a holder of the key cannot expand beyond its declared length, which is itself bounded by the 64 MiB chunk limit. This bounds memory use for any damaged or hostile object. |
+| The id is re-derived from the plaintext after decryption | Authentication proves who wrote an object, not that it holds the right data. Recomputing the id ties content to name regardless of how a wrong pairing arose (software bug, repair tooling, restoring from backup). |
+| Explicit magic and version byte; unknown versions refused | Future formats (packs, new ciphers, new compression) can coexist; a reader never interprets bytes it does not understand. A format change is a new version number, never a silent reinterpretation. |
+| One file per chunk | Simplest correct atomic unit, and the unit of concurrency control. Small chunks mean many files; **packs** that group chunks are planned and will be a new object kind/version, with this layout still readable. |
+
+## Pack files (planned)
+
+A pack will hold many encrypted chunks plus an encrypted trailer listing them (chunk id, offset,
+length), to avoid one file per chunk. Packs will be written to a temporary name, flushed, and
+renamed into `data/`, and will become visible only when an index object that references them is
+written. Until then every chunk is a loose object as described above.
 
 ## Snapshot object
 
@@ -220,22 +293,22 @@ with 32-byte output. Labels are part of the format and never change or get reuse
 
 | Purpose              | Label                                  | Used for (planned)              |
 |----------------------|----------------------------------------|---------------------------------|
-| `ContentId`          | `vaultsnap/v1/content-id`              | keyed hash naming chunks        |
-| `DataEncryption`     | `vaultsnap/v1/data-encryption`         | pack files                      |
+| `ContentId`          | `vaultsnap/v1/content-id`              | keyed hash naming chunks (built)|
+| `DataEncryption`     | `vaultsnap/v1/data-encryption`         | chunk objects (built), packs    |
 | `MetadataEncryption` | `vaultsnap/v1/metadata-encryption`     | snapshot and index objects      |
 
 **Sealed messages.** `nonce(24 random bytes) || ciphertext || tag(16)` with XChaCha20-Poly1305
-and caller-supplied associated data. The object kind and format version will be bound as
-associated data so one kind of object cannot be substituted for another (planned, with the
-objects). Random 192-bit nonces make reuse negligible without any counter state.
+and caller-supplied associated data. Chunk objects bind their header (magic, version, kind,
+compression, length) and chunk id; snapshot and index objects will bind their own kind and
+version in the same way. Random 192-bit nonces make reuse negligible without any counter state.
 
 ## Write ordering and crash safety
 
-1. Write new packs (temporary name, sync, rename).
-2. Write the index object that covers them.
-3. Write the snapshot object.
+1. Write new chunk objects (and, later, packs): temporary name, sync, no-overwrite publish.
+2. Write the index object that covers them (planned).
+3. Write the snapshot object (planned).
 
-Readers only trust snapshots, so a crash between steps leaves unreferenced packs that `prune`
+Readers only trust snapshots, so a crash between steps leaves unreferenced chunks that `prune`
 later removes. Existing objects are never modified in place.
 
 ## Locking

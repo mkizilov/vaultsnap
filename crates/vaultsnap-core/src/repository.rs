@@ -5,8 +5,10 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::blocking::blocking;
+use crate::chunk_store::ChunkStore;
 use crate::config::RepositoryConfig;
 use crate::error::{Error, Result};
+use crate::keys::RepositoryKeys;
 use crate::lock::{LockKind, RepositoryLock};
 use crate::snapshot::SnapshotId;
 use crate::store::LocalStore;
@@ -110,6 +112,12 @@ impl Repository {
     /// The local store backing this repository.
     pub fn store(&self) -> LocalStore {
         LocalStore::new(self.layout.root())
+    }
+
+    /// The encrypted chunk store of this repository, using keys derived from `keys` (obtained
+    /// with [`Repository::unlock`]). Performs no I/O; the repository should have been opened.
+    pub fn chunk_store(&self, keys: &RepositoryKeys) -> Result<ChunkStore> {
+        ChunkStore::new(self.store(), keys)
     }
 
     /// Opens the repository: checks that it exists, that its format version is supported, and

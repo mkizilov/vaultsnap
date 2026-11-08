@@ -97,6 +97,43 @@ pub enum Error {
     /// Chunk size limits are out of range or inconsistent.
     #[error("invalid chunker configuration: {0}")]
     InvalidChunkerConfig(String),
+    /// A chunk identifier was not 64 lowercase hexadecimal characters.
+    #[error("invalid chunk id {0:?}: expected 64 lowercase hexadecimal characters")]
+    InvalidChunkId(String),
+    /// The repository has no object for this chunk.
+    #[error("chunk {0} is not in the repository")]
+    ChunkNotFound(String),
+    /// A chunk is larger than the largest chunk the format supports.
+    #[error("chunk of {len} bytes exceeds the maximum of {max} bytes")]
+    ChunkTooLarge {
+        /// Size of the offered chunk.
+        len: usize,
+        /// The limit.
+        max: usize,
+    },
+    /// A stored object failed verification: it is damaged, truncated, tampered with, stored
+    /// under the wrong id, or the key is wrong. These cases cannot be told apart reliably.
+    #[error("object {id} is corrupt: {reason}")]
+    CorruptObject {
+        /// The chunk id the object was read for.
+        id: String,
+        /// What failed.
+        reason: String,
+    },
+    /// An object was written with a format version this build does not understand.
+    #[error(
+        "object format version {found} is not supported (this build supports version \
+         {supported}); nothing was changed"
+    )]
+    UnsupportedObjectVersion {
+        /// Version found in the object.
+        found: u8,
+        /// Version this build reads and writes.
+        supported: u8,
+    },
+    /// Compressing a chunk failed.
+    #[error("compression failed: {0}")]
+    Compression(String),
     /// A passphrase was rejected before use.
     #[error("invalid passphrase: {0}")]
     InvalidPassphrase(&'static str),
