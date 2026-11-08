@@ -145,6 +145,23 @@ impl SnapshotStore {
             .collect())
     }
 
+    /// The ids of all committed snapshots, newest file first (ties broken by id). The order
+    /// comes from the files' modification times, which is when each snapshot was committed; it
+    /// is a hint for choosing a likely parent for an incremental backup, never something to
+    /// trust: a snapshot's authentic creation time is inside its manifest.
+    pub fn ids_newest_first(&self) -> Result<Vec<SnapshotId>> {
+        let mut dated = Vec::new();
+        for id in self.ids()? {
+            match self.store.modified(&id.object_name()) {
+                Ok(time) => dated.push((time, id)),
+                Err(err) if err.is_not_found() => {}
+                Err(err) => return Err(err),
+            }
+        }
+        dated.sort_by(|(a_time, a_id), (b_time, b_id)| b_time.cmp(a_time).then_with(|| a_id.cmp(b_id)));
+        Ok(dated.into_iter().map(|(_, id)| id).collect())
+    }
+
     /// Loads and verifies every snapshot, returning a summary or the reason for each. Snapshots
     /// are decrypted in full, so this costs time proportional to their total size.
     pub fn list(&self) -> Result<Vec<SnapshotListing>> {
@@ -525,6 +542,23 @@ mod tests {
         fs::write(dir.join(".tmp-abc"), b"hello").expect("write");
         assert_eq!(fx.snapshots.ids().expect("ids"), [manifest.id.clone()]);
         assert_eq!(fx.snapshots.list().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn ids_can_be_listed_newest_first() {
+        let fx = Fixture::new();
+        let mut committed = Vec::new();
+        for _ in 0..3 {
+            let mut manifest = fx.manifest_with_real_chunks(minimal());
+            fresh_id(&mut manifest);
+            fx.snapshots.commit(&manifest).expect("commit");
+            let file = fs::File::options().write(true).open(fx.path_of(&manifest.id)).expect("open");
+            let age = std::time::Duration::from_secs(1000 * (committed.len() as u64 + 1));
+            file.set_modified(std::time::SystemTime::now() - age).expect("set mtime");
+            committed.push(manifest.id);
+        }
+        // The first commit was given the smallest age, so it is the newest.
+        assert_eq!(fx.snapshots.ids_newest_first().expect("ids"), committed);
     }
 
     #[test]

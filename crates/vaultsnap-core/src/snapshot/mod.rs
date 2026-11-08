@@ -22,6 +22,7 @@ mod model;
 mod object;
 mod store;
 
+pub(crate) use builder::{os_bytes, relative_path_bytes};
 pub use builder::ManifestBuilder;
 pub use id::SnapshotId;
 pub use model::{

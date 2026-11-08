@@ -54,6 +54,18 @@ pub struct BackupArgs {
     /// Label to store with the snapshot (repeatable)
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
+
+    /// Host name to store with the snapshot
+    #[arg(long, value_name = "NAME")]
+    pub host: Option<String>,
+
+    /// Worker threads (default: one per CPU, at most 4; larger values are reduced to 64)
+    #[arg(long, value_name = "N")]
+    pub jobs: Option<usize>,
+
+    /// Read every file instead of trusting unchanged metadata from the previous snapshot
+    #[arg(long)]
+    pub rescan: bool,
 }
 
 #[derive(Debug, Args)]
@@ -142,6 +154,51 @@ mod tests {
     #[test]
     fn backup_requires_a_path() {
         assert!(parse(&["backup"]).is_err());
+    }
+
+    #[test]
+    fn backup_collects_its_options() {
+        let cli = parse(&[
+            "backup",
+            "a",
+            "b",
+            "--exclude",
+            "*.log",
+            "--exclude",
+            "tmp/",
+            "--tag",
+            "x",
+            "--host",
+            "box",
+            "--jobs",
+            "3",
+            "--rescan",
+        ])
+        .expect("valid arguments");
+        let Command::Backup(args) = cli.command else {
+            panic!("expected backup");
+        };
+        assert_eq!(args.paths, [PathBuf::from("a"), PathBuf::from("b")]);
+        assert_eq!(args.excludes, ["*.log", "tmp/"]);
+        assert_eq!(args.tags, ["x"]);
+        assert_eq!(args.host.as_deref(), Some("box"));
+        assert_eq!(args.jobs, Some(3));
+        assert!(args.rescan);
+    }
+
+    #[test]
+    fn backup_defaults_are_conservative() {
+        let cli = parse(&["backup", "a"]).expect("valid arguments");
+        let Command::Backup(args) = cli.command else {
+            panic!("expected backup");
+        };
+        assert!(args.excludes.is_empty() && args.tags.is_empty());
+        assert_eq!((args.host, args.jobs, args.rescan), (None, None, false));
+    }
+
+    #[test]
+    fn backup_rejects_a_non_numeric_job_count() {
+        assert!(parse(&["backup", "a", "--jobs", "many"]).is_err());
     }
 
     #[test]

@@ -188,6 +188,39 @@ file change in a way the checks cannot see (see `SCANNING.md`).
   the decoded structure is not).
 - **No names in diagnostics.** Validation errors identify entries by index, never by name.
 
+## Backup (built)
+
+See [`BACKUP.md`](BACKUP.md) for the behavior; this is what it means for security.
+
+- **Order of events.** The passphrase is read and the repository unlocked before any source path
+  is opened. A wrong passphrase, an invalid pattern, or an invalid source stores nothing. The
+  passphrase and keys are never printed or logged; the command prints the snapshot id, counts,
+  and sizes, and the paths of files that could not be read.
+- **File names in output.** Paths of unreadable files go to `stderr`, and paths of files left out
+  by policy are logged at `-v`. They are the user's own paths on the user's own terminal, but a
+  log that is collected elsewhere will contain them. Nothing written *into the repository*
+  mentions a name outside the encrypted manifest.
+- **Trusting unchanged files.** Skipping a file relies on its size, modification time,
+  inode-change time, inode, and device all matching the earlier snapshot, and on both times being
+  older than that backup's start by a margin. A process that can set the system clock or edit
+  inodes directly (root) can defeat this, and a filesystem with coarse or absent timestamps
+  silently degrades to reading everything. `--rescan` reads every file regardless. This protects
+  against accident, not against an adversary with root on the machine being backed up, who could
+  alter the files or this program anyway.
+- **Existing chunks are reused without being read.** A chunk whose object already exists is
+  deduplicated by its keyed id and not re-verified, so a damaged object is reused by later
+  backups and every snapshot that names it is damaged too until it is detected on read. Deleting
+  the damaged object makes the next backup, if the source data is still there, write it again.
+- **Cancellation is safe, forced termination is not tidy.** Signals stop the backup at a chunk
+  boundary without publishing anything. A killed process leaves a stale lock file that blocks
+  `prune`; because locks are never removed automatically (a live holder cannot be told from a dead
+  one safely), removal is a manual step that names the file.
+- **Hostile or racing source trees** are handled by the scanner (`SCANNING.md`); backup adds the
+  retry-and-give-up rule for files that change while read, so torn data is never recorded as a
+  complete file.
+- **Bounded resources.** Memory is bounded by `--jobs` and the chunk size limits, apart from the
+  manifest, which is held until commit.
+
 ## Concurrency
 
 Advisory locks stop two VaultSnap processes from corrupting each other. They are not a security

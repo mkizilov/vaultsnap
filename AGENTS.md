@@ -63,7 +63,10 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   layout of manifest schema v1, `object` = the encrypted container, `builder`, `store` =
   `SnapshotStore` commit/load/list; a change to the codec layout, the container, or the validity
   rules is a format change: new schema version, old decoder kept, `docs/FORMAT.md` updated, and
-  tests added; manifests never leak file names into errors or logs). No CLI or terminal concerns
+  tests added; manifests never leak file names into errors or logs), `backup` (`BackupOptions`,
+  `BackupReport`, `CancelToken`, `BackupObserver`; `engine` = the worker pipeline, `parent` = the
+  unchanged-file decision; `ops/backup.rs` is the `Repository::backup` entry point; behavior and
+  guarantees are in `docs/BACKUP.md`). No CLI or terminal concerns
   here. All repository file
   access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
@@ -72,10 +75,17 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   key file layout, AAD, or HKDF labels is a format change (update `docs/FORMAT.md`, bump versions,
   add tests). Tests use `testing::fast_kdf()` (cheap Argon2 parameters); production code never
   does.
+- Backup invariants (do not break them without updating `docs/BACKUP.md` and its tests): a
+  snapshot is published only as the very last step, after every chunk it names is stored, so a
+  failure or cancellation can never make a partial snapshot visible; the manifest is assembled in
+  scan order so it does not depend on thread timing; a file counts as unchanged only under the
+  full rule in `backup/parent.rs`, including the safety margin, and only if its chunks still
+  exist; unreadable files are recorded as skipped and make the result incomplete (CLI exit 3),
+  never silently dropped; the repository is never part of its own backup; concurrency and memory
+  stay bounded (`jobs`, files in flight).
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
-  manifests. `backup`, `snapshots`, `restore`, `check`, `prune` are stubs. Nothing connects the
-  scanner, chunk store, and snapshot store into a backup yet, and nothing restores.
+  manifests, and `backup`. `snapshots`, `restore`, `check`, `prune` are stubs; nothing restores.
 - Tests that need privileges or special files must detect their absence at run time and say so
   (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
   any test that changes permissions must restore them with a guard so temporary directories can
@@ -88,7 +98,9 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   no-echo prompt, never from arguments or environment values, and are read before any repository
   file is created.
 - `crates/vaultsnap-cli`: binary `vaultsnap`. `cli` (clap definitions), `commands` (argument to
-  core mapping and printing), `logging` (tracing setup, stderr only).
+  core mapping and printing; `CliError::exit_code`: 1 failure, 3 incomplete backup, 130 cancelled,
+  clap's 2 for usage), `backup` (the `backup` command: unlock, progress line on a terminal only,
+  SIGINT/SIGTERM to a `CancelToken`, summary), `logging` (tracing setup, stderr only).
 - `docs/`: `FORMAT.md` and `SECURITY.md`.
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors

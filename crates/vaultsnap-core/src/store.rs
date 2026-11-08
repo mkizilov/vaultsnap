@@ -91,6 +91,14 @@ impl LocalStore {
         Ok(data)
     }
 
+    /// The modification time of `name`.
+    pub fn modified(&self, name: &str) -> Result<std::time::SystemTime> {
+        let path = self.resolve(name)?;
+        fs::symlink_metadata(&path)
+            .and_then(|meta| meta.modified())
+            .map_err(|err| Error::io("inspect", &path, err))
+    }
+
     /// Lists entry names of the directory `dir` in sorted order. The empty string lists the root.
     pub fn list(&self, dir: &str) -> Result<Vec<String>> {
         let path = if dir.is_empty() {

@@ -1,6 +1,9 @@
 //! Shared helpers for CLI integration tests. Temporary directories honor `TMPDIR`, which the
 //! project environment points inside the repository.
 
+// Each test binary compiles this module and uses a different subset of it.
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -26,6 +29,11 @@ impl TestEnv {
     /// Repository path inside the scratch directory; the directory is never created implicitly.
     pub fn repo_path(&self) -> PathBuf {
         self.dir.path().join("repo")
+    }
+
+    /// A path inside the scratch directory; nothing is created.
+    pub fn path(&self, name: &str) -> PathBuf {
+        self.dir.path().join(name)
     }
 
     /// Writes `contents` to a private file in the scratch directory and returns its path.

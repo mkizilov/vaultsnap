@@ -1,6 +1,8 @@
 //! The explicit policies of the scanner. Every default is the conservative choice; see
 //! `docs/SCANNING.md` for the reasoning and the platform differences.
 
+use std::path::PathBuf;
+
 /// What to do with symbolic links.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SymlinkPolicy {
@@ -85,6 +87,11 @@ pub struct ScanOptions {
     /// Glob patterns; entries (and everything below excluded directories) matching one are
     /// omitted. Exclusion wins over inclusion.
     pub excludes: Vec<String>,
+    /// Directories that are not entered, given as paths on the filesystem (resolved once, so
+    /// symbolic links in them are fine; paths that do not exist are ignored). Unlike patterns
+    /// these are exact, which is what a program needs to keep a repository out of its own
+    /// backup.
+    pub exclude_paths: Vec<PathBuf>,
 }
 
 #[cfg(test)]

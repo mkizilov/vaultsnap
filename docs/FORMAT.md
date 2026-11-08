@@ -317,6 +317,13 @@ list<skipped>:
 7 x u64  totals: directories, files, symlinks, hard links, special files, bytes, skipped
 ```
 
+`created` is the moment the backup **started**, not when it was committed: an incremental backup
+trusts a file as unchanged only if the file's modification and inode-change times are older than
+the earlier snapshot's `created` by a safety margin (`BACKUP.md`, "Skipping unchanged files"), so
+writers must never record a later time. The recorded attributes of a file are those of the content
+that was read, taken when the file was opened. The backup configuration records the scan policies
+and patterns but not paths that were excluded by the program (such as the repository itself).
+
 The whole input must be consumed. A conforming reader checks every count and length against the
 bytes that remain *before* allocating, so a lying count cannot exhaust memory.
 
@@ -466,6 +473,9 @@ version in the same way. Random 192-bit nonces make reuse negligible without any
 2. Write the index object that covers them (planned).
 3. Commit the snapshot (built; it checks that the chunks it names exist, then publishes).
 
+`backup` follows exactly this order: all chunks first, the snapshot last, so cancelling or killing
+it at any moment leaves no snapshot. See [`BACKUP.md`](BACKUP.md).
+
 Readers only trust snapshots, so a crash between steps leaves unreferenced chunks that `prune`
 later removes. Existing objects are never modified in place.
 
@@ -473,14 +483,16 @@ later removes. Existing objects are never modified in place.
 
 `backup`, `restore`, `snapshots`, and `check` take shared locks; `prune` takes an exclusive lock.
 Locks are advisory and carry a timestamp for diagnostics. Locking protects against concurrent
-VaultSnap runs, not against a hostile writer (see `SECURITY.md`).
+VaultSnap runs, not against a hostile writer (see `SECURITY.md`). A backup holds its shared lock
+until it has finished or been cancelled; a process that is killed leaves its lock file behind,
+which blocks `prune` until it is removed by hand (stale locks are never removed automatically).
 
 ## Command semantics
 
 | Command     | Reads              | Writes                                   |
 |-------------|--------------------|------------------------------------------|
 | `init`      | nothing            | `config`, one `keys/` slot, empty dirs   |
-| `backup`    | index              | packs, index, snapshot                   |
+| `backup`    | snapshots (parent) | chunks (new ones only), then one snapshot |
 | `snapshots` | snapshots          | nothing                                  |
 | `restore`   | snapshot, packs    | files under the target directory only    |
 | `check`     | everything*        | nothing                                  |

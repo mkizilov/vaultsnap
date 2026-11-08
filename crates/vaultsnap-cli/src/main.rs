@@ -1,5 +1,6 @@
 //! `vaultsnap`: command-line interface for the VaultSnap encrypted backup utility.
 
+mod backup;
 mod cli;
 mod commands;
 mod logging;
@@ -17,7 +18,7 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("error: {err}");
-            ExitCode::FAILURE
+            ExitCode::from(err.exit_code())
         }
     }
 }

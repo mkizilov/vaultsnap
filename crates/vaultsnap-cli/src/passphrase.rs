@@ -23,6 +23,15 @@ pub fn read_new(password_file: Option<&Path>) -> Result<Passphrase, CliError> {
     }
 }
 
+/// Obtains the passphrase of an existing repository. From a file when `password_file` is given,
+/// otherwise by asking once on the terminal.
+pub fn read_existing(password_file: Option<&Path>) -> Result<Passphrase, CliError> {
+    match password_file {
+        Some(path) => from_file(path),
+        None => prompt_existing(),
+    }
+}
+
 fn from_file(path: &Path) -> Result<Passphrase, CliError> {
     let io_error = |source: std::io::Error| CliError::PasswordFile {
         path: path.to_path_buf(),
@@ -70,6 +79,14 @@ fn prompt_new() -> Result<Passphrase, CliError> {
         return Err(CliError::PassphraseMismatch);
     }
     Ok(Passphrase::new(first.as_bytes().to_vec())?)
+}
+
+fn prompt_existing() -> Result<Passphrase, CliError> {
+    if !std::io::stdin().is_terminal() {
+        return Err(CliError::NoTerminal);
+    }
+    let line = prompt("Enter passphrase: ")?;
+    Ok(Passphrase::new(line.as_bytes().to_vec())?)
 }
 
 fn prompt(label: &str) -> Result<Zeroizing<String>, CliError> {

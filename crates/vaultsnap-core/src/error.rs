@@ -201,6 +201,17 @@ pub enum Error {
         /// The first missing chunk id.
         first: String,
     },
+    /// The operation was cancelled; nothing was committed.
+    #[error("cancelled: no snapshot was created (chunks already stored are kept and will be reused)")]
+    Cancelled,
+    /// A file could not be backed up and the error policy is to stop.
+    #[error("cannot back up {}: {}", .path.display(), .reason)]
+    SourceUnreadable {
+        /// The file, relative to its backup root.
+        path: PathBuf,
+        /// Why.
+        reason: String,
+    },
     /// A passphrase was rejected before use.
     #[error("invalid passphrase: {0}")]
     InvalidPassphrase(&'static str),

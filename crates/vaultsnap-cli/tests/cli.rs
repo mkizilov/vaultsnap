@@ -58,8 +58,7 @@ fn unfinished_commands_report_not_implemented_without_touching_the_repository() 
     let env = TestEnv::default();
     let id = "a".repeat(64);
     let restore = ["restore", id.as_str(), "--target", "out"];
-    let invocations: [&[&str]; 5] = [
-        &["backup", "."],
+    let invocations: [&[&str]; 4] = [
         &["snapshots"],
         &restore,
         &["check"],

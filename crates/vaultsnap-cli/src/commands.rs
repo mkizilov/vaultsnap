@@ -1,11 +1,9 @@
 //! Maps parsed arguments onto `vaultsnap-core` operations and prints results.
 
-use vaultsnap_core::{
-    BackupOptions, CheckOptions, PruneOptions, Repository, RestoreOptions, RetentionPolicy,
-};
+use vaultsnap_core::{CheckOptions, PruneOptions, Repository, RestoreOptions, RetentionPolicy};
 
 use crate::cli::{Cli, Command};
-use crate::passphrase;
+use crate::{backup, passphrase};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -29,8 +27,26 @@ pub enum CliError {
     Terminal(std::io::Error),
     #[error("repository check found {0} problem(s)")]
     CheckFailed(usize),
+    #[error(
+        "the snapshot was created but is incomplete: {failed} path(s) could not be read and are \
+         not in it (listed above)"
+    )]
+    BackupIncomplete { failed: usize },
     #[error(transparent)]
     Core(#[from] vaultsnap_core::Error),
+}
+
+impl CliError {
+    /// 1 for failures, 3 when a snapshot was created but some paths are missing from it, and 130
+    /// (the shell convention for SIGINT) when a backup was cancelled. Usage errors exit with 2
+    /// before any command runs.
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            Self::BackupIncomplete { .. } => 3,
+            Self::Core(vaultsnap_core::Error::Cancelled) => 130,
+            _ => 1,
+        }
+    }
 }
 
 pub async fn run(cli: Cli) -> Result<(), CliError> {
@@ -49,12 +65,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
             );
         }
         Command::Backup(args) => {
-            let options = BackupOptions {
-                sources: args.paths,
-                excludes: args.excludes,
-                tags: args.tags,
-            };
-            println!("{}", repo.backup(&options).await?);
+            backup::run(&repo, cli.password_file.as_deref(), args).await?;
         }
         Command::Snapshots => {
             for snapshot in repo.snapshots().await? {
@@ -102,4 +113,17 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_codes_tell_failures_incomplete_backups_and_cancellation_apart() {
+        assert_eq!(CliError::MissingRepository.exit_code(), 1);
+        assert_eq!(CliError::Core(vaultsnap_core::Error::WrongPassphrase).exit_code(), 1);
+        assert_eq!(CliError::BackupIncomplete { failed: 2 }.exit_code(), 3);
+        assert_eq!(CliError::Core(vaultsnap_core::Error::Cancelled).exit_code(), 130);
+    }
 }

@@ -15,15 +15,26 @@ use crate::scan::{Entry, EntryKind, SkipReason, Skipped, Timestamp};
 /// A path component or path as the raw bytes the manifest stores. On Unix these are the exact
 /// bytes of the name. Elsewhere names are converted lossily, which is a documented limitation.
 #[cfg(unix)]
-fn os_bytes(text: &OsStr) -> Vec<u8> {
+pub(crate) fn os_bytes(text: &OsStr) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt;
 
     text.as_bytes().to_vec()
 }
 
 #[cfg(not(unix))]
-fn os_bytes(text: &OsStr) -> Vec<u8> {
+pub(crate) fn os_bytes(text: &OsStr) -> Vec<u8> {
     text.to_string_lossy().into_owned().into_bytes()
+}
+
+/// A scan-root-relative path as the bytes a manifest stores for it: the components' raw bytes
+/// joined with `/`, whatever the platform's separator. This is the form [`Root::relative_path`]
+/// produces, so the two can be compared.
+pub(crate) fn relative_path_bytes(path: &Path) -> Vec<u8> {
+    let parts: Vec<Vec<u8>> = path
+        .components()
+        .map(|component| os_bytes(component.as_os_str()))
+        .collect();
+    parts.join(&b'/')
 }
 
 struct RootState {
@@ -340,6 +351,18 @@ mod tests {
         assert_eq!(manifest.skipped[0].path, b"locked");
         assert_eq!(manifest.skipped[0].reason, SkippedReason::Vanished);
         manifest.validate().expect("valid");
+    }
+
+    #[test]
+    fn relative_paths_use_slashes_and_match_the_manifest_form() {
+        assert_eq!(relative_path_bytes(Path::new("")), b"");
+        assert_eq!(relative_path_bytes(Path::new("a")), b"a");
+        assert_eq!(relative_path_bytes(Path::new("a/b/c.txt")), b"a/b/c.txt");
+        let manifest = built();
+        assert_eq!(
+            relative_path_bytes(Path::new("sub/alias")),
+            manifest.roots[0].relative_path(5)
+        );
     }
 
     #[test]

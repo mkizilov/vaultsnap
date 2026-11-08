@@ -1,6 +1,6 @@
 //! The scanner: a streaming, deterministic, policy-driven directory walk.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io;
@@ -25,6 +25,7 @@ pub struct Scanner {
     root_device: Option<u64>,
     options: ScanOptions,
     filter: Filter,
+    excluded_paths: HashSet<PathBuf>,
 }
 
 impl Scanner {
@@ -37,11 +38,17 @@ impl Scanner {
         let meta = fs::symlink_metadata(&root)
             .map_err(|err| Error::io("inspect the scan root", &root, err))?;
         let filter = Filter::new(&options.includes, &options.excludes)?;
+        let excluded_paths = options
+            .exclude_paths
+            .iter()
+            .filter_map(|path| fs::canonicalize(path).ok())
+            .collect();
         Ok(Self {
             root_device: Metadata::from_fs(&meta).device,
             root,
             options,
             filter,
+            excluded_paths,
         })
     }
 
@@ -225,6 +232,10 @@ impl Scan<'_> {
 
         let is_directory = node == Node::Directory;
         if !is_root {
+            if is_directory && scanner.excluded_paths.contains(&canonical) {
+                self.stats.excluded += 1;
+                return None;
+            }
             if scanner.filter.is_excluded(&rel, is_directory) {
                 self.stats.excluded += 1;
                 return None;

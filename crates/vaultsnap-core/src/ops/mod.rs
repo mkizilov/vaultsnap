@@ -8,7 +8,6 @@ mod restore;
 mod snapshots;
 mod unlock;
 
-pub use backup::BackupOptions;
 pub use check::{CheckOptions, CheckReport};
 pub use prune::{PruneOptions, PruneReport};
 pub use restore::RestoreOptions;

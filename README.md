@@ -9,15 +9,16 @@ A reliable encrypted incremental backup utility written in Rust.
 | Command     | State                                                                  |
 |-------------|------------------------------------------------------------------------|
 | `init`      | Implemented: creates a versioned repository (see below)                |
-| `backup`    | Not implemented; validates arguments, then fails                        |
+| `backup`    | Implemented: incremental, encrypted, deduplicated (see below)           |
 | `snapshots` | Not implemented                                                        |
 | `restore`   | Not implemented                                                        |
 | `check`     | Not implemented                                                        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
 Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
-filesystem scanner, and encrypted snapshot manifests are in place, but **nothing yet connects them
-into a backup**: `backup` and `restore` do not exist. Do not rely on this tool for real data.
+filesystem scanner, encrypted snapshot manifests, and the `backup` command that connects them are
+in place. **There is no `restore` yet**, so a backup cannot be read back by the tool, and none of
+this code has been compiled or run (see "Known gaps"). Do not rely on it for real data.
 
 ### Chunking
 
@@ -125,10 +126,38 @@ let again = snapshots.load(&manifest.id)?;    // authenticated, decrypted, valid
 Restoring is not implemented; loading only reads and verifies manifests. The byte-level format
 and compatibility rules are in [`docs/FORMAT.md`](docs/FORMAT.md) ("Snapshots").
 
+### `vaultsnap backup`
+
+```sh
+vaultsnap --repo REPO --password-file PW backup ~/Documents ~/notes.txt --exclude '*.tmp' --tag laptop
+```
+
+Backs up one or more files or directories into one new snapshot, reusing everything already in
+the repository:
+
+- **Incremental.** A file whose size, timestamps, inode, and device match the same path in the
+  previous snapshot (and which is clearly older than that backup) is not read; its recorded chunks
+  are reused if they are all still stored. Every other file is chunked and each chunk that already
+  exists is not written again. `--rescan` reads everything.
+- **All or nothing.** The snapshot is published in one atomic step after every chunk is stored. A
+  failure, Ctrl-C, SIGTERM, or crash at any point leaves no snapshot behind; chunks already stored
+  are reused by the next run.
+- **Honest about problems.** Files that cannot be read, or that keep changing while being read, are
+  listed on `stderr` and recorded in the snapshot, which is then flagged incomplete: exit status 3.
+  Exit status 130 means cancelled, 1 means failed, and 0 a complete snapshot.
+- **Bounded.** `--jobs` worker threads (default one per CPU, at most 4); memory is bounded by the
+  chunk size limits and the number of files in flight.
+- **Progress.** A one-line status on a terminal, and a summary of what was read, unchanged,
+  stored, and reused when it finishes.
+
+Details, guarantees, and limits: [`docs/BACKUP.md`](docs/BACKUP.md).
+
 The design is specified before the code that implements it:
 
 - [`docs/FORMAT.md`](docs/FORMAT.md): repository layout, identifiers, key files and encryption,
   chunking, crash safety.
+- [`docs/BACKUP.md`](docs/BACKUP.md): the backup pipeline, change detection, failure and
+  cancellation behavior.
 - [`docs/SECURITY.md`](docs/SECURITY.md): threat model, secrets handling, restore safety.
 
 ### `vaultsnap init`
@@ -162,7 +191,7 @@ no way to recover a lost passphrase.
 
 | Crate             | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot ids, retention, operations |
+| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot manifests, the backup engine, retention, operations |
 | `vaultsnap-cli`   | Binary `vaultsnap`: `clap` argument parsing and output          |
 
 Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiserror` (errors),
@@ -210,6 +239,11 @@ Tests:
   chunk store are in `crates/vaultsnap-core/tests/snapshot.rs`.
 - Scanner tests, which build real directory trees (symlinks, hard links, FIFOs, unreadable
   directories, files changing mid-read), are in `crates/vaultsnap-core/tests/scan.rs`.
+- Backup tests are in `crates/vaultsnap-core/tests/backup.rs`: repeated, modified, inserted,
+  deleted, and added files; unchanged-file skipping and its safety margin; several sources;
+  cancellation, failure, and files changing or vanishing mid-backup; bounded and deterministic
+  concurrency; simultaneous backups; and a rebuild of every file of every snapshot from its chunk
+  list. Unit tests for the engine and the parent comparison sit beside the code.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -234,6 +268,13 @@ is compiled by `clippy --all-targets` but not run).
 - The local store publishes new files with hard links, so the repository must live on a
   filesystem that supports them.
 - The chunking benchmark has never been run, so there are no throughput numbers yet.
+- `backup` has no CLI test for Ctrl-C/SIGTERM (a race-free test needs a controllable slow
+  source); cancellation is tested in the library through the cancel token only, and the signal
+  handler itself is unverified.
+- There is no `restore`, so the proof that a snapshot is complete is the test that rebuilds files
+  from the chunk lists in the repository; nothing restores to disk yet.
+- Several lines are longer than rustfmt's limit because nothing could be formatted; the first
+  toolchain run needs `cargo fmt --all`, and `clippy` may report lints that were not seen.
 - Scanner behavior on real mount points, on Windows, and on network filesystems is unverified;
   see `docs/SCANNING.md`.
 
