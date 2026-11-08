@@ -1,0 +1,36 @@
+# A MinIO server for the S3 integration tests (docs/S3.md). It listens on this machine only, on
+# ports from the range this project may use: 21100 for the S3 API, 21101 for the web console.
+#
+# The credentials are not in this file. Export the same two variables the tests read:
+#
+#   export AWS_ACCESS_KEY_ID=<any user name>
+#   export AWS_SECRET_ACCESS_KEY=<at least 8 characters>
+#   docker compose -f docker/minio/compose.yaml up -d
+#   export VAULTSNAP_S3_TEST_ENDPOINT=http://127.0.0.1:21100
+#   docker compose -f docker/minio/compose.yaml down -v        # when done; -v deletes the data
+#
+# The image is pinned by tag. The tag is a release that exists on Docker Hub and Quay; whether it
+# honors conditional writes (If-None-Match / If-Match on PutObject) has not been checked here,
+# and VaultSnap refuses a server that does not, at connect time, with a message that says so.
+name: vaultsnap-minio
+
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # A directory in the data directory of a single-drive server is a bucket, which is how the
+    # test bucket exists without a separate client. VaultSnap never creates buckets itself.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - mkdir -p /data/vaultsnap-test && exec minio server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?export AWS_ACCESS_KEY_ID first}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?export AWS_SECRET_ACCESS_KEY first}
+    ports:
+      - "127.0.0.1:21100:9000"
+      - "127.0.0.1:21101:9001"
+    volumes:
+      - minio-data:/data
+
+volumes:
+  minio-data: {}

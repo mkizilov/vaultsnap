@@ -2,10 +2,10 @@
 
 Every byte of a repository is read and written through one interface, `Backend`
 (`crates/vaultsnap-core/src/storage/`). The local directory is the reference implementation. The
-interface is designed so that an S3-compatible object store can follow without changing the
-repository format or any code above it. **Only the local directory, an in-memory object store,
-and two wrappers (retries, fault injection) are built; an S3 backend is designed here and not
-implemented.**
+interface is designed so that an S3-compatible object store follows without changing the
+repository format or any code above it: the local directory, an in-memory object store, and an
+S3-compatible bucket are built, with two wrappers (retries, fault injection). Using a bucket is
+described in [`S3.md`](S3.md); this document is the reasoning and the contract.
 
 The repository layout and what it stores are in [`FORMAT.md`](FORMAT.md); the threat model is in
 [`SECURITY.md`](SECURITY.md).
@@ -18,7 +18,7 @@ backup  restore  check  prune  snapshots  init  ...      operations (ops/*)
                        Store                             a cheap handle: Arc<dyn Backend>
                        Backend                           the interface (this document)
    RetryingBackend    FlakyBackend                       wrappers: any backend in, a backend out
-   LocalBackend       MemoryBackend       (S3Backend)    implementations
+   LocalBackend       MemoryBackend       S3Backend      implementations
 ```
 
 * Nothing above `Store` touches `std::fs` for repository files. `Repository::at(path)` is
@@ -27,8 +27,9 @@ backup  restore  check  prune  snapshots  init  ...      operations (ops/*)
   has, so a network backend blocks its own thread on its own client and the runtime of the caller
   is not involved.
 * The wrappers compose: `RetryingBackend::new(Arc::new(s3), RetryPolicy::standard())`.
-* The CLI still takes only a directory (`--repo PATH`). Selecting another backend from the command
-  line is future work and is not needed by anything in this document.
+  `S3Backend::connect` returns the S3 backend already wrapped in retries.
+* The CLI selects the backend from `--repo`: a directory, or `s3://BUCKET[/FOLDER]`
+  (`crates/vaultsnap-cli/src/remote.rs`).
 
 ## The model
 
@@ -235,9 +236,15 @@ it (`src/storage/contract.rs`). Beyond the contract, `tests/storage.rs` runs a w
 those, copies a repository object by object from a directory to memory and back and compares the
 bytes, and checks that weak backends are refused with nothing written.
 
-## Designing an S3-compatible backend (not built)
+## The S3 backend: design and what was built
 
-What an `S3Backend` has to do, so that the rest needs no change:
+What an `S3Backend` has to do, so that the rest needs no change, and where the implementation
+(`storage/s3/`) departs from or settles it. The module has three layers: `S3Backend` (this
+mapping, the request limit, the conditional-write check), the narrow `ObjectApi` trait (one method
+per S3 call, with a classified error), and two implementations of that trait: the AWS SDK adapter
+(`sdk.rs`, the only code that uses the network) and `FakeS3` (`fake.rs`, an in-memory service that
+can page, fail on a script, ignore `If-None-Match`, and count calls). The contract runs against
+the backend on the fake, so the mapping is tested without a network.
 
 1. **Keys.** Object key = configured prefix + name. Nothing else is stored: no directory marker
    objects (`create_dir` is a no-op), no sidecar files.
@@ -255,6 +262,9 @@ What an `S3Backend` has to do, so that the rest needs no change:
    its `412` or its success. Objects above the single-request threshold go through multipart
    upload; `CompleteMultipartUpload` accepts the same conditional headers, so `Create` stays
    exclusive, and an abandoned upload must be aborted so it does not leave billed parts.
+   **Built without multipart:** every object is one `PUT` (chunk objects are at most the maximum
+   chunk size plus a few dozen bytes, and a snapshot file is capped at 1 GiB, far below the 5 GiB
+   a single `PUT` allows), so there are no abandoned uploads to abort.
 5. **Capabilities** are decided by probing when connecting (see above), never by the store's name.
 6. **Errors** map to `NotFound` (`404`, `NoSuchKey`), `Transient` (connection errors, timeouts,
    `500`, `502`, `503`, `SlowDown`, `409` conflicts, incomplete bodies), `Permission` (`401`,
@@ -269,6 +279,9 @@ What an `S3Backend` has to do, so that the rest needs no change:
    objects, and the times of writes are visible to the store ([`SECURITY.md`](SECURITY.md)).
 9. **Tests.** The contract against a store in a container on a loopback port (21100 to 21199 in this
    project). Running it is the acceptance test for the capabilities the backend declares.
+   **Built:** `tests/s3_minio.rs` runs whole-repository scenarios against MinIO
+   (`docker/minio/compose.yaml`, [`S3.md`](S3.md)); it does not run the contract itself against
+   MinIO, which remains to be added.
 
 Costs to design around: every `HEAD` and `LIST` is a billed request, so the repository should not
 `stat` what it can learn from one listing; `prune` and `check` already list once per shard.
@@ -279,6 +292,7 @@ Nothing in this change has been compiled or run: the authoring environment has n
 and no network. The contract, the backends, the retry logic, and the end-to-end tests were written
 and read carefully, not executed. In particular unverified are the concurrency cases (8 racing
 creators and updaters, readers against a replacement), the timing-free retry tests, and the
-behavior of the rewritten `Store` under every existing test. No S3 backend exists, so none of the
-S3 mappings in this document has been exercised against a store. Docker-based tests of a
-containerized store would be recorded as unverified here in any case.
+behavior of the rewritten `Store` under every existing test. The S3 mappings in this document have
+been exercised only against `FakeS3`, which was written by the same hand as the backend and so
+shares its misreadings of S3; no test has met a real store, because the MinIO tests of
+[`S3.md`](S3.md) need Docker, which this environment may not operate, and were never run.

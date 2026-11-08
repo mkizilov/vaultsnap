@@ -1,7 +1,7 @@
 # Command-line reference
 
 ```
-vaultsnap [--repo PATH] [--password-file FILE] [-v...] <COMMAND>
+vaultsnap [--repo PATH|s3://BUCKET[/FOLDER]] [S3 options] [--password-file FILE] [-v...] <COMMAND>
 ```
 
 | Command | What it does | State |
@@ -20,12 +20,42 @@ vaultsnap [--repo PATH] [--password-file FILE] [-v...] <COMMAND>
 
 | Option | Meaning |
 |--------|---------|
-| `-r, --repo PATH` | The repository. Also read from `VAULTSNAP_REPO`. Required by every command. |
+| `-r, --repo PATH` | The repository: a directory, or `s3://BUCKET[/FOLDER]` for a bucket of an S3-compatible service (see [S3 options](#s3-options)). Also read from `VAULTSNAP_REPO`. Required by every command. |
 | `--password-file FILE` | File holding the repository passphrase (one trailing newline is ignored). Also read from `VAULTSNAP_PASSWORD_FILE`. Without it, the passphrase is asked for on the terminal with echo off. There is no way to give it as an argument. |
 | `-v`, `-vv`, `-vvv` | More diagnostics on standard error (info, debug, trace). `RUST_LOG` overrides. Secrets are never logged. |
 | `-h, --help`, `-V, --version` | Usage and version. Every command also has `--help`. |
 
 Options may come before or after the command name.
+
+### S3 options
+
+These apply when `--repo` is `s3://BUCKET[/FOLDER]` and are ignored for a directory. There is no
+option for credentials, on purpose: they come from the standard AWS credential chain (environment
+variables, `~/.aws` files and profiles, SSO, roles). Everything is explained in
+[`S3.md`](S3.md).
+
+| Option | Environment | Meaning |
+|--------|-------------|---------|
+| `--s3-endpoint URL` | `VAULTSNAP_S3_ENDPOINT` | The service URL for an S3-compatible service such as MinIO. Default: AWS. |
+| `--s3-region REGION` | `VAULTSNAP_S3_REGION` | The region to sign for. Default: the AWS configuration, else `us-east-1`. |
+| `--s3-profile NAME` | `VAULTSNAP_S3_PROFILE` | A named profile of the AWS config and credentials files. |
+| `--s3-path-style BOOL` | `VAULTSNAP_S3_PATH_STYLE` | Address buckets in the path (`host/bucket/key`). Default: true with `--s3-endpoint`. |
+| `--s3-ca-bundle FILE` | `AWS_CA_BUNDLE` | A PEM file of certificate authorities to trust instead of the system's. Certificates are always verified. |
+| `--s3-allow-insecure-http` | | Accept an `http://` endpoint on another machine. Without it plain HTTP is accepted only for `localhost`, `127.0.0.0/8` and `[::1]`. |
+| `--s3-max-requests N` | `VAULTSNAP_S3_MAX_REQUESTS` | The most requests in flight at once. Default 8, at most 256. |
+
+```sh
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
+vaultsnap --repo s3://my-bucket/laptop init
+vaultsnap --repo s3://my-bucket/laptop backup ~/Documents --jobs 4
+vaultsnap --repo s3://my-bucket/laptop restore 3f2a91c4 --target /mnt/restore
+vaultsnap --repo s3://my-bucket --s3-endpoint http://127.0.0.1:21100 --s3-region us-east-1 snapshots
+vaultsnap --repo s3://backups/host1 --s3-endpoint https://s3.example.org --s3-ca-bundle ~/ca.pem check
+```
+
+A bad bucket name or folder, an `http://` endpoint on another machine, an endpoint that contains a
+user name or password, and a request limit outside 1 to 256 are refused before any connection,
+with exit status 1 and nothing created. The bucket must already exist.
 
 `backup`, `snapshots`, `show`, `ls`, `diff`, `restore`, and `prune` unlock the repository first, so a
 wrong passphrase fails before anything is read, printed, or written. Without `--password-file` and without a

@@ -1,9 +1,9 @@
 //! Maps parsed arguments onto `vaultsnap-core` operations and prints results.
 
-use vaultsnap_core::{Error, Repository};
+use vaultsnap_core::Error;
 
 use crate::cli::{Cli, Command};
-use crate::{backup, check, inspect, passphrase, prune, restore};
+use crate::{backup, check, inspect, passphrase, prune, remote, restore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -92,9 +92,8 @@ impl CliError {
 }
 
 pub async fn run(cli: Cli) -> Result<(), CliError> {
-    let root = cli.repo.ok_or(CliError::MissingRepository)?;
-    tracing::debug!(repo = %root.display(), "using repository");
-    let repo = Repository::at(root);
+    let repo = remote::open(&cli).await?;
+    tracing::debug!(repo = %repo.layout().root().display(), "using repository");
 
     match cli.command {
         Command::Init => {

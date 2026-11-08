@@ -1,2 +1,2 @@
 allow-unwrap-in-tests = true
-msrv = "1.82"
+msrv = "1.94"

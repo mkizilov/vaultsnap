@@ -399,6 +399,18 @@ directory is the reference implementation. What that means for security:
 - **Credentials for a remote backend are secrets outside VaultSnap's own encryption.** They are
   taken from the environment or the provider's usual configuration, never from the command line,
   and never printed or logged (the same rule as for the passphrase).
+- **The S3 backend** ([`S3.md`](S3.md)) adds to this: certificate and host name verification can
+  not be turned off (a private CA is trusted with `--s3-ca-bundle` instead of the system's, never
+  in addition); plain `http://` is accepted only on this machine unless `--s3-allow-insecure-http`
+  says otherwise; credentials in an endpoint URL are refused and never repeated; the HTTP stack
+  and the AWS SDK, which can log request details at debug and trace level, are held to warnings
+  unless `RUST_LOG` is set; text coming back from the service is cut and access key ids in it are
+  replaced before it reaches an error message; and on connecting, the backend tests that the
+  service really honors `If-None-Match` and `If-Match` instead of believing it, and a service
+  that does not is refused. The bucket operator sees object names (random ids), sizes, counts and
+  write times, and the plaintext `config` and lock files; they can delete or roll back the
+  repository undetected. The AWS credentials are the one secret VaultSnap's encryption does not
+  cover.
 - **The in-memory and fault-injecting backends are for tests.** They hold nothing on disk and
   inject failures only into a backend they are given; nothing uses them unless asked.
 

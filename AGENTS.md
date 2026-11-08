@@ -49,7 +49,10 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   read and write goes through, `Capabilities`, `PutMode`/`Version` conditional writes, name
   validation; `LocalBackend` = the reference directory implementation with symlink refusal,
   atomic create/replace, private permissions; `MemoryBackend` = object-store semantics;
-  `RetryingBackend`/`RetryPolicy`; `FlakyBackend` = fault injection; `contract` = the cases every
+  `RetryingBackend`/`RetryPolicy`; `s3` = `S3Backend` (S3 requests for the model, the request
+  limit, the connect-time check of conditional writes), `ObjectApi` (one method per S3 call),
+  `sdk` (the AWS SDK adapter, the only network code, behind the `s3` feature), `FakeS3` (an
+  in-memory service for tests); `FlakyBackend` = fault injection; `contract` = the cases every
   backend must pass; specification in `docs/STORAGE.md`), `store` (`Store`: the cheap handle on a
   backend that all repository code holds, plus `Store::update`, the transactional
   read-modify-write), `lock` (`RepositoryLock`),
@@ -166,10 +169,23 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   name; a change to the trait, a new `Capabilities` field, or a new backend adds or updates
   contract cases, and every backend runs the whole contract; retries repeat only transient errors
   and resolve a conditional write whose answer was lost by comparing bytes, never by assuming.
+- S3 invariants (do not break them without updating `docs/S3.md`, `docs/SECURITY.md`, and the
+  tests): there is no option, field, or environment variable of VaultSnap's own for credentials
+  (the AWS credential chain supplies them) and none is ever read, stored, formatted, or logged;
+  an endpoint with user information is refused without repeating it; certificate verification
+  cannot be switched off and plain HTTP off this machine needs an explicit flag; everything that
+  can be refused without a network is refused in `S3Config::validate` or the CLI's `remote`
+  module, before connecting; the SDK's own retries stay off so `RetryingBackend` sees every
+  attempt; the backend declares only what the connect-time check saw work; texts from the
+  service go through `redact`; the SDK and HTTP stack stay at warnings under `-v`. Tests
+  against MinIO (`crates/vaultsnap-core/tests/s3_minio.rs`, `docker/minio/compose.yaml`) run
+  only when `VAULTSNAP_S3_TEST_ENDPOINT` is set, use loopback ports 21100-21199 and a prefix of
+  their own, and are reported as unverified when they could not run.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
   manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, `restore`,
-  `check`, and `prune`. Every command is implemented.
+  `check`, and `prune`. Every command is implemented. A repository can live in a directory or in
+  an S3-compatible bucket (`--repo s3://BUCKET[/FOLDER]`).
 - Tests that need privileges or special files must detect their absence at run time and say so
   (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
   any test that changes permissions must restore them with a guard so temporary directories can
@@ -193,10 +209,11 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   by `backup`, `restore`, `check`, and `prune`),
   `inspect` (`snapshots`/`show`/`ls`/`diff`: `human` = text, `json` = one JSON document built
   from explicit `serde` structs, `tests` = golden output), `format` (sizes, UTC times, `escape`
-  for names, `ls`-style modes), `passphrase` (including `unlock`), `logging` (tracing setup,
-  stderr only). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
+  for names, `ls`-style modes), `passphrase` (including `unlock`), `remote` (turns `--repo` into a directory or an S3
+  repository; the S3 options are `cli::S3Args`), `logging` (tracing setup,
+  stderr only; `-v` raises only VaultSnap's own messages). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
 - `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, `CHECK.md`,
-  `PRUNE.md`, `STORAGE.md`, and `CLI.md` (the command reference; every new or changed command,
+  `PRUNE.md`, `STORAGE.md`, `S3.md`, and `CLI.md` (the command reference; every new or changed command,
   option, or output goes there with an example).
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors

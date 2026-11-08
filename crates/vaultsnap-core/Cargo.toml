@@ -7,8 +7,25 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = ["s3"]
+# The S3 client (AWS SDK for Rust). Without it the S3 backend's logic and its in-memory test
+# double still build and are tested; `S3Backend::connect` then reports that this build has no S3.
+s3 = [
+    "dep:aws-config",
+    "dep:aws-sdk-s3",
+    "dep:aws-smithy-http-client",
+    "dep:aws-smithy-types",
+    "tokio/rt-multi-thread",
+    "tokio/time",
+]
+
 [dependencies]
 argon2.workspace = true
+aws-config = { workspace = true, optional = true }
+aws-sdk-s3 = { workspace = true, optional = true }
+aws-smithy-http-client = { workspace = true, optional = true }
+aws-smithy-types = { workspace = true, optional = true }
 blake3.workspace = true
 chacha20poly1305.workspace = true
 getrandom.workspace = true
@@ -32,6 +49,11 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 [[bench]]
 name = "chunking"
 harness = false
+
+# Needs a MinIO server (see docs/S3.md); the tests skip themselves when none is configured.
+[[test]]
+name = "s3_minio"
+required-features = ["s3"]
 
 [lints]
 workspace = true

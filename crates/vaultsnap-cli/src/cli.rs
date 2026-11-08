@@ -9,9 +9,12 @@ use vaultsnap_core::SnapshotRef;
 #[derive(Debug, Parser)]
 #[command(name = "vaultsnap", version, propagate_version = true, arg_required_else_help = true)]
 pub struct Cli {
-    /// Repository location
-    #[arg(short, long, global = true, env = "VAULTSNAP_REPO", value_name = "PATH")]
+    /// Repository location: a directory, or s3://BUCKET[/FOLDER] for an S3-compatible bucket
+    #[arg(short, long, global = true, env = "VAULTSNAP_REPO", value_name = "PATH|s3://URL")]
     pub repo: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub s3: S3Args,
 
     /// File containing the repository passphrase (instead of asking on the terminal)
     #[arg(long, global = true, env = "VAULTSNAP_PASSWORD_FILE", value_name = "FILE")]
@@ -23,6 +26,51 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// How to reach a repository in an S3-compatible bucket (`--repo s3://BUCKET[/FOLDER]`).
+///
+/// There is no option for credentials, on purpose: they come from the standard AWS credential
+/// chain (environment variables, `~/.aws` files and profiles, SSO, roles).
+#[derive(Debug, Args)]
+pub struct S3Args {
+    /// S3 endpoint URL for an S3-compatible service such as MinIO (default: AWS)
+    #[arg(long = "s3-endpoint", global = true, env = "VAULTSNAP_S3_ENDPOINT", value_name = "URL")]
+    pub endpoint: Option<String>,
+
+    /// Region to sign requests for (default: the AWS configuration, or us-east-1)
+    #[arg(long = "s3-region", global = true, env = "VAULTSNAP_S3_REGION", value_name = "REGION")]
+    pub region: Option<String>,
+
+    /// Named profile of the AWS config and credentials files (default: AWS_PROFILE or default)
+    #[arg(long = "s3-profile", global = true, env = "VAULTSNAP_S3_PROFILE", value_name = "NAME")]
+    pub profile: Option<String>,
+
+    /// Address buckets in the path rather than the host name (default: true with --s3-endpoint)
+    #[arg(
+        long = "s3-path-style",
+        global = true,
+        env = "VAULTSNAP_S3_PATH_STYLE",
+        value_name = "BOOL"
+    )]
+    pub path_style: Option<bool>,
+
+    /// PEM file of the certificate authorities to trust instead of the system's
+    #[arg(long = "s3-ca-bundle", global = true, env = "AWS_CA_BUNDLE", value_name = "FILE")]
+    pub ca_bundle: Option<PathBuf>,
+
+    /// Accept an http:// endpoint that is not on this machine (traffic is not protected)
+    #[arg(long = "s3-allow-insecure-http", global = true)]
+    pub allow_insecure_http: bool,
+
+    /// Most S3 requests in flight at once (default 8, at most 256)
+    #[arg(
+        long = "s3-max-requests",
+        global = true,
+        env = "VAULTSNAP_S3_MAX_REQUESTS",
+        value_name = "N"
+    )]
+    pub max_requests: Option<usize>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -254,6 +302,41 @@ mod tests {
         assert_eq!(cli.password_file, Some(PathBuf::from("/p")));
         let cli = parse(&["--password-file", "/q", "snapshots"]).expect("valid arguments");
         assert_eq!(cli.password_file, Some(PathBuf::from("/q")));
+    }
+
+    #[test]
+    fn s3_options_are_global_and_have_no_credentials() {
+        let cli = parse(&[
+            "--repo",
+            "s3://bucket/folder",
+            "snapshots",
+            "--s3-endpoint",
+            "http://127.0.0.1:21100",
+            "--s3-region",
+            "eu-west-1",
+            "--s3-path-style",
+            "false",
+            "--s3-max-requests",
+            "4",
+            "--s3-allow-insecure-http",
+        ])
+        .expect("valid arguments");
+        assert_eq!(cli.repo, Some(PathBuf::from("s3://bucket/folder")));
+        assert_eq!(cli.s3.endpoint.as_deref(), Some("http://127.0.0.1:21100"));
+        assert_eq!(cli.s3.region.as_deref(), Some("eu-west-1"));
+        assert_eq!(cli.s3.path_style, Some(false));
+        assert_eq!(cli.s3.max_requests, Some(4));
+        assert!(cli.s3.allow_insecure_http);
+
+        let cli = parse(&["init"]).expect("valid arguments");
+        assert!(cli.s3.endpoint.is_none() && cli.s3.profile.is_none() && !cli.s3.allow_insecure_http);
+
+        let command = Cli::command();
+        let names: Vec<&str> = command.get_arguments().filter_map(|arg| arg.get_long()).collect();
+        for forbidden in ["access-key", "secret-key", "s3-access-key", "s3-secret-key", "s3-token"] {
+            assert!(!names.contains(&forbidden), "{forbidden} must not exist");
+        }
+        assert!(parse(&["snapshots", "--s3-path-style", "maybe"]).is_err());
     }
 
     #[test]

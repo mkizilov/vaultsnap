@@ -13,8 +13,8 @@
 //! anything, and retention with mark-and-sweep garbage collection ([`prune`],
 //! [`Repository::prune`]), the only operation that deletes data. All repository files are
 //! reached through a storage backend ([`storage`], [`Backend`]): the local directory is the
-//! reference implementation, and the interface is designed so that an S3-compatible object store
-//! can follow without changing the format or the code above it.
+//! reference implementation, and an S3-compatible bucket ([`S3Backend`]) keeps a repository
+//! without changing the format or the code above it.
 
 pub mod backup;
 mod blocking;
@@ -73,5 +73,7 @@ pub use snapshot::{
     Manifest, ManifestBuilder, SnapshotId, SnapshotListing, SnapshotRef, SnapshotStore,
     SnapshotSummary,
 };
-pub use storage::{Backend, LocalBackend, MemoryBackend, RetryPolicy, RetryingBackend};
+pub use storage::{
+    Backend, LocalBackend, MemoryBackend, RetryPolicy, RetryingBackend, S3Backend, S3Config,
+};
 pub use store::Store;

@@ -236,11 +236,29 @@ The design is specified before the code that implements it:
 - [`docs/PRUNE.md`](docs/PRUNE.md): retention rules, what `prune` deletes and in which order, why
   a kept snapshot cannot lose a chunk, confirmation, locking, and interruption.
 - [`docs/STORAGE.md`](docs/STORAGE.md): the storage backend interface, what every backend must
-  guarantee, retries and conditional writes, the contract tests, and the design of an
-  S3-compatible backend.
+  guarantee, retries and conditional writes, the contract tests, and how an S3-compatible backend
+  maps onto it.
+- [`docs/S3.md`](docs/S3.md): keeping a repository in an S3-compatible bucket: location and
+  options, credentials, transport security, conditional-write checks, retries, resuming,
+  request volume, and how to run the MinIO tests.
 - [`docs/CLI.md`](docs/CLI.md): every command with examples, exit statuses, size definitions,
   and the JSON output.
 - [`docs/SECURITY.md`](docs/SECURITY.md): threat model, secrets handling, restore safety.
+
+### Repositories in S3-compatible buckets
+
+`--repo` takes a directory or `s3://BUCKET[/FOLDER]`. Every command works the same on a bucket.
+Credentials come only from the standard AWS credential chain (environment, `~/.aws` files and
+profiles, SSO, roles); there is no option for them. Certificates are always verified.
+
+```sh
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
+vaultsnap --repo s3://my-bucket/laptop init
+vaultsnap --repo s3://my-bucket/laptop backup ~/Documents
+vaultsnap --repo s3://my-bucket --s3-endpoint http://127.0.0.1:21100 snapshots   # MinIO
+```
+
+See [`docs/S3.md`](docs/S3.md) for the options and the guarantees.
 
 ### `vaultsnap init`
 
@@ -273,7 +291,7 @@ no way to recover a lost passphrase.
 
 | Crate             | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `vaultsnap-core`  | Library: repository handle and layout, `config`, the storage backend interface (local directory, in-memory object store, retries) and its contract tests, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot manifests, the backup engine, retention and garbage collection, operations |
+| `vaultsnap-core`  | Library: repository handle and layout, `config`, the storage backend interface (local directory, S3-compatible bucket, in-memory object store, retries) and its contract tests, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot manifests, the backup engine, retention and garbage collection, operations |
 | `vaultsnap-cli`   | Binary `vaultsnap`: `clap` argument parsing and output          |
 
 Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiserror` (errors),
@@ -369,6 +387,14 @@ Tests:
   layer, and the fault injector; `crates/vaultsnap-core/tests/storage.rs` runs a whole repository
   (init, backups, restore, check, prune) on each, moves a repository between backends object by
   object, and checks that backends without the needed guarantees are refused.
+- S3 tests: the S3 backend passes the same contract against an in-memory fake service
+  (`crates/vaultsnap-core/src/storage/s3/`, with tests of paging, conditional writes, error
+  mapping, retries, the request limit, and redaction), and `crates/vaultsnap-cli/tests/s3.rs`
+  checks the refusals that need no network. `crates/vaultsnap-core/tests/s3_minio.rs` runs a
+  repository against a real MinIO server (round trip and restore from a fresh connection,
+  nothing readable uploaded, duplicate uploads, a cancelled backup, a network outage in the middle
+  of a backup, connection failures). It needs Docker and `VAULTSNAP_S3_TEST_ENDPOINT` (see
+  `docs/S3.md`); without them each test prints `SKIPPED (unverified)`.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -419,9 +445,15 @@ is compiled by `clippy --all-targets` but not run).
   (`docs/CHECK.md`).
 - The storage refactor is unverified like everything else, and touched most of the core. The
   concurrency cases of the contract (racing creators and updaters, readers against a replacement)
-  and the retry-over-faults runs are the least certain. There is no S3 backend; the design in
-  `docs/STORAGE.md` has not been exercised against any store. The command line still accepts only
-  a directory for `--repo`.
+  and the retry-over-faults runs are the least certain.
+- The S3 backend is unverified like everything else, and more so: its adapter to the AWS SDK has
+  never been compiled, the MinIO tests have never met a server (this environment has no Docker
+  access), and the fake service it is otherwise tested against was written by the same hand. The
+  toolchain pin was raised to 1.94.1 for the SDK; with no `Cargo.lock` a first networked build may
+  need a newer one. A backup checks each chunk with its own request, one after the other, so a
+  backup of a very large tree to a distant bucket is slow; listing instead is future work. The
+  lock file of a killed process stays in the bucket until removed by hand. Details in
+  `docs/S3.md`.
 - `prune` is unverified like everything else. Specifically: the interactive question (`Type
   "yes"`) needs a terminal, so only its logic is unit tested and the flow around it is not tested
   end to end; Ctrl-C and SIGTERM through the binary are not tested; the race tests (a prune

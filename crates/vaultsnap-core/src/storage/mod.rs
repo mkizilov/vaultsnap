@@ -22,8 +22,9 @@
 //! The reference implementation is [`LocalBackend`]. [`MemoryBackend`] has object-store
 //! semantics and is the proof that nothing above this module needs a file system.
 //! [`RetryingBackend`] adds retries with backoff to any backend, and [`FlakyBackend`] injects the
-//! failures that test them. [`contract`] is the test suite every backend must pass. The design
-//! for an S3-compatible backend, and how each rule here maps onto S3, is in `docs/STORAGE.md`.
+//! failures that test them. [`S3Backend`] keeps a repository in an S3-compatible bucket (see
+//! [`s3`]). [`contract`] is the test suite every backend must pass. How each rule here maps onto
+//! S3 is in `docs/STORAGE.md`, and how to use a bucket in `docs/S3.md`.
 //!
 //! Backends are synchronous. The repository calls them on Tokio's blocking pool (see
 //! `blocking`), so a network backend can block on its own client without touching the async
@@ -34,6 +35,7 @@ mod fault;
 mod local;
 mod memory;
 mod retry;
+pub mod s3;
 
 use std::fmt;
 use std::path::Path;
@@ -45,6 +47,7 @@ pub use fault::{Fault, FlakyBackend};
 pub use local::LocalBackend;
 pub use memory::MemoryBackend;
 pub use retry::{ImmediateSleeper, RetryPolicy, RetryingBackend, Sleeper, ThreadSleeper};
+pub use s3::{S3Backend, S3Config};
 
 /// The longest accepted name segment, in bytes.
 pub const MAX_NAME_LEN: usize = 255;
