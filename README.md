@@ -15,9 +15,9 @@ A reliable encrypted incremental backup utility written in Rust.
 | `check`     | Not implemented                                                        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
-Key management, a streaming content-defined chunker, and an encrypted, deduplicating chunk store
-are in place, but **nothing yet reads your files into the repository** because `backup` does not
-exist. Do not rely on this tool for real data.
+Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, and
+a filesystem scanner are in place, but **nothing yet connects them**: `backup` does not exist, so
+no files are read into the repository. Do not rely on this tool for real data.
 
 ### Chunking
 
@@ -36,6 +36,36 @@ while let Some(chunk) = chunker.next_chunk()? {
 ```
 
 The exact algorithm is specified in [`docs/FORMAT.md`](docs/FORMAT.md).
+
+### Filesystem scanner
+
+`vaultsnap_core::scan::Scanner` walks a directory (or one file) lazily and deterministically
+(depth first, names in byte order) and reports each path's type, size, timestamps, permissions,
+ownership, link information, and why anything was left out. File content is never read during
+the walk; `Scanner::open` returns a streaming `Read` that plugs into the chunker.
+
+Every judgment call is an explicit option with a conservative default: symbolic links are
+recorded and **never followed** (following only inside the root, or anywhere, is opt-in); hard
+links are stored once; unreadable paths are reported and skipped; paths vanishing mid-scan are
+skipped; files that change while being read fail the read; other filesystems are not entered;
+FIFOs, sockets, and devices are recorded but never opened. Include/exclude globs are supported.
+The policy table, platform differences, and limitations are in
+[`docs/SCANNING.md`](docs/SCANNING.md).
+
+```rust
+let scanner = Scanner::new("/home/me/Documents", ScanOptions::default())?;
+for item in scanner.scan() {
+    match item? {
+        ScanItem::Entry(entry) if entry.is_file() => {
+            let reader = scanner.open(&entry)?;      // streaming, change-checked
+            let chunks = Chunker::new(reader, ChunkerConfig::default());
+            // ... store each chunk in the ChunkStore
+        }
+        ScanItem::Skipped(skipped) => eprintln!("skipped {:?}", skipped.path),
+        _ => {}
+    }
+}
+```
 
 ### Chunk store
 
@@ -100,7 +130,7 @@ no way to recover a lost passphrase.
 
 | Crate             | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, snapshot ids, retention, operations |
+| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot ids, retention, operations |
 | `vaultsnap-cli`   | Binary `vaultsnap`: `clap` argument parsing and output          |
 
 Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiserror` (errors),
@@ -108,7 +138,8 @@ Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiser
 blocking pool), `getrandom` (OS randomness), `argon2`, `hkdf` + `sha2`, `chacha20poly1305`
 (RustCrypto key derivation and authenticated encryption), `blake3` (keyed chunk ids), `zstd`
 (compression; the C library is compiled from source, so a C compiler is needed to build),
-`zeroize` (clearing secrets), and `rpassword` (reading a passphrase without echo).
+`globset` (include/exclude patterns), `libc` (Unix `O_NOFOLLOW` and friends), `zeroize`
+(clearing secrets), and `rpassword` (reading a passphrase without echo).
 
 ## Usage
 
@@ -141,6 +172,8 @@ Tests:
 - Chunking property tests (`proptest`) and statistical tests are in
   `crates/vaultsnap-core/tests/chunking.rs`. A failing property case is saved under
   `crates/vaultsnap-core/proptest-regressions/`; commit that file with the fix.
+- Scanner tests, which build real directory trees (symlinks, hard links, FIFOs, unreadable
+  directories, files changing mid-read), are in `crates/vaultsnap-core/tests/scan.rs`.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -165,6 +198,8 @@ is compiled by `clippy --all-targets` but not run).
 - The local store publishes new files with hard links, so the repository must live on a
   filesystem that supports them.
 - The chunking benchmark has never been run, so there are no throughput numbers yet.
+- Scanner behavior on real mount points, on Windows, and on network filesystems is unverified;
+  see `docs/SCANNING.md`.
 
 ## License
 

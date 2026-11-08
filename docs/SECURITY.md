@@ -128,6 +128,32 @@ as untrusted for path purposes:
   the repository directory is outside the threat model (they already have write access to it).
 - Temporary files are created exclusively (`create_new`) with random names.
 
+## Reading the user's files (scanner; built)
+
+The tree being backed up is **not trusted**: it may be changed by other users and processes
+while a backup runs, including by an attacker who can write to it while VaultSnap runs with
+more privilege than that attacker (for example a root backup of a shared directory). The scanner
+is designed so such a party cannot make a backup read files outside the requested root or hang
+it:
+
+- Symbolic links are never followed by default, so a link cannot pull in `/etc/shadow` or any
+  other target. Following inside the root, or anywhere, is a separate explicit option, and
+  loops and links to ancestors are always cut.
+- When a file is opened, the final component is opened with `O_NOFOLLOW`, the opened file must
+  be a regular file with the device and inode recorded at scan time, and `O_NONBLOCK` keeps a
+  swapped-in FIFO from blocking. A file or directory swapped for a link or another file between
+  scan and read is therefore refused (`FileChanged`), not read. This relies on the kernel's
+  inode identity; it is not available on Windows, where the protection is weaker.
+- Special files are never opened; FIFOs, sockets, and devices are recorded as metadata only.
+- Files are read as streams; a file of any size cannot exhaust memory, and a file that changes
+  while it is read fails the read instead of silently producing inconsistent data.
+- Filesystem boundaries are not crossed by default, so pseudo-filesystems and network mounts are
+  not read by accident.
+
+This does not stop an attacker from *reading* what the backup user can read, nor from making a
+file change in a way the checks cannot see (see `SCANNING.md`), and file names and metadata
+of the user's tree are only protected once snapshots exist and are encrypted (not built yet).
+
 ## Concurrency
 
 Advisory locks stop two VaultSnap processes from corrupting each other. They are not a security

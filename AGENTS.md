@@ -56,7 +56,10 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   `chunk_store` (`ChunkStore`, `ChunkId`; `object` is the byte format of one chunk object: header
   and chunk id are AEAD associated data, keyed BLAKE3 ids, optional zstd; `store` is the
   dedup/atomic-write/verified-read logic; the format is specified in `docs/FORMAT.md` and any
-  change to it needs a version bump). No CLI or terminal concerns here. All repository file
+  change to it needs a version bump), `scan` (`Scanner`, `ScanOptions`, `FileReader`: the
+  filesystem walk and streaming file access; every behavior choice is an explicit policy option
+  documented in `docs/SCANNING.md`, and defaults must stay conservative: never follow symlinks,
+  never open special files). No CLI or terminal concerns here. All repository file
   access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
   through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
@@ -65,8 +68,12 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   add tests). Tests use `testing::fast_kdf()` (cheap Argon2 parameters); production code never
   does.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
-  chunking engine, the encrypted chunk store. `backup`, `snapshots`, `restore`, `check`, `prune`
-  are stubs. Nothing reads files into the chunk store yet.
+  chunking engine, the encrypted chunk store, the filesystem scanner. `backup`, `snapshots`,
+  `restore`, `check`, `prune` are stubs. Nothing connects the scanner to the chunk store yet.
+- Tests that need privileges or special files must detect their absence at run time and say so
+  (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
+  any test that changes permissions must restore them with a guard so temporary directories can
+  be cleaned up. Never use `unsafe` (it is forbidden), even in tests: spawn `mkfifo` instead.
 - Tests and benchmarks: chunking property tests live in `crates/vaultsnap-core/tests/chunking.rs`
   (`proptest`; only properties that are provable, plus fixed-seed statistical tests with wide
   margins, to avoid flaky tests); the benchmark is `crates/vaultsnap-core/benches/chunking.rs`

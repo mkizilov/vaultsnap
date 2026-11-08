@@ -134,6 +134,22 @@ pub enum Error {
     /// Compressing a chunk failed.
     #[error("compression failed: {0}")]
     Compression(String),
+    /// An include or exclude pattern could not be compiled.
+    #[error("invalid pattern {pattern:?}: {reason}")]
+    InvalidPattern {
+        /// The pattern as given.
+        pattern: String,
+        /// Why it was rejected.
+        reason: String,
+    },
+    /// A file was replaced, removed, or modified between being scanned and being read.
+    #[error("file {} changed while it was being backed up: {}", .path.display(), .reason)]
+    FileChanged {
+        /// The file.
+        path: PathBuf,
+        /// What changed.
+        reason: String,
+    },
     /// A passphrase was rejected before use.
     #[error("invalid passphrase: {0}")]
     InvalidPassphrase(&'static str),

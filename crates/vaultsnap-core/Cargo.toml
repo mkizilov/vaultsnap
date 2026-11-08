@@ -12,6 +12,7 @@ argon2.workspace = true
 blake3.workspace = true
 chacha20poly1305.workspace = true
 getrandom.workspace = true
+globset.workspace = true
 hkdf.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
@@ -19,6 +20,9 @@ tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 zeroize.workspace = true
 zstd.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

@@ -15,7 +15,9 @@ blake3 = "1"
 chacha20poly1305 = "0.10"
 clap = { version = "4.5", features = ["derive", "env"] }
 getrandom = "0.2"
+globset = { version = "0.4", default-features = false }
 hkdf = "0.12"
+libc = "0.2"
 proptest = { version = "1", default-features = false, features = ["std"] }
 rpassword = "7"
 sha2 = "0.10"

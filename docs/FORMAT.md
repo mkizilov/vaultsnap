@@ -244,6 +244,14 @@ to the root of a tree of directory and file entries. Directory and file entries 
 chunks, so unchanged subtrees are shared between snapshots. Entries record name, type, mode, size,
 modification time, symlink target, and chunk ids.
 
+The entries come from the filesystem scanner (`SCANNING.md`), which defines what is captured:
+type (directory, file, symlink, hard link to an earlier entry, FIFO, socket, device), size,
+modification, access, inode-change, and birth times at nanosecond resolution, permission bits
+(`0o7777`), owner uid and gid, and the hard-link and symlink structure. Names are arbitrary byte
+strings on Unix (not necessarily UTF-8), so the snapshot encoding must store them as bytes, never
+as text. Extended attributes, ACLs, file flags, and sparse-file hole maps are not captured yet;
+adding them is a snapshot format change.
+
 ## Keys and encryption (built, except where marked planned)
 
 **Primitives** (all from maintained RustCrypto crates; none implemented here): Argon2id
