@@ -24,7 +24,9 @@ mod store;
 
 pub(crate) use builder::{os_bytes, relative_path_bytes};
 pub use builder::ManifestBuilder;
-pub use id::SnapshotId;
+pub use id::{SnapshotId, SnapshotRef, MIN_REFERENCE_LEN};
+#[cfg(test)]
+pub(crate) use model::testing;
 pub use model::{
     is_valid_name, Attributes, BackupConfig, ChunkRef, Manifest, ManifestEntry, ManifestStats,
     NodeKind, Root, SkippedReason, SkippedRecord, SnapshotSummary, MANIFEST_FORMAT_VERSION,

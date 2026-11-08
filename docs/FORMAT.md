@@ -3,9 +3,10 @@
 Status: **partly implemented**. `init`, the `config` file, the local store, locking, and key
 management (master key, key files, derived keys, authenticated encryption) exist and are marked
 *built*, as are chunking, the encrypted, deduplicated chunk store, the filesystem scanner, and
-encrypted snapshot manifests. Packs and indexes are still *planned*, and nothing yet performs a
-backup end to end; `backup`, `snapshots`, `restore`, `check`, and `prune` return "not
-implemented". Code that lands later must follow this document, and changes to the format must
+encrypted snapshot manifests. Packs and indexes are still *planned*. `backup` and the commands
+that inspect snapshots (`snapshots`, `show`, `ls`, `diff`) are built on top of these; `restore`,
+`check`, and `prune` return "not implemented". Code that lands later must follow this document,
+and changes to the format must
 update it first and bump `FORMAT_VERSION` (`crates/vaultsnap-core/src/repository.rs`).
 
 Repositories created by pre-release builds before key management existed have no `keys/`
@@ -390,6 +391,28 @@ A damaged, truncated, extended, wrong-key, or misplaced file is a *corrupt snaps
 listings report such files with their error instead of omitting them or presenting them as good.
 Files in `snapshots/` that are not named like a snapshot id, and `.tmp-` files, are ignored.
 
+### Listing, ordering, and sizes
+
+History commands (`docs/CLI.md`) rely on these definitions.
+
+* **Order.** Snapshots are ordered by the `created` time inside the authenticated manifest,
+  oldest first, ties broken by snapshot id (ascending, as text). A file's modification time is
+  never used, because anyone with write access to the repository can change it.
+* **References.** A user may name a snapshot by the start of its id, four characters or more. The
+  start is matched against the names in `snapshots/`, which are unauthenticated, and the matching
+  snapshot is then loaded, which authenticates it.
+* **Logical size** of a snapshot is the sum of the sizes of its `file` entries (hard links add
+  nothing). A snapshot's **distinct chunks** are the chunk ids in its file entries, each counted
+  once. Their **deduplicated size** is the sum of their plaintext lengths, their **stored size** is
+  the sum of the lengths of their object files, and the **unique stored size** is the stored size
+  of the distinct chunks that no other snapshot refers to. Stored sizes come from object file
+  metadata and are not verified; a missing object counts as zero and is reported.
+* **Comparison.** Entries are matched by logical path (the root's source path joined with the
+  entry's path below it). Two files have the same content if their sizes and ordered chunk lists
+  are equal, which means equal bytes when the same chunk size limits were used; hard links count
+  as the file they link to. Access, inode-change, and creation times are not compared, and
+  directory modification times are not either.
+
 ### Decisions
 
 | Decision | Reason |
@@ -481,7 +504,8 @@ later removes. Existing objects are never modified in place.
 
 ## Locking
 
-`backup`, `restore`, `snapshots`, and `check` take shared locks; `prune` takes an exclusive lock.
+`backup`, `restore`, `snapshots`, `show`, `ls`, `diff`, and `check` take shared locks; `prune`
+takes an exclusive lock.
 Locks are advisory and carry a timestamp for diagnostics. Locking protects against concurrent
 VaultSnap runs, not against a hostile writer (see `SECURITY.md`). A backup holds its shared lock
 until it has finished or been cancelled; a process that is killed leaves its lock file behind,
@@ -493,7 +517,7 @@ which blocks `prune` until it is removed by hand (stale locks are never removed 
 |-------------|--------------------|------------------------------------------|
 | `init`      | nothing            | `config`, one `keys/` slot, empty dirs   |
 | `backup`    | snapshots (parent) | chunks (new ones only), then one snapshot |
-| `snapshots` | snapshots          | nothing                                  |
+| `snapshots`, `show`, `ls`, `diff` | snapshots, chunk object sizes | nothing              |
 | `restore`   | snapshot, packs    | files under the target directory only    |
 | `check`     | everything*        | nothing                                  |
 | `prune`     | snapshots, index   | removes snapshots, rewrites packs/index  |

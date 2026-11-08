@@ -188,6 +188,25 @@ pub struct Root {
 }
 
 impl Root {
+    /// Counts of this root's entries by kind and the total size of its regular files. The
+    /// `skipped` count is always 0 here: skipped paths are recorded on the manifest.
+    pub fn stats(&self) -> ManifestStats {
+        let mut stats = ManifestStats::default();
+        for entry in &self.entries {
+            match &entry.kind {
+                NodeKind::Directory => stats.directories += 1,
+                NodeKind::File { .. } => {
+                    stats.files += 1;
+                    stats.bytes = stats.bytes.saturating_add(entry.attributes.size);
+                }
+                NodeKind::Symlink { .. } => stats.symlinks += 1,
+                NodeKind::HardLink { .. } => stats.hard_links += 1,
+                _ => stats.special_files += 1,
+            }
+        }
+        stats
+    }
+
     /// The path of entry `index` relative to the root: names joined with `/`, empty for the
     /// root itself. Names never contain `/`, so the result is unambiguous.
     pub fn relative_path(&self, index: usize) -> Vec<u8> {
@@ -390,21 +409,17 @@ pub struct Manifest {
 impl Manifest {
     /// Computes the totals from the entries and skipped records.
     pub fn compute_stats(&self) -> ManifestStats {
-        let mut stats = ManifestStats::default();
-        for entry in self.roots.iter().flat_map(|root| root.entries.iter()) {
-            match &entry.kind {
-                NodeKind::Directory => stats.directories += 1,
-                NodeKind::File { .. } => {
-                    stats.files += 1;
-                    stats.bytes = stats.bytes.saturating_add(entry.attributes.size);
-                }
-                NodeKind::Symlink { .. } => stats.symlinks += 1,
-                NodeKind::HardLink { .. } => stats.hard_links += 1,
-                _ => stats.special_files += 1,
-            }
+        let mut total = ManifestStats::default();
+        for stats in self.roots.iter().map(Root::stats) {
+            total.directories += stats.directories;
+            total.files += stats.files;
+            total.symlinks += stats.symlinks;
+            total.hard_links += stats.hard_links;
+            total.special_files += stats.special_files;
+            total.bytes = total.bytes.saturating_add(stats.bytes);
         }
-        stats.skipped = self.skipped.len() as u64;
-        stats
+        total.skipped = self.skipped.len() as u64;
+        total
     }
 
     /// Checks every rule of a well-formed manifest:
@@ -712,6 +727,18 @@ mod tests {
         assert_eq!(stats.special_files, 5);
         assert_eq!(stats.bytes, 1500 + 1000 + 77);
         assert_eq!(stats.skipped, 4);
+    }
+
+    #[test]
+    fn each_root_has_its_own_statistics_that_add_up_to_the_totals() {
+        let manifest = rich();
+        let documents = manifest.roots[0].stats();
+        assert_eq!((documents.directories, documents.files, documents.bytes), (2, 3, 2500));
+        assert_eq!((documents.symlinks, documents.hard_links, documents.special_files), (1, 1, 5));
+        assert_eq!(documents.skipped, 0, "skipped paths belong to the manifest");
+        let notes = manifest.roots[1].stats();
+        assert_eq!((notes.directories, notes.files, notes.bytes), (0, 1, 77));
+        assert_eq!(documents.bytes + notes.bytes, manifest.stats.bytes);
     }
 
     #[test]

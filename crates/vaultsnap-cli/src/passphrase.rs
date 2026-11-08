@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{IsTerminal, Read, Write};
 use std::path::Path;
 
-use vaultsnap_core::Passphrase;
+use vaultsnap_core::{Passphrase, Repository, RepositoryKeys};
 use zeroize::Zeroizing;
 
 use crate::commands::CliError;
@@ -30,6 +30,16 @@ pub fn read_existing(password_file: Option<&Path>) -> Result<Passphrase, CliErro
         Some(path) => from_file(path),
         None => prompt_existing(),
     }
+}
+
+/// Reads the passphrase of an existing repository and unlocks it. The passphrase is cleared
+/// when this returns; only the derived keys live on.
+pub async fn unlock(
+    repo: &Repository,
+    password_file: Option<&Path>,
+) -> Result<RepositoryKeys, CliError> {
+    let passphrase = read_existing(password_file)?;
+    Ok(repo.unlock(&passphrase).await?)
 }
 
 fn from_file(path: &Path) -> Result<Passphrase, CliError> {

@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::codec;
-use super::id::SnapshotId;
+use super::id::{SnapshotId, SnapshotRef};
 use super::model::{Manifest, NodeKind, SnapshotSummary};
 use super::object::{self, MAX_OBJECT_BYTES};
 use crate::blocking::blocking;
@@ -143,6 +143,29 @@ impl SnapshotStore {
             .filter(|name| !LocalStore::is_temp_name(name))
             .filter_map(|name| name.parse::<SnapshotId>().ok())
             .collect())
+    }
+
+    /// The snapshot a reference names: a full id as is, or the one snapshot whose id starts with
+    /// the given text. Reads file names only, so the result is a candidate; [`SnapshotStore::load`]
+    /// is what authenticates it. Fails with [`Error::SnapshotNotFound`] if nothing matches and
+    /// [`Error::AmbiguousSnapshot`] if several snapshots do.
+    pub fn resolve(&self, reference: &SnapshotRef) -> Result<SnapshotId> {
+        if reference.is_full() {
+            return reference.as_str().parse();
+        }
+        let mut matching: Vec<SnapshotId> = self
+            .ids()?
+            .into_iter()
+            .filter(|id| id.as_str().starts_with(reference.as_str()))
+            .collect();
+        match matching.len() {
+            0 => Err(Error::SnapshotNotFound(reference.to_string())),
+            1 => Ok(matching.remove(0)),
+            count => Err(Error::AmbiguousSnapshot {
+                prefix: reference.to_string(),
+                count,
+            }),
+        }
     }
 
     /// The ids of all committed snapshots, newest file first (ties broken by id). The order
@@ -559,6 +582,52 @@ mod tests {
         }
         // The first commit was given the smallest age, so it is the newest.
         assert_eq!(fx.snapshots.ids_newest_first().expect("ids"), committed);
+    }
+
+    fn commit_with_id(fx: &Fixture, id: &str) -> SnapshotId {
+        let mut manifest = fx.manifest_with_real_chunks(minimal());
+        manifest.id = id.parse().expect("valid id");
+        fx.snapshots.commit(&manifest).expect("commit");
+        manifest.id
+    }
+
+    #[test]
+    fn references_resolve_by_unique_prefix() {
+        let fx = Fixture::new();
+        let first = commit_with_id(&fx, &"aa".repeat(32));
+        let second = commit_with_id(&fx, &format!("ab{}", "c".repeat(62)));
+        let resolve = |text: &str| fx.snapshots.resolve(&text.parse().expect("syntax"));
+
+        assert_eq!(resolve("aaaa").expect("unique"), first);
+        assert_eq!(resolve(&"aa".repeat(32)).expect("full id"), first);
+        assert_eq!(resolve("abcc").expect("unique"), second);
+        assert_eq!(resolve(&format!("ab{}", "c".repeat(30))).expect("unique"), second);
+    }
+
+    #[test]
+    fn ambiguous_and_unknown_references_are_reported() {
+        let fx = Fixture::new();
+        commit_with_id(&fx, &format!("abcd{}", "0".repeat(60)));
+        let second = commit_with_id(&fx, &format!("abcd{}", "1".repeat(60)));
+        let resolve = |text: &str| fx.snapshots.resolve(&text.parse().expect("syntax"));
+
+        match resolve("abcd") {
+            Err(Error::AmbiguousSnapshot { prefix, count }) => {
+                assert_eq!(prefix, "abcd");
+                assert_eq!(count, 2);
+            }
+            other => panic!("expected an ambiguity: {other:?}"),
+        }
+        assert_eq!(resolve("abcd1").expect("unique"), second);
+        assert!(matches!(resolve("bbbb"), Err(Error::SnapshotNotFound(_))));
+    }
+
+    #[test]
+    fn a_full_reference_is_only_checked_against_the_repository_when_loaded() {
+        let fx = Fixture::new();
+        let unknown = "0f".repeat(32);
+        let id = fx.snapshots.resolve(&unknown.parse().expect("syntax")).expect("full id");
+        assert!(matches!(fx.snapshots.load(&id), Err(Error::SnapshotNotFound(_))));
     }
 
     #[test]

@@ -14,6 +14,7 @@ use vaultsnap_core::{
 
 use crate::cli::BackupArgs;
 use crate::commands::CliError;
+use crate::format::human_size;
 use crate::passphrase;
 
 /// The progress line is redrawn at most this often.
@@ -24,9 +25,7 @@ pub async fn run(
     password_file: Option<&Path>,
     args: BackupArgs,
 ) -> Result<(), CliError> {
-    let passphrase = passphrase::read_existing(password_file)?;
-    let keys = repo.unlock(&passphrase).await?;
-    drop(passphrase);
+    let keys = passphrase::unlock(repo, password_file).await?;
 
     let cancel = CancelToken::new();
     cancel_on_interrupt(cancel.clone());
@@ -130,14 +129,14 @@ fn print_report(report: &BackupReport) {
     );
     println!(
         "  size         {} total, {} read, {} unchanged",
-        human(totals.bytes),
-        human(transfer.bytes_read),
-        human(transfer.bytes_unchanged)
+        human_size(totals.bytes),
+        human_size(transfer.bytes_read),
+        human_size(transfer.bytes_unchanged)
     );
     println!(
         "  chunks       {} new ({} stored), {} already stored",
         transfer.chunks_new,
-        human(transfer.bytes_stored),
+        human_size(transfer.bytes_stored),
         transfer.chunks_existing
     );
     let by_policy = report.skipped.iter().filter(|s| !s.failure).count();
@@ -170,21 +169,6 @@ fn warn_about_skipped(report: &BackupReport) -> usize {
         }
     }
     failed
-}
-
-fn human(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
 }
 
 /// A one-line status on the terminal, redrawn while the backup runs. Events arrive from several
@@ -226,7 +210,7 @@ impl Progress {
             "\r\x1b[K{} files, {} unchanged, {} read",
             self.files.load(Ordering::Relaxed),
             self.unchanged.load(Ordering::Relaxed),
-            human(self.bytes.load(Ordering::Relaxed))
+            human_size(self.bytes.load(Ordering::Relaxed))
         )
         .and_then(|()| stderr.flush())
         .ok();
@@ -259,17 +243,6 @@ impl BackupObserver for Progress {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sizes_are_shown_in_binary_units() {
-        assert_eq!(human(0), "0 B");
-        assert_eq!(human(1023), "1023 B");
-        assert_eq!(human(1024), "1.0 KiB");
-        assert_eq!(human(1536), "1.5 KiB");
-        assert_eq!(human(5 * 1024 * 1024), "5.0 MiB");
-        assert_eq!(human(3 * 1024 * 1024 * 1024), "3.0 GiB");
-        assert_eq!(human(u64::MAX), "16777216.0 TiB");
-    }
 
     #[test]
     fn progress_counts_events_and_ignores_the_rest() {

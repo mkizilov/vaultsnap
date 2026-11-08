@@ -88,6 +88,16 @@ impl ChunkStore {
         self.store.exists(&id.object_name())
     }
 
+    /// The size in bytes of the object stored for `id` (compressed and encrypted, with its
+    /// header), taken from the file's metadata without reading or verifying it. Fails with
+    /// [`Error::ChunkNotFound`] if there is no object.
+    pub fn stored_len(&self, id: &ChunkId) -> Result<u64> {
+        match self.store.file_len(&id.object_name()) {
+            Err(err) if err.is_not_found() => Err(Error::ChunkNotFound(id.to_hex())),
+            other => other,
+        }
+    }
+
     /// Stores `plaintext` unless an object for it already exists.
     pub fn put(&self, plaintext: &[u8]) -> Result<PutResult> {
         if plaintext.len() > MAX_CHUNK_BYTES {
@@ -235,6 +245,27 @@ mod tests {
             assert!(fx.chunks.contains(&put.id).expect("contains"));
             assert_eq!(fx.chunks.get(&put.id).expect("get"), data, "len {len}");
         }
+    }
+
+    #[test]
+    fn the_stored_length_is_the_size_of_the_object_file() {
+        let fx = Fixture::new();
+        let data = pseudo_random(5000, 7);
+        let put = fx.chunks.put(&data).expect("put");
+        let PutOutcome::Stored { object_len, .. } = put.outcome else {
+            panic!("the chunk is new");
+        };
+        assert_eq!(fx.chunks.stored_len(&put.id).expect("length"), object_len);
+        let on_disk = fs::metadata(fx.path_of(&put.id)).expect("metadata").len();
+        assert_eq!(on_disk, object_len);
+    }
+
+    #[test]
+    fn the_stored_length_of_a_missing_chunk_is_chunk_not_found() {
+        let fx = Fixture::new();
+        let id = fx.chunks.chunk_id(b"never stored");
+        let err = fx.chunks.stored_len(&id).expect_err("must fail");
+        assert!(matches!(err, Error::ChunkNotFound(_)), "{err}");
     }
 
     #[test]

@@ -150,6 +150,22 @@ pub enum Error {
         /// What changed.
         reason: String,
     },
+    /// Text naming a snapshot was not 4 to 64 lowercase hexadecimal characters.
+    #[error(
+        "invalid snapshot reference {0:?}: expected 4 to 64 lowercase hexadecimal characters \
+         (the start of a snapshot id)"
+    )]
+    InvalidSnapshotRef(String),
+    /// The start of a snapshot id matches more than one snapshot.
+    #[error(
+        "snapshot reference {prefix} matches {count} snapshots; use more characters of the id"
+    )]
+    AmbiguousSnapshot {
+        /// The text that was given.
+        prefix: String,
+        /// How many snapshots start with it.
+        count: usize,
+    },
     /// There is no snapshot with this id.
     #[error("snapshot {0} does not exist")]
     SnapshotNotFound(String),

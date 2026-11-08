@@ -221,6 +221,41 @@ See [`BACKUP.md`](BACKUP.md) for the behavior; this is what it means for securit
 - **Bounded resources.** Memory is bounded by `--jobs` and the chunk size limits, apart from the
   manifest, which is held until commit.
 
+## Inspecting snapshots (built)
+
+The commands `snapshots`, `show`, `ls`, and `diff` ([`CLI.md`](CLI.md)) decrypt and print
+metadata, which is the most sensitive thing the repository protects.
+
+- **Only verified data is shown.** Every snapshot is read through authenticated decryption (the
+  file is checked against the key and its own id) and the manifest is validated before use. A
+  damaged, truncated, modified, renamed, swapped, or foreign snapshot is reported as damaged with
+  a message that contains no file names and is never displayed. A wrong passphrase fails before
+  anything is read.
+- **Names given on the command line are only candidates.** A snapshot reference (the start of an
+  id) is matched against file names in `snapshots/`, which are not authenticated; the match is
+  then loaded, and loading is what authenticates it. An attacker who renames a file therefore gets
+  *snapshot is corrupt*, not another snapshot's contents.
+- **Order comes from the manifest.** Listings are ordered by the creation time inside each
+  authenticated manifest, not by file times, which anyone with write access could change. (They
+  can still delete a snapshot, or roll the repository back, undetected, as noted above.)
+- **Sizes are not authenticated.** Logical sizes come from manifests. Stored sizes and "unique"
+  sizes use the length of the chunk object files, i.e. file metadata, without reading the content;
+  they say how much space is used, not that the content is intact. Verifying content is the job of
+  `check`.
+- **Printing hostile names.** File names, link targets, host names, tags, patterns, and messages
+  come from the machine that was backed up, which may have been compromised, and are shown in the
+  terminal of the person inspecting the backup. Text output escapes backslashes, every control
+  character (so no ESC), invalid UTF-8 bytes, and invisible or direction-changing characters
+  (U+202E and friends), reversibly, so a name can neither inject escape sequences nor span lines
+  nor disguise itself. JSON output keeps strings exact, with control characters as JSON escapes
+  and non-UTF-8 paths also given as hex; whatever consumes the JSON must treat names as data.
+- **Output is sensitive.** Paths, sizes, and times are written to standard output in the clear;
+  redirecting them to a file or a log stores them unencrypted. Nothing is written to the
+  repository, and the passphrase and keys never appear in the output.
+- **Read-only, bounded.** The commands hold a shared lock and change nothing. They decrypt every
+  snapshot for a listing, with memory bounded by the largest manifest plus one small record per
+  distinct chunk.
+
 ## Concurrency
 
 Advisory locks stop two VaultSnap processes from corrupting each other. They are not a security

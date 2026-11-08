@@ -9,6 +9,8 @@ use crate::util::{decode_hex, hex, random_hex};
 
 const ID_LEN: usize = 64;
 const SHORT_LEN: usize = 8;
+/// The shortest start of an id accepted as a [`SnapshotRef`].
+pub const MIN_REFERENCE_LEN: usize = 4;
 
 /// Identifier of a snapshot: 64 lowercase hexadecimal characters, 256 random bits from the
 /// operating system. Ids are not secret; they are the snapshot file names.
@@ -71,6 +73,50 @@ impl fmt::Display for SnapshotId {
     }
 }
 
+/// What a person types to name a snapshot: a full id, or the start of one as shown in listings
+/// (at least [`MIN_REFERENCE_LEN`] characters). Only the syntax is checked here; whether it names
+/// exactly one snapshot is decided against a repository by `SnapshotStore::resolve`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotRef(String);
+
+impl SnapshotRef {
+    /// The text as given.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// True if this is a complete id rather than a prefix.
+    pub fn is_full(&self) -> bool {
+        self.0.len() == ID_LEN
+    }
+}
+
+impl FromStr for SnapshotRef {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let valid = (MIN_REFERENCE_LEN..=ID_LEN).contains(&s.len())
+            && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        if valid {
+            Ok(Self(s.to_owned()))
+        } else {
+            Err(Error::InvalidSnapshotRef(s.to_owned()))
+        }
+    }
+}
+
+impl fmt::Display for SnapshotRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<&SnapshotId> for SnapshotRef {
+    fn from(id: &SnapshotId) -> Self {
+        Self(id.0.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,5 +172,34 @@ mod tests {
     #[test]
     fn rejects_path_traversal_attempts() {
         assert!("../".repeat(22).parse::<SnapshotId>().is_err());
+    }
+
+    #[test]
+    fn references_accept_four_to_sixty_four_lowercase_hex_digits() {
+        for length in [4, 8, 63, 64] {
+            let text = "0123456789abcdef".repeat(4)[..length].to_owned();
+            let reference: SnapshotRef = text.parse().expect("valid reference");
+            assert_eq!(reference.as_str(), text);
+            assert_eq!(reference.to_string(), text);
+            assert_eq!(reference.is_full(), length == 64);
+        }
+    }
+
+    #[test]
+    fn references_reject_everything_else() {
+        let too_long = "a".repeat(65);
+        let bad = ["", "abc", "latest", "ABCD", "ab cd", "../..", "abcd/", too_long.as_str()];
+        for text in bad {
+            let result = text.parse::<SnapshotRef>();
+            assert!(matches!(result, Err(Error::InvalidSnapshotRef(_))), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_id_converts_to_a_full_reference() {
+        let id = SnapshotId::generate().expect("randomness available");
+        let reference = SnapshotRef::from(&id);
+        assert!(reference.is_full());
+        assert_eq!(reference.as_str(), id.as_str());
     }
 }

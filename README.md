@@ -10,15 +10,19 @@ A reliable encrypted incremental backup utility written in Rust.
 |-------------|------------------------------------------------------------------------|
 | `init`      | Implemented: creates a versioned repository (see below)                |
 | `backup`    | Implemented: incremental, encrypted, deduplicated (see below)           |
-| `snapshots` | Not implemented                                                        |
+| `snapshots` | Implemented: lists snapshots with sizes, text or JSON                  |
+| `show`      | Implemented: everything about one snapshot, text or JSON               |
+| `ls`        | Implemented: the files of a snapshot, text or JSON                     |
+| `diff`      | Implemented: added, deleted, and modified files between two snapshots   |
 | `restore`   | Not implemented                                                        |
 | `check`     | Not implemented                                                        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
 Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
-filesystem scanner, encrypted snapshot manifests, and the `backup` command that connects them are
-in place. **There is no `restore` yet**, so a backup cannot be read back by the tool, and none of
-this code has been compiled or run (see "Known gaps"). Do not rely on it for real data.
+filesystem scanner, encrypted snapshot manifests, the `backup` command that connects them, and the
+commands that inspect snapshot history are in place. **There is no `restore` yet**, so a backup
+cannot be read back by the tool, and none of this code has been compiled or run (see "Known
+gaps"). Do not rely on it for real data.
 
 ### Chunking
 
@@ -152,12 +156,35 @@ the repository:
 
 Details, guarantees, and limits: [`docs/BACKUP.md`](docs/BACKUP.md).
 
+### Inspecting history: `snapshots`, `show`, `ls`, `diff`
+
+```sh
+vaultsnap --repo REPO snapshots                 # oldest first, with logical / stored / unique sizes
+vaultsnap --repo REPO show 3f2a91c4             # a snapshot by the start of its id
+vaultsnap --repo REPO ls 3f2a91c4 /home/me/Documents
+vaultsnap --repo REPO diff 3f2a91c4 b7e01d52    # added, deleted, modified
+vaultsnap --repo REPO diff 3f2a91c4 b7e01d52 --json | jq .summary
+```
+
+- **Verified.** Every snapshot is read through authenticated decryption and validated before it
+  is shown; a damaged or tampered snapshot is reported, never displayed.
+- **Sizes.** *Logical* (what the files add up to), *stored* (what the snapshot's distinct chunks
+  occupy in the repository), and *unique stored* (the part no other snapshot uses).
+- **Text or JSON.** `--json` prints one stable JSON document per command; text output escapes
+  hostile file names so they cannot inject terminal control sequences.
+- **Read-only**, under a shared lock.
+
+The full command reference with example output and the JSON schema is in
+[`docs/CLI.md`](docs/CLI.md).
+
 The design is specified before the code that implements it:
 
 - [`docs/FORMAT.md`](docs/FORMAT.md): repository layout, identifiers, key files and encryption,
   chunking, crash safety.
 - [`docs/BACKUP.md`](docs/BACKUP.md): the backup pipeline, change detection, failure and
   cancellation behavior.
+- [`docs/CLI.md`](docs/CLI.md): every command with examples, exit statuses, size definitions,
+  and the JSON output.
 - [`docs/SECURITY.md`](docs/SECURITY.md): threat model, secrets handling, restore safety.
 
 ### `vaultsnap init`
@@ -200,7 +227,8 @@ blocking pool), `getrandom` (OS randomness), `argon2`, `hkdf` + `sha2`, `chacha2
 (RustCrypto key derivation and authenticated encryption), `blake3` (keyed chunk ids), `zstd`
 (compression; the C library is compiled from source, so a C compiler is needed to build),
 `globset` (include/exclude patterns), `libc` (Unix `O_NOFOLLOW` and friends), `zeroize`
-(clearing secrets), and `rpassword` (reading a passphrase without echo).
+(clearing secrets), `rpassword` (reading a passphrase without echo), and `serde` + `serde_json`
+(the `--json` output of the command line; the core library does not use them).
 
 ## Usage
 
@@ -208,6 +236,9 @@ blocking pool), `getrandom` (OS randomness), `argon2`, `hkdf` + `sha2`, `chacha2
 vaultsnap --repo /path/to/repo init
 vaultsnap --repo /path/to/repo backup ~/Documents --exclude '*.tmp' --tag laptop
 vaultsnap --repo /path/to/repo snapshots
+vaultsnap --repo /path/to/repo show <snapshot-id-or-start>
+vaultsnap --repo /path/to/repo ls <snapshot-id-or-start> [/path/inside]
+vaultsnap --repo /path/to/repo diff <older> <newer> --json
 vaultsnap --repo /path/to/repo restore <snapshot-id> --target /path/to/restore
 vaultsnap --repo /path/to/repo check --read-data
 vaultsnap --repo /path/to/repo prune --keep-last 7 --keep-monthly 12 --dry-run
@@ -244,6 +275,11 @@ Tests:
   cancellation, failure, and files changing or vanishing mid-backup; bounded and deterministic
   concurrency; simultaneous backups; and a rebuild of every file of every snapshot from its chunk
   list. Unit tests for the engine and the parent comparison sit beside the code.
+- History tests (ordering, changes between real backups, unusual file names, sizes checked
+  against the object files on disk, tampering, wrong keys) are in
+  `crates/vaultsnap-core/tests/history.rs`; the exact text and JSON of every inspection command
+  for fixed data, and the escaping of hostile names, are unit tests in
+  `crates/vaultsnap-cli/src/inspect/tests.rs`.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -271,6 +307,12 @@ is compiled by `clippy --all-targets` but not run).
 - `backup` has no CLI test for Ctrl-C/SIGTERM (a race-free test needs a controllable slow
   source); cancellation is tested in the library through the cancel token only, and the signal
   handler itself is unverified.
+- The expected text and JSON of the inspection commands (`inspect/tests.rs`, and the same
+  examples in `docs/CLI.md`) were derived by hand, not by running the program, so a mismatch on
+  the first real run is possible. Likewise the `jq` recipes in `docs/CLI.md` were never run.
+- Tests that create files with newlines, escape characters, or non-UTF-8 names depend on the
+  file system accepting them (macOS refuses non-UTF-8 names); the non-UTF-8 case is skipped
+  there and counts as unverified on such systems.
 - There is no `restore`, so the proof that a snapshot is complete is the test that rebuilds files
   from the chunk lists in the repository; nothing restores to disk yet.
 - Several lines are longer than rustfmt's limit because nothing could be formatted; the first

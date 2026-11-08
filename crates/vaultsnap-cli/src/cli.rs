@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
-use vaultsnap_core::SnapshotId;
+use vaultsnap_core::{SnapshotId, SnapshotRef};
 
 /// Reliable encrypted incremental backups.
 #[derive(Debug, Parser)]
@@ -31,8 +31,14 @@ pub enum Command {
     Init,
     /// Back up files and directories into a new snapshot
     Backup(BackupArgs),
-    /// List snapshots
-    Snapshots,
+    /// List snapshots, oldest first, with their sizes
+    Snapshots(SnapshotsArgs),
+    /// Show everything about one snapshot
+    Show(ShowArgs),
+    /// List the files in a snapshot
+    Ls(LsArgs),
+    /// Compare two snapshots: what was added, deleted, and modified
+    Diff(DiffArgs),
     /// Restore a snapshot into a directory
     Restore(RestoreArgs),
     /// Verify repository integrity
@@ -66,6 +72,50 @@ pub struct BackupArgs {
     /// Read every file instead of trusting unchanged metadata from the previous snapshot
     #[arg(long)]
     pub rescan: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SnapshotsArgs {
+    /// Print JSON instead of a table
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ShowArgs {
+    /// Snapshot id, or the start of one (at least 4 characters, as `snapshots` shows them)
+    pub snapshot: SnapshotRef,
+
+    /// Print JSON instead of text
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LsArgs {
+    /// Snapshot id, or the start of one (at least 4 characters)
+    pub snapshot: SnapshotRef,
+
+    /// Only this path and what is below it, as an absolute path on the backed-up machine
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+
+    /// Print JSON instead of text
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DiffArgs {
+    /// The older snapshot: id, or the start of one (at least 4 characters)
+    pub from: SnapshotRef,
+
+    /// The newer snapshot: id, or the start of one (at least 4 characters)
+    pub to: SnapshotRef,
+
+    /// Print JSON instead of text
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -135,7 +185,11 @@ mod tests {
     fn parses_every_subcommand() {
         assert!(matches!(parse(&["init"]).map(|c| c.command), Ok(Command::Init)));
         assert!(matches!(parse(&["backup", "a"]).map(|c| c.command), Ok(Command::Backup(_))));
-        assert!(matches!(parse(&["snapshots"]).map(|c| c.command), Ok(Command::Snapshots)));
+        let snapshots = parse(&["snapshots"]).map(|c| c.command);
+        assert!(matches!(snapshots, Ok(Command::Snapshots(_))));
+        assert!(matches!(parse(&["show", "abcd"]).map(|c| c.command), Ok(Command::Show(_))));
+        assert!(matches!(parse(&["ls", "abcd"]).map(|c| c.command), Ok(Command::Ls(_))));
+        assert!(matches!(parse(&["diff", "abcd", "ef01"]).map(|c| c.command), Ok(Command::Diff(_))));
         assert!(matches!(parse(&["check"]).map(|c| c.command), Ok(Command::Check(_))));
         assert!(matches!(parse(&["prune"]).map(|c| c.command), Ok(Command::Prune(_))));
         let id = "a".repeat(64);
@@ -149,6 +203,49 @@ mod tests {
         assert_eq!(cli.password_file, Some(PathBuf::from("/p")));
         let cli = parse(&["--password-file", "/q", "snapshots"]).expect("valid arguments");
         assert_eq!(cli.password_file, Some(PathBuf::from("/q")));
+    }
+
+    #[test]
+    fn inspection_commands_take_snapshot_references_and_a_json_flag() {
+        let Command::Snapshots(args) = parse(&["snapshots", "--json"]).expect("valid").command else {
+            panic!("expected snapshots");
+        };
+        assert!(args.json);
+
+        let id = "a".repeat(64);
+        let Command::Show(args) = parse(&["show", id.as_str()]).expect("valid").command else {
+            panic!("expected show");
+        };
+        assert!(args.snapshot.is_full() && !args.json);
+
+        let cli = parse(&["ls", "abcd", "/home/me", "--json"]).expect("valid");
+        let Command::Ls(args) = cli.command else {
+            panic!("expected ls");
+        };
+        assert_eq!(args.snapshot.as_str(), "abcd");
+        assert_eq!(args.path, Some(PathBuf::from("/home/me")));
+        assert!(args.json);
+
+        let cli = parse(&["diff", "abcd", "ef012345"]).expect("valid");
+        let Command::Diff(args) = cli.command else {
+            panic!("expected diff");
+        };
+        assert_eq!((args.from.as_str(), args.to.as_str()), ("abcd", "ef012345"));
+    }
+
+    #[test]
+    fn inspection_commands_reject_malformed_references_and_missing_arguments() {
+        for args in [
+            &["show", "abc"][..],
+            &["show", "latest"],
+            &["show", "ABCD"],
+            &["ls", "abcd/"],
+            &["diff", "abcd"],
+            &["diff", "abcd", "xyz"],
+            &["show"],
+        ] {
+            assert!(parse(args).is_err(), "{args:?}");
+        }
     }
 
     #[test]

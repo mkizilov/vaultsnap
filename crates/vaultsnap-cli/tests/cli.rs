@@ -3,7 +3,8 @@ mod common;
 use common::{run_without_repo, stderr, stdout, TestEnv, PASSPHRASE};
 use vaultsnap_core::{Error, Passphrase, Repository};
 
-const COMMANDS: [&str; 6] = ["init", "backup", "snapshots", "restore", "check", "prune"];
+const COMMANDS: [&str; 9] =
+    ["init", "backup", "snapshots", "show", "ls", "diff", "restore", "check", "prune"];
 
 fn passphrase(text: &str) -> Passphrase {
     Passphrase::new(text.as_bytes().to_vec()).expect("valid passphrase")
@@ -58,12 +59,7 @@ fn unfinished_commands_report_not_implemented_without_touching_the_repository() 
     let env = TestEnv::default();
     let id = "a".repeat(64);
     let restore = ["restore", id.as_str(), "--target", "out"];
-    let invocations: [&[&str]; 4] = [
-        &["snapshots"],
-        &restore,
-        &["check"],
-        &["prune", "--keep-last", "1"],
-    ];
+    let invocations: [&[&str]; 3] = [&restore, &["check"], &["prune", "--keep-last", "1"]];
     for args in invocations {
         let output = env.run(args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");

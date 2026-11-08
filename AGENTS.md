@@ -66,7 +66,12 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   tests added; manifests never leak file names into errors or logs), `backup` (`BackupOptions`,
   `BackupReport`, `CancelToken`, `BackupObserver`; `engine` = the worker pipeline, `parent` = the
   unchanged-file decision; `ops/backup.rs` is the `Repository::backup` entry point; behavior and
-  guarantees are in `docs/BACKUP.md`). No CLI or terminal concerns
+  guarantees are in `docs/BACKUP.md`), `history` (read-only inspection of snapshots: `list` =
+  ordered `SnapshotList` and `SnapshotDetails`, `sizes` = the `SizeLedger` behind logical /
+  stored / unique stored, `entries` = full logical paths and the path filter, `diff` = the
+  comparison; the `Repository::snapshots`, `snapshot`, `snapshot_details`, and
+  `compare_snapshots` operations in `ops/snapshots.rs` wrap them under a shared lock; its
+  definitions are in `docs/CLI.md`). No CLI or terminal concerns
   here. All repository file
   access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
@@ -83,9 +88,18 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   exist; unreadable files are recorded as skipped and make the result incomplete (CLI exit 3),
   never silently dropped; the repository is never part of its own backup; concurrency and memory
   stay bounded (`jobs`, files in flight).
+- Inspection invariants: nothing is shown from a snapshot that did not pass `SnapshotStore::load`
+  (authenticated decryption plus validation); ordering comes from the creation time inside the
+  manifest, never from file times; paths are raw bytes in core and are made printable only in
+  the CLI (`format::escape` for text, exact text plus `*_hex` for JSON); commands only read, under
+  a shared lock. The JSON field names, their order, and the spellings of fixed values are a
+  contract documented in `docs/CLI.md` and pinned by golden tests in
+  `crates/vaultsnap-cli/src/inspect/tests.rs`: change them only by adding fields at the end of an
+  object, and update the docs and the golden tests in the same change.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
-  manifests, and `backup`. `snapshots`, `restore`, `check`, `prune` are stubs; nothing restores.
+  manifests, `backup`, and the inspection commands `snapshots`, `show`, `ls`, `diff`. `restore`,
+  `check`, `prune` are stubs; nothing restores.
 - Tests that need privileges or special files must detect their absence at run time and say so
   (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
   any test that changes permissions must restore them with a guard so temporary directories can
@@ -98,10 +112,15 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   no-echo prompt, never from arguments or environment values, and are read before any repository
   file is created.
 - `crates/vaultsnap-cli`: binary `vaultsnap`. `cli` (clap definitions), `commands` (argument to
-  core mapping and printing; `CliError::exit_code`: 1 failure, 3 incomplete backup, 130 cancelled,
-  clap's 2 for usage), `backup` (the `backup` command: unlock, progress line on a terminal only,
-  SIGINT/SIGTERM to a `CancelToken`, summary), `logging` (tracing setup, stderr only).
-- `docs/`: `FORMAT.md` and `SECURITY.md`.
+  core mapping and printing; `CliError::exit_code`: 1 failure, 3 problem in the result (incomplete
+  backup, damaged snapshots), 130 cancelled, clap's 2 for usage), `backup` (the `backup` command:
+  unlock, progress line on a terminal only, SIGINT/SIGTERM to a `CancelToken`, summary),
+  `inspect` (`snapshots`/`show`/`ls`/`diff`: `human` = text, `json` = one JSON document built
+  from explicit `serde` structs, `tests` = golden output), `format` (sizes, UTC times, `escape`
+  for names, `ls`-style modes), `passphrase` (including `unlock`), `logging` (tracing setup,
+  stderr only). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
+- `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, and `CLI.md` (the command
+  reference; every new or changed command, option, or output goes there with an example).
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors
 are typed in core and converted at the CLI boundary; user-supplied identifiers are validated

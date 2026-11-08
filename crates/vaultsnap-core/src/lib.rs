@@ -6,9 +6,9 @@
 //! per-purpose HKDF keys, XChaCha20-Poly1305 sealing), a streaming content-defined chunker
 //! ([`chunking`]), an encrypted, deduplicating chunk store ([`chunk_store`]), a filesystem scanner
 //! ([`scan`]), encrypted, atomically committed snapshot manifests ([`snapshot`]), and the
-//! incremental backup that ties them together ([`backup`], [`Repository::backup`]). Restore,
-//! snapshot listing, check, and prune validate their arguments and then return
-//! [`Error::NotImplemented`].
+//! incremental backup that ties them together ([`backup`], [`Repository::backup`]), and the
+//! inspection of snapshot history: listing, details, file listings, and comparison ([`history`]).
+//! Restore, check, and prune validate their arguments and then return [`Error::NotImplemented`].
 
 pub mod backup;
 mod blocking;
@@ -17,6 +17,7 @@ pub mod chunking;
 pub mod config;
 pub mod crypto;
 pub mod error;
+pub mod history;
 pub mod keys;
 mod kv;
 pub mod lock;
@@ -39,6 +40,7 @@ pub use chunking::{Chunker, ChunkerConfig};
 pub use config::RepositoryConfig;
 pub use crypto::{KdfParams, KeyPurpose, SecretKey};
 pub use error::{Error, Result};
+pub use history::{Diff, SnapshotDetails, SnapshotList, SnapshotSizes};
 pub use keys::RepositoryKeys;
 pub use lock::{LockKind, RepositoryLock};
 pub use ops::{CheckOptions, CheckReport, PruneOptions, PruneReport, RestoreOptions};
@@ -47,6 +49,7 @@ pub use retention::RetentionPolicy;
 pub use scan::{ScanOptions, Scanner};
 pub use secret::Passphrase;
 pub use snapshot::{
-    Manifest, ManifestBuilder, SnapshotId, SnapshotListing, SnapshotStore, SnapshotSummary,
+    Manifest, ManifestBuilder, SnapshotId, SnapshotListing, SnapshotRef, SnapshotStore,
+    SnapshotSummary,
 };
 pub use store::LocalStore;

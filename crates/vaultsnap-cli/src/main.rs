@@ -3,6 +3,8 @@
 mod backup;
 mod cli;
 mod commands;
+mod format;
+mod inspect;
 mod logging;
 mod passphrase;
 

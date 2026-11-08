@@ -91,6 +91,14 @@ impl LocalStore {
         Ok(data)
     }
 
+    /// The size in bytes of the file `name`, from its metadata (the file is not read).
+    pub fn file_len(&self, name: &str) -> Result<u64> {
+        let path = self.resolve(name)?;
+        fs::symlink_metadata(&path)
+            .map(|meta| meta.len())
+            .map_err(|err| Error::io("inspect", &path, err))
+    }
+
     /// The modification time of `name`.
     pub fn modified(&self, name: &str) -> Result<std::time::SystemTime> {
         let path = self.resolve(name)?;
