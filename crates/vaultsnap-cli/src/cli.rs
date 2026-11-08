@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args, Parser, Subcommand};
-use vaultsnap_core::{SnapshotId, SnapshotRef};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use vaultsnap_core::SnapshotRef;
 
 /// Reliable encrypted incremental backups.
 #[derive(Debug, Parser)]
@@ -120,16 +120,47 @@ pub struct DiffArgs {
 
 #[derive(Debug, Args)]
 pub struct RestoreArgs {
-    /// Snapshot to restore (64 lowercase hex characters)
-    pub snapshot: SnapshotId,
+    /// Snapshot id, or the start of one (at least 4 characters, as `snapshots` shows them)
+    pub snapshot: SnapshotRef,
 
-    /// Directory to restore into
+    /// Directory to restore into (created if it does not exist, never inside the repository)
     #[arg(long, value_name = "DIR")]
     pub target: PathBuf,
 
-    /// Path inside the snapshot to restore (repeatable; default is everything)
+    /// Path to restore, as `ls` shows it, with everything below it (repeatable; default is
+    /// everything)
     #[arg(long = "include", value_name = "PATH")]
     pub includes: Vec<PathBuf>,
+
+    /// What to do when something already exists in the target
+    #[arg(long, value_enum, default_value_t = ConflictArg::Fail, value_name = "MODE")]
+    pub on_conflict: ConflictArg,
+
+    /// What to do with symbolic links in the snapshot
+    #[arg(long, value_enum, default_value_t = SymlinkArg::Contained, value_name = "POLICY")]
+    pub symlinks: SymlinkArg,
+}
+
+/// What `restore` does about things that already exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConflictArg {
+    /// Restore nothing and report every conflict (the default)
+    Fail,
+    /// Keep what exists, restore the rest, and report what was skipped
+    Skip,
+    /// Replace files and links that exist; directories are merged and never replaced
+    Overwrite,
+}
+
+/// What `restore` does with symbolic links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SymlinkArg {
+    /// Restore only links that cannot lead out of the target (the default)
+    Contained,
+    /// Restore no links
+    Skip,
+    /// Restore every link exactly as recorded, including absolute and escaping ones
+    AsRecorded,
 }
 
 #[derive(Debug, Args)]
@@ -246,6 +277,71 @@ mod tests {
         ] {
             assert!(parse(args).is_err(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn restore_defaults_to_the_safest_choices() {
+        let id = "a".repeat(64);
+        let id = id.as_str();
+        let cli = parse(&["restore", id, "--target", "out"]).expect("valid arguments");
+        let Command::Restore(args) = cli.command else {
+            panic!("expected restore");
+        };
+        assert_eq!(args.on_conflict, ConflictArg::Fail);
+        assert_eq!(args.symlinks, SymlinkArg::Contained);
+        assert!(args.includes.is_empty());
+    }
+
+    #[test]
+    fn restore_takes_its_policies_and_paths() {
+        let id = "a".repeat(64);
+        let id = id.as_str();
+        let cli = parse(&[
+            "restore",
+            id,
+            "--target",
+            "out",
+            "--include",
+            "/home/me/a",
+            "--include",
+            "/home/me/b",
+            "--on-conflict",
+            "overwrite",
+            "--symlinks",
+            "as-recorded",
+        ])
+        .expect("valid arguments");
+        let Command::Restore(args) = cli.command else {
+            panic!("expected restore");
+        };
+        assert_eq!(args.on_conflict, ConflictArg::Overwrite);
+        assert_eq!(args.symlinks, SymlinkArg::AsRecorded);
+        assert_eq!(args.includes, [PathBuf::from("/home/me/a"), PathBuf::from("/home/me/b")]);
+        let skipping = ["restore", id, "--target", "out", "--on-conflict", "skip"];
+        let mut skipping = skipping.to_vec();
+        skipping.extend(["--symlinks", "skip"]);
+        let cli = parse(&skipping).expect("valid arguments");
+        let Command::Restore(args) = cli.command else {
+            panic!("expected restore");
+        };
+        assert_eq!((args.on_conflict, args.symlinks), (ConflictArg::Skip, SymlinkArg::Skip));
+    }
+
+    #[test]
+    fn restore_rejects_unknown_policies_and_a_missing_target() {
+        let id = "a".repeat(64);
+        let id = id.as_str();
+        for extra in [
+            ["--on-conflict", "merge"],
+            ["--on-conflict", ""],
+            ["--symlinks", "follow"],
+            ["--symlinks", "Contained"],
+        ] {
+            let mut args = vec!["restore", id, "--target", "out"];
+            args.extend(extra);
+            assert!(parse(&args).is_err(), "{extra:?}");
+        }
+        assert!(parse(&["restore", id]).is_err(), "--target is required");
     }
 
     #[test]

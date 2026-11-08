@@ -211,6 +211,18 @@ impl SnapshotStore {
     }
 }
 
+#[cfg(test)]
+impl SnapshotStore {
+    /// Seals and publishes `manifest` exactly as [`SnapshotStore::commit`] does, but without
+    /// validating it or checking that its chunks exist, so that tests can plant authentic
+    /// snapshots that a correct writer would never produce.
+    pub(crate) fn commit_unchecked(&self, manifest: &Manifest) -> Result<()> {
+        let body = codec::encode(manifest)?;
+        let file = object::seal(&self.key, &manifest.id, &body)?;
+        self.store.write_new(&manifest.id.object_name(), &file)
+    }
+}
+
 impl fmt::Debug for SnapshotStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SnapshotStore")

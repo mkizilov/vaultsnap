@@ -43,7 +43,7 @@ fn malformed_snapshot_id_is_a_usage_error() {
     let env = TestEnv::default();
     let output = env.run(&["restore", "latest", "--target", "out"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(stderr(&output).contains("invalid snapshot id"));
+    assert!(stderr(&output).contains("invalid snapshot reference"), "{}", stderr(&output));
 }
 
 #[test]
@@ -57,9 +57,7 @@ fn prune_without_keep_rules_is_rejected() {
 #[test]
 fn unfinished_commands_report_not_implemented_without_touching_the_repository() {
     let env = TestEnv::default();
-    let id = "a".repeat(64);
-    let restore = ["restore", id.as_str(), "--target", "out"];
-    let invocations: [&[&str]; 3] = [&restore, &["check"], &["prune", "--keep-last", "1"]];
+    let invocations: [&[&str]; 2] = [&["check"], &["prune", "--keep-last", "1"]];
     for args in invocations {
         let output = env.run(args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");

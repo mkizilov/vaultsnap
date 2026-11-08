@@ -10,4 +10,3 @@ mod unlock;
 
 pub use check::{CheckOptions, CheckReport};
 pub use prune::{PruneOptions, PruneReport};
-pub use restore::RestoreOptions;

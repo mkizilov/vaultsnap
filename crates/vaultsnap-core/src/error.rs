@@ -217,6 +217,49 @@ pub enum Error {
         /// The first missing chunk id.
         first: String,
     },
+    /// A path in a snapshot is not safe to create on the file system. Entries are named by index,
+    /// never by name.
+    #[error("the snapshot contains an unsafe path ({location}): {reason}; nothing was restored")]
+    UnsafePath {
+        /// Where in the snapshot, for example `root 0, entry 5`.
+        location: String,
+        /// What is wrong with it.
+        reason: &'static str,
+    },
+    /// A path selected for restoring is not in the snapshot.
+    #[error("the snapshot has no entry at or below {}; nothing was restored", .path.display())]
+    IncludeNotFound {
+        /// The path as given.
+        path: PathBuf,
+    },
+    /// The directory to restore into cannot be used.
+    #[error("invalid restore target: {0}")]
+    InvalidTarget(String),
+    /// Something already exists where a restore would put an entry, or two entries of the
+    /// snapshot would be put in the same place.
+    #[error(
+        "{count} path(s) already exist in the restore target or clash with each other (first: \
+         {}); nothing was restored",
+        .first.display()
+    )]
+    RestoreConflict {
+        /// How many entries are affected.
+        count: usize,
+        /// The first affected path.
+        first: PathBuf,
+    },
+    /// A restore was cancelled.
+    #[error(
+        "cancelled: the restore was stopped; the files restored so far are complete and \
+         nothing half-written was left behind"
+    )]
+    RestoreCancelled,
+    /// A directory is where a restore would put a file; directories are never replaced.
+    #[error("{} is a directory, which a restore never replaces", .path.display())]
+    DirectoryInTheWay {
+        /// The directory.
+        path: PathBuf,
+    },
     /// The operation was cancelled; nothing was committed.
     #[error("cancelled: no snapshot was created (chunks already stored are kept and will be reused)")]
     Cancelled,

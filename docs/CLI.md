@@ -12,9 +12,9 @@ vaultsnap [--repo PATH] [--password-file FILE] [-v...] <COMMAND>
 | [`show`](#show) | Everything about one snapshot | implemented |
 | [`ls`](#ls) | List the files in a snapshot | implemented |
 | [`diff`](#diff) | Compare two snapshots | implemented |
-| [`restore`](#restore-check-and-prune) | Restore a snapshot into a directory | not implemented |
-| [`check`](#restore-check-and-prune) | Verify repository integrity | not implemented |
-| [`prune`](#restore-check-and-prune) | Remove snapshots outside a retention policy | not implemented |
+| [`restore`](#restore) | Restore a snapshot, or selected paths, into a directory | implemented |
+| [`check`](#check-and-prune) | Verify repository integrity | not implemented |
+| [`prune`](#check-and-prune) | Remove snapshots outside a retention policy | not implemented |
 
 ## Global options
 
@@ -27,8 +27,8 @@ vaultsnap [--repo PATH] [--password-file FILE] [-v...] <COMMAND>
 
 Options may come before or after the command name.
 
-`backup`, `snapshots`, `show`, `ls`, and `diff` unlock the repository first, so a wrong
-passphrase fails before anything is read or printed. Without `--password-file` and without a
+`backup`, `snapshots`, `show`, `ls`, `diff`, and `restore` unlock the repository first, so a
+wrong passphrase fails before anything is read, printed, or written. Without `--password-file` and without a
 terminal, they fail with *no terminal available to ask for a passphrase*.
 
 ## Exit status
@@ -36,10 +36,10 @@ terminal, they fail with *no terminal available to ask for a passphrase*.
 | Status | Meaning |
 |--------|---------|
 | 0 | Success. For `diff`, success does **not** mean "no differences": differences are normal output. |
-| 1 | The command failed. Nothing was changed (these commands only read the repository; `backup` creates no snapshot). |
+| 1 | The command failed. The repository was not changed. `backup` created no snapshot; `restore` normally restored nothing (see [`restore`](#restore) for the one exception). |
 | 2 | Usage error: unknown option, missing argument, or a malformed snapshot reference. Nothing ran. |
-| 3 | The command finished, but its result has a problem. `backup`: the snapshot was created but some paths could not be read. `snapshots`: some snapshots are damaged and are not shown. |
-| 130 | `backup` was cancelled with Ctrl-C or SIGTERM. |
+| 3 | The command finished, but its result has a problem. `backup`: the snapshot was created but some paths could not be read. `snapshots`: some snapshots are damaged and are not shown. `restore`: everything that could be restored was, but some paths could not be (a damaged or missing chunk, a refused write). |
+| 130 | `backup` or `restore` was cancelled with Ctrl-C or SIGTERM. |
 
 Standard output carries the result; warnings and errors go to standard error. If the reader of
 standard output goes away (`vaultsnap ls … | head`), the output simply ends.
@@ -57,8 +57,7 @@ vaultsnap --repo ~/backups show 3f2a91c4         # the unique snapshot starting 
 A malformed reference (fewer than 4 characters, upper case, anything but `0-9a-f`) is a usage
 error (status 2). A reference that matches nothing fails with *snapshot … does not exist*; one
 that matches several fails with *matches N snapshots; use more characters of the id* (status 1).
-There is no `latest`: list the snapshots and pick one. `restore` still takes a full 64-character
-id.
+There is no `latest`: list the snapshots and pick one. `restore` takes the same references.
 
 ## Snapshot data is verified before it is shown
 
@@ -307,22 +306,130 @@ data the newer snapshot added and how much only the older one holds.
 
 ---
 
-## restore, check, and prune
+## restore
+
+```sh
+# Everything in a snapshot, into a new directory
+vaultsnap --repo ~/backups restore 3f2a91c4 --target /mnt/restore
+
+# Only some files or directories (paths as `ls` prints them)
+vaultsnap --repo ~/backups restore 3f2a91c4 --target /mnt/restore \
+    --include /home/me/Documents/taxes --include /home/me/notes.txt
+
+# Into a directory that already holds files: keep them, or replace them
+vaultsnap --repo ~/backups restore 3f2a91c4 --target ~/Documents --on-conflict skip
+vaultsnap --repo ~/backups restore 3f2a91c4 --target ~/Documents --on-conflict overwrite
+
+# Restore symbolic links exactly as recorded (snapshots you trust)
+vaultsnap --repo ~/backups restore 3f2a91c4 --target /mnt/restore --symlinks as-recorded
+```
+
+Restores a snapshot, or selected paths of it, below the directory given with `--target`. The
+command is built to be safe to point at a snapshot you do not fully trust: it authenticates every
+chunk before using it, never writes outside the target, never follows a link, and writes every
+file through a temporary name and a rename. The full specification is in
+[`RESTORE.md`](RESTORE.md).
+
+| Option | Meaning |
+|--------|---------|
+| `SNAPSHOT` | Snapshot id, or the start of one (4 or more characters). |
+| `--target DIR` | Directory to restore into (required). Created, with its parents, if missing. Never inside the repository. |
+| `--include PATH` | Restore this path and everything below it (repeatable). Default: everything. The directories above it are created too. A path that is not in the snapshot is an error. |
+| `--on-conflict MODE` | `fail` (default), `skip`, or `overwrite`: see below. |
+| `--symlinks POLICY` | `contained` (default), `skip`, or `as-recorded`: see below. |
+
+**Where files go.** Below the target, under the absolute path they had when they were backed up:
+`/home/me/Documents/a.txt`, restored with `--target /mnt/restore`, becomes
+`/mnt/restore/home/me/Documents/a.txt`. Several sources never collide, and `--include` takes the
+paths that `vaultsnap ls` prints. There is no option yet to drop the leading path: to get the files
+directly into a directory, restore into a scratch directory and move them.
+
+**What is restored.** File content, byte for byte; permissions (without set-user-id and
+set-group-id); modification and access times; directories with their permissions and times
+(applied last, so a read-only directory can still be filled); symbolic links under the policy
+below; hard links as hard links. Not restored: owners, special files (FIFOs, sockets, devices),
+extended attributes, ACLs.
+
+### Conflicts: `--on-conflict`
+
+| Mode | When something already exists where an entry would go |
+|------|------------------------------------------------------|
+| `fail` | Checks everything first and, if anything would be replaced, restores **nothing** and exits with status 1, naming the number of conflicts and the first one. This is the default. |
+| `skip` | Leaves what exists, restores the rest, and lists what was skipped. |
+| `overwrite` | Replaces files and links, atomically. A directory is **never** replaced: a file that meets a directory is reported as failed. |
+
+Directories that meet directories are merged in every mode; nothing in the target is ever
+deleted. After an interrupted restore, run it again with `skip` (fills the gaps) or `overwrite`
+(also resets directory permissions and times).
+
+### Symbolic links: `--symlinks`
+
+| Policy | Behavior |
+|--------|----------|
+| `contained` | Restores a link only if its target is relative and can never lead out of the restore root (`..` only at the start, and not above the root). Others, such as `/etc/passwd` or `../../../x`, are skipped and listed. This is the default. |
+| `skip` | Restores no links. |
+| `as-recorded` | Restores every link exactly as recorded, including absolute and escaping ones. |
+
+The restore itself never follows a link, whatever the policy; the policy decides which links are
+left lying around for other programs to follow.
+
+### Output
+
+The summary goes to standard output. (The numbers below are illustrative; the layout is what the
+command prints.)
+
+```
+restored snapshot <64-character id> into /mnt/restore
+  files         6 (200.0 KiB written)
+  directories   9
+  links         1 symbolic, 0 hard
+  skipped       1 (left out on purpose)
+  duration      0.1s
+```
+
+The lines `skipped`, `failed`, and `attributes` appear only when they are not zero. Problems are
+listed on standard error, with the path first (escaped, since it comes from the snapshot) and the
+reason after it:
+
+```
+1 could not be restored:
+  /mnt/restore/home/me/big.bin: object 9c1e…7a is corrupt: …
+1 skipped:
+  /mnt/restore/home/me/escape.link: its target leads, or could lead, out of the restore root; restoring it needs --symlinks as-recorded
+```
+
+A terminal also shows a progress line (`64.0 KiB of 200.0 KiB written, 4 entries`) that is erased
+when the restore ends; it is never printed when standard error is not a terminal.
+
+### Exit status
+
+| Status | Meaning |
+|--------|---------|
+| 0 | Everything that should be restored was. Skipped paths do not count against this. |
+| 1 | The restore stopped: the snapshot is missing, damaged, or unsafe; the target is unusable; an `--include` matches nothing; a conflict in `fail` mode. All of these are found before the first write, so nothing was restored, with one exception: a conflict that only appears while writing (something created in the target by someone else in the meantime, or a case-insensitive file system) stops the restore there, with the files before it restored. |
+| 2 | Usage error (unknown mode or policy, missing `--target`, malformed snapshot reference). |
+| 3 | The restore finished, but some paths could not be restored (a missing or damaged chunk, a refused write, a directory in the way in `overwrite` mode). Everything else was restored, and no partial files remain. They are listed on standard error. |
+| 130 | Cancelled with Ctrl-C or SIGTERM. Files already restored are complete; nothing half-written remains. |
+
+Because chunks are authenticated before use, a damaged repository shows up here as status 3 with
+the affected paths listed, never as silently wrong files.
+
+---
+
+## check and prune
 
 These commands exist on the command line and validate their arguments, but do nothing yet: they
 fail with status 1 and *… is not implemented yet*.
 
 ```sh
-vaultsnap --repo ~/backups restore <64-character-snapshot-id> --target /path/to/restore
-vaultsnap --repo ~/backups restore <id> --target /path/to/restore --include /home/me/notes.txt
 vaultsnap --repo ~/backups check
 vaultsnap --repo ~/backups check --read-data
 vaultsnap --repo ~/backups prune --keep-last 7 --keep-monthly 12 --dry-run
 ```
 
-`restore` takes a full id and `--target DIR`, and optionally `--include PATH` (repeatable). `check`
-takes `--read-data` to authenticate all stored data. `prune` takes `--keep-last`, `--keep-daily`,
-`--keep-weekly`, `--keep-monthly`, `--keep-yearly` (at least one is required) and `--dry-run`.
+`check` takes `--read-data` to authenticate all stored data. `prune` takes `--keep-last`,
+`--keep-daily`, `--keep-weekly`, `--keep-monthly`, `--keep-yearly` (at least one is required) and
+`--dry-run`.
 
 ---
 

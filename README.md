@@ -14,15 +14,14 @@ A reliable encrypted incremental backup utility written in Rust.
 | `show`      | Implemented: everything about one snapshot, text or JSON               |
 | `ls`        | Implemented: the files of a snapshot, text or JSON                     |
 | `diff`      | Implemented: added, deleted, and modified files between two snapshots   |
-| `restore`   | Not implemented                                                        |
+| `restore`   | Implemented: safe restore of a snapshot or selected paths (see below)  |
 | `check`     | Not implemented                                                        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
 Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
-filesystem scanner, encrypted snapshot manifests, the `backup` command that connects them, and the
-commands that inspect snapshot history are in place. **There is no `restore` yet**, so a backup
-cannot be read back by the tool, and none of this code has been compiled or run (see "Known
-gaps"). Do not rely on it for real data.
+filesystem scanner, encrypted snapshot manifests, the `backup` command that connects them, the
+commands that inspect snapshot history, and `restore` are in place. **None of this code has been
+compiled or run** (see "Known gaps"). Do not rely on it for real data.
 
 ### Chunking
 
@@ -177,12 +176,39 @@ vaultsnap --repo REPO diff 3f2a91c4 b7e01d52 --json | jq .summary
 The full command reference with example output and the JSON schema is in
 [`docs/CLI.md`](docs/CLI.md).
 
+### Restoring: `restore`
+
+```sh
+vaultsnap --repo REPO restore 3f2a91c4 --target /mnt/restore
+vaultsnap --repo REPO restore 3f2a91c4 --target /mnt/restore --include /home/me/Documents/taxes
+vaultsnap --repo REPO restore 3f2a91c4 --target ~/Documents --on-conflict skip     # or overwrite
+vaultsnap --repo REPO restore 3f2a91c4 --target /mnt/restore --symlinks as-recorded
+```
+
+- **Authenticated.** The snapshot and every chunk are authenticated and decrypted before use; a
+  damaged chunk fails its file only, which is then absent, never wrong or half-written.
+- **Contained.** Files go to their original absolute path *below* `--target`. Every path component
+  is checked, nothing is written outside the target, and no symbolic link in the target is ever
+  followed. A target inside the repository is refused.
+- **Atomic files.** Each file is written to a private temporary file and renamed into place.
+- **Conflicts are explicit.** The default `fail` restores nothing if anything would be replaced;
+  `skip` and `overwrite` are opt-in, and a directory is never replaced or deleted.
+- **Links under a policy.** By default only symbolic links that cannot lead out of the restore
+  root are restored.
+- Permissions and times are restored (without set-user-id/set-group-id); owners and special files
+  are not.
+
+Specification and limits: [`docs/RESTORE.md`](docs/RESTORE.md); options and exit statuses:
+[`docs/CLI.md`](docs/CLI.md#restore).
+
 The design is specified before the code that implements it:
 
 - [`docs/FORMAT.md`](docs/FORMAT.md): repository layout, identifiers, key files and encryption,
   chunking, crash safety.
 - [`docs/BACKUP.md`](docs/BACKUP.md): the backup pipeline, change detection, failure and
   cancellation behavior.
+- [`docs/RESTORE.md`](docs/RESTORE.md): what a restore does and guarantees: paths, conflicts,
+  links, atomicity, interruption.
 - [`docs/CLI.md`](docs/CLI.md): every command with examples, exit statuses, size definitions,
   and the JSON output.
 - [`docs/SECURITY.md`](docs/SECURITY.md): threat model, secrets handling, restore safety.
@@ -239,7 +265,8 @@ vaultsnap --repo /path/to/repo snapshots
 vaultsnap --repo /path/to/repo show <snapshot-id-or-start>
 vaultsnap --repo /path/to/repo ls <snapshot-id-or-start> [/path/inside]
 vaultsnap --repo /path/to/repo diff <older> <newer> --json
-vaultsnap --repo /path/to/repo restore <snapshot-id> --target /path/to/restore
+vaultsnap --repo /path/to/repo restore <snapshot-id-or-start> --target /path/to/restore \
+    [--include /path/inside]... [--on-conflict fail|skip|overwrite] [--symlinks contained|skip|as-recorded]
 vaultsnap --repo /path/to/repo check --read-data
 vaultsnap --repo /path/to/repo prune --keep-last 7 --keep-monthly 12 --dry-run
 ```
@@ -280,6 +307,13 @@ Tests:
   `crates/vaultsnap-core/tests/history.rs`; the exact text and JSON of every inspection command
   for fixed data, and the escaping of hostile names, are unit tests in
   `crates/vaultsnap-cli/src/inspect/tests.rs`.
+- Restore tests: the planner (path rules, selection, the link policy), the file system layer
+  (links never followed, atomic publication, attributes), and the engine with hand-built hostile
+  manifests, planted links, damaged chunks, and cancellation are unit tests under
+  `crates/vaultsnap-core/src/restore/`; restores of real backups compared byte for byte (and by
+  permissions and times) with the originals, selected paths, conflicts, damaged and tampered data,
+  and interrupted restores are in `crates/vaultsnap-core/tests/restore.rs` and
+  `crates/vaultsnap-cli/tests/restore.rs`.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -313,8 +347,14 @@ is compiled by `clippy --all-targets` but not run).
 - Tests that create files with newlines, escape characters, or non-UTF-8 names depend on the
   file system accepting them (macOS refuses non-UTF-8 names); the non-UTF-8 case is skipped
   there and counts as unverified on such systems.
-- There is no `restore`, so the proof that a snapshot is complete is the test that rebuilds files
-  from the chunk lists in the repository; nothing restores to disk yet.
+- `restore` is unverified like everything else. Specifically unexercised: its behavior on file
+  systems that are case-insensitive, lack hard links, or cannot represent a recorded time; on
+  Windows (not built); and under a racing attacker, which it does not defend against (it is
+  `unsafe`-free and cannot use `openat`; see `docs/RESTORE.md`). The tests that need Unix
+  permissions or links are skipped on other platforms. There is no `fsync` on restored files, no
+  restoration of owners, and no way yet to strip the leading source path.
+- `restore` has no CLI test for Ctrl-C/SIGTERM either; cancellation is tested in the library
+  through the cancel token only.
 - Several lines are longer than rustfmt's limit because nothing could be formatted; the first
   toolchain run needs `cargo fmt --all`, and `clippy` may report lints that were not seen.
 - Scanner behavior on real mount points, on Windows, and on network filesystems is unverified;

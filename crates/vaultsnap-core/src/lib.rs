@@ -7,8 +7,9 @@
 //! ([`chunking`]), an encrypted, deduplicating chunk store ([`chunk_store`]), a filesystem scanner
 //! ([`scan`]), encrypted, atomically committed snapshot manifests ([`snapshot`]), and the
 //! incremental backup that ties them together ([`backup`], [`Repository::backup`]), and the
-//! inspection of snapshot history: listing, details, file listings, and comparison ([`history`]).
-//! Restore, check, and prune validate their arguments and then return [`Error::NotImplemented`].
+//! inspection of snapshot history: listing, details, file listings, and comparison ([`history`]),
+//! and the safe restore of snapshots into a directory ([`restore`], [`Repository::restore`]).
+//! Check and prune validate their arguments and then return [`Error::NotImplemented`].
 
 pub mod backup;
 mod blocking;
@@ -23,6 +24,7 @@ mod kv;
 pub mod lock;
 pub mod ops;
 pub mod repository;
+pub mod restore;
 pub mod retention;
 pub mod scan;
 pub mod secret;
@@ -43,8 +45,12 @@ pub use error::{Error, Result};
 pub use history::{Diff, SnapshotDetails, SnapshotList, SnapshotSizes};
 pub use keys::RepositoryKeys;
 pub use lock::{LockKind, RepositoryLock};
-pub use ops::{CheckOptions, CheckReport, PruneOptions, PruneReport, RestoreOptions};
+pub use ops::{CheckOptions, CheckReport, PruneOptions, PruneReport};
 pub use repository::{Repository, RepositoryLayout};
+pub use restore::{
+    ConflictPolicy, RestoreEvent, RestoreObserver, RestoreOptions, RestoreProblem, RestoreReport,
+    RestoreSymlinks,
+};
 pub use retention::RetentionPolicy;
 pub use scan::{ScanOptions, Scanner};
 pub use secret::Passphrase;

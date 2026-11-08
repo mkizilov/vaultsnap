@@ -3,11 +3,11 @@
 Status: **partly implemented**. `init`, the `config` file, the local store, locking, and key
 management (master key, key files, derived keys, authenticated encryption) exist and are marked
 *built*, as are chunking, the encrypted, deduplicated chunk store, the filesystem scanner, and
-encrypted snapshot manifests. Packs and indexes are still *planned*. `backup` and the commands
-that inspect snapshots (`snapshots`, `show`, `ls`, `diff`) are built on top of these; `restore`,
-`check`, and `prune` return "not implemented". Code that lands later must follow this document,
-and changes to the format must
-update it first and bump `FORMAT_VERSION` (`crates/vaultsnap-core/src/repository.rs`).
+encrypted snapshot manifests. Packs and indexes are still *planned*. `backup`, the commands
+that inspect snapshots (`snapshots`, `show`, `ls`, `diff`), and `restore` are built on top of
+these; `check` and `prune` return "not implemented". Code that lands later must follow this
+document, and changes to the format must update it first and bump `FORMAT_VERSION`
+(`crates/vaultsnap-core/src/repository.rs`).
 
 Repositories created by pre-release builds before key management existed have no `keys/`
 directory or key file; they are not usable and must be re-created (nothing of value could have
@@ -513,12 +513,19 @@ which blocks `prune` until it is removed by hand (stale locks are never removed 
 
 ## Command semantics
 
+Restore reads only what this document already defines: the snapshot's manifest, and the chunk
+objects its files name. It adds no on-disk structure. How the manifest becomes files (where they
+go, what is trusted, conflicts, links) is specified in [`RESTORE.md`](RESTORE.md); the manifest
+fields it uses are the entry tree (parent, name, kind), the chunk lists and sizes of files, the
+attributes (`mode`, `modified`, `accessed`), the targets of symbolic links, and the hard link
+targets. Fields it does not use yet: owners, the creation, change, and device/inode values.
+
 | Command     | Reads              | Writes                                   |
 |-------------|--------------------|------------------------------------------|
 | `init`      | nothing            | `config`, one `keys/` slot, empty dirs   |
 | `backup`    | snapshots (parent) | chunks (new ones only), then one snapshot |
 | `snapshots`, `show`, `ls`, `diff` | snapshots, chunk object sizes | nothing              |
-| `restore`   | snapshot, packs    | files under the target directory only    |
+| `restore`   | snapshot, chunks   | files under the target directory only    |
 | `check`     | everything*        | nothing                                  |
 | `prune`     | snapshots, index   | removes snapshots, rewrites packs/index  |
 

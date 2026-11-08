@@ -1,11 +1,10 @@
 //! The `backup` command: unlocks the repository, runs the backup with a progress line and
 //! interrupt handling, and prints what was done.
 
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 use vaultsnap_core::{
     BackupEvent, BackupObserver, BackupOptions, BackupReport, CancelToken, ParentPolicy,
@@ -15,10 +14,8 @@ use vaultsnap_core::{
 use crate::cli::BackupArgs;
 use crate::commands::CliError;
 use crate::format::human_size;
-use crate::passphrase;
-
-/// The progress line is redrawn at most this often.
-const DRAW_INTERVAL_MS: u64 = 200;
+use crate::progress::{self, Ticker};
+use crate::{interrupt, passphrase};
 
 pub async fn run(
     repo: &Repository,
@@ -28,7 +25,10 @@ pub async fn run(
     let keys = passphrase::unlock(repo, password_file).await?;
 
     let cancel = CancelToken::new();
-    cancel_on_interrupt(cancel.clone());
+    interrupt::cancel_on_interrupt(
+        cancel.clone(),
+        "interrupted: stopping; no snapshot will be created",
+    );
 
     let progress = std::io::stderr()
         .is_terminal()
@@ -65,44 +65,6 @@ pub async fn run(
         0 => Ok(()),
         failed => Err(CliError::BackupIncomplete { failed }),
     }
-}
-
-/// Asks the running backup to stop on Ctrl-C or SIGTERM. Nothing is committed in that case, and
-/// the repository stays valid; a second signal changes nothing, so the backup always ends cleanly
-/// (use SIGKILL to force it, which can leave a stale lock file behind).
-fn cancel_on_interrupt(cancel: CancelToken) {
-    tokio::spawn(async move {
-        wait_for_interrupt().await;
-        eprintln!("\ninterrupted: stopping; no snapshot will be created");
-        cancel.cancel();
-    });
-}
-
-/// Completes when Ctrl-C is pressed, and never if the signal cannot be observed.
-async fn ctrl_c() {
-    if tokio::signal::ctrl_c().await.is_err() {
-        std::future::pending::<()>().await;
-    }
-}
-
-#[cfg(unix)]
-async fn wait_for_interrupt() {
-    use tokio::signal::unix::{signal, SignalKind};
-
-    match signal(SignalKind::terminate()) {
-        Ok(mut terminate) => {
-            tokio::select! {
-                () = ctrl_c() => {}
-                _ = terminate.recv() => {}
-            }
-        }
-        Err(_) => ctrl_c().await,
-    }
-}
-
-#[cfg(not(unix))]
-async fn wait_for_interrupt() {
-    ctrl_c().await;
 }
 
 fn print_report(report: &BackupReport) {
@@ -174,8 +136,7 @@ fn warn_about_skipped(report: &BackupReport) -> usize {
 /// A one-line status on the terminal, redrawn while the backup runs. Events arrive from several
 /// threads, so everything is atomic and drawing is rate limited.
 struct Progress {
-    started: Instant,
-    last_draw_ms: AtomicU64,
+    ticker: Ticker,
     files: AtomicU64,
     unchanged: AtomicU64,
     bytes: AtomicU64,
@@ -184,8 +145,7 @@ struct Progress {
 impl Progress {
     fn new() -> Self {
         Self {
-            started: Instant::now(),
-            last_draw_ms: AtomicU64::new(0),
+            ticker: Ticker::new(),
             files: AtomicU64::new(0),
             unchanged: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
@@ -193,32 +153,18 @@ impl Progress {
     }
 
     fn draw(&self) {
-        let now = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let last = self.last_draw_ms.load(Ordering::Relaxed);
-        if now.saturating_sub(last) < DRAW_INTERVAL_MS
-            || self
-                .last_draw_ms
-                .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
-                .is_err()
-        {
-            return;
+        if self.ticker.due() {
+            progress::draw(&format!(
+                "{} files, {} unchanged, {} read",
+                self.files.load(Ordering::Relaxed),
+                self.unchanged.load(Ordering::Relaxed),
+                human_size(self.bytes.load(Ordering::Relaxed))
+            ));
         }
-        let mut stderr = std::io::stderr().lock();
-        // A terminal that went away must not fail the backup, so write errors are ignored.
-        write!(
-            stderr,
-            "\r\x1b[K{} files, {} unchanged, {} read",
-            self.files.load(Ordering::Relaxed),
-            self.unchanged.load(Ordering::Relaxed),
-            human_size(self.bytes.load(Ordering::Relaxed))
-        )
-        .and_then(|()| stderr.flush())
-        .ok();
     }
 
     fn clear(&self) {
-        let mut stderr = std::io::stderr().lock();
-        write!(stderr, "\r\x1b[K").and_then(|()| stderr.flush()).ok();
+        progress::clear();
     }
 }
 

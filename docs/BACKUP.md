@@ -150,8 +150,9 @@ not been run (see the README, "Known gaps").
 
 ## Limitations
 
-- No `restore`, `check`, or `prune` yet. The snapshots a backup creates can be listed, shown, and
-  compared with `snapshots`, `show`, `ls`, and `diff` ([`CLI.md`](CLI.md)).
+- No `check` or `prune` yet. The snapshots a backup creates can be listed, shown, and compared
+  with `snapshots`, `show`, `ls`, and `diff`, and restored with `restore` ([`CLI.md`](CLI.md),
+  [`RESTORE.md`](RESTORE.md)).
 - The command line exposes no scan policy: symbolic links are never followed, and there is no
   `--one-file-system` or `--include`. The library supports them (`BackupOptions::scan`).
 - The two-second margin is fixed on the command line.

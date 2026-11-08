@@ -1,9 +1,9 @@
 //! Maps parsed arguments onto `vaultsnap-core` operations and prints results.
 
-use vaultsnap_core::{CheckOptions, PruneOptions, Repository, RestoreOptions, RetentionPolicy};
+use vaultsnap_core::{CheckOptions, Error, PruneOptions, Repository, RetentionPolicy};
 
 use crate::cli::{Cli, Command};
-use crate::{backup, inspect, passphrase};
+use crate::{backup, inspect, passphrase, restore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -37,6 +37,11 @@ pub enum CliError {
          modified (listed above)"
     )]
     DamagedSnapshots { count: usize },
+    #[error(
+        "the restore is incomplete: {failed} path(s) could not be restored (listed above); \
+         nothing half-written was left behind"
+    )]
+    RestoreIncomplete { failed: usize },
     #[error("snapshot {snapshot} has no entry at or below {}", .path.display())]
     PathNotInSnapshot {
         snapshot: String,
@@ -50,13 +55,15 @@ pub enum CliError {
 
 impl CliError {
     /// 1 for failures, 3 when the command finished but with a problem in its result (a snapshot
-    /// that is missing some paths, or snapshots that could not be verified), and 130 (the shell
-    /// convention for SIGINT) when a backup was cancelled. Usage errors exit with 2 before any
-    /// command runs.
+    /// that is missing some paths, snapshots that could not be verified, or paths that could not
+    /// be restored), and 130 (the shell convention for SIGINT) when a backup or restore was
+    /// cancelled. Usage errors exit with 2 before any command runs.
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::BackupIncomplete { .. } | Self::DamagedSnapshots { .. } => 3,
-            Self::Core(vaultsnap_core::Error::Cancelled) => 130,
+            Self::BackupIncomplete { .. }
+            | Self::DamagedSnapshots { .. }
+            | Self::RestoreIncomplete { .. } => 3,
+            Self::Core(Error::Cancelled | Error::RestoreCancelled) => 130,
             _ => 1,
         }
     }
@@ -93,12 +100,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
             inspect::diff(&repo, cli.password_file.as_deref(), args).await?;
         }
         Command::Restore(args) => {
-            let options = RestoreOptions {
-                snapshot: args.snapshot,
-                target: args.target,
-                includes: args.includes,
-            };
-            repo.restore(&options).await?;
+            restore::run(&repo, cli.password_file.as_deref(), args).await?;
         }
         Command::Check(args) => {
             let options = CheckOptions {
@@ -140,6 +142,13 @@ mod tests {
         assert_eq!(CliError::Core(vaultsnap_core::Error::WrongPassphrase).exit_code(), 1);
         assert_eq!(CliError::BackupIncomplete { failed: 2 }.exit_code(), 3);
         assert_eq!(CliError::DamagedSnapshots { count: 1 }.exit_code(), 3);
+        assert_eq!(CliError::RestoreIncomplete { failed: 4 }.exit_code(), 3);
+        assert_eq!(CliError::Core(vaultsnap_core::Error::RestoreCancelled).exit_code(), 130);
+        let conflict = vaultsnap_core::Error::RestoreConflict {
+            count: 1,
+            first: std::path::PathBuf::from("x"),
+        };
+        assert_eq!(CliError::Core(conflict).exit_code(), 1);
         assert_eq!(CliError::Output(std::io::Error::other("disk full")).exit_code(), 1);
         assert_eq!(CliError::Core(vaultsnap_core::Error::Cancelled).exit_code(), 130);
     }

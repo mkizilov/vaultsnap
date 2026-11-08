@@ -71,9 +71,14 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   stored / unique stored, `entries` = full logical paths and the path filter, `diff` = the
   comparison; the `Repository::snapshots`, `snapshot`, `snapshot_details`, and
   `compare_snapshots` operations in `ops/snapshots.rs` wrap them under a shared lock; its
-  definitions are in `docs/CLI.md`). No CLI or terminal concerns
-  here. All repository file
-  access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
+  definitions are in `docs/CLI.md`), `restore` (`RestoreOptions`, `ConflictPolicy`,
+  `RestoreSymlinks`, `RestoreReport`; `plan` = which entries go where, every path component
+  checked; `dest` = the file system operations: nothing followed, exclusive creation, temporary
+  file plus rename, attributes through open handles; `engine` = the pipeline; the
+  `Repository::restore` entry point is `ops/restore.rs`; the specification is `docs/RESTORE.md`).
+  No CLI or terminal concerns here. All repository file access goes through `LocalStore`; do not
+  use `std::fs` directly on repository paths elsewhere. (The restore writes to the *target*, not
+  the repository, and uses `std::fs` in `restore/dest.rs` for that on purpose.)
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
   through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
   print `<redacted>`; never format a secret into a log, error, or `Debug` output; any change to
@@ -96,10 +101,22 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   contract documented in `docs/CLI.md` and pinned by golden tests in
   `crates/vaultsnap-cli/src/inspect/tests.rs`: change them only by adding fields at the end of an
   object, and update the docs and the golden tests in the same change.
+- Restore invariants (do not break them without updating `docs/RESTORE.md`, `docs/SECURITY.md`,
+  and the tests): a snapshot is untrusted even when authentic, so every destination is the
+  restore root plus components that `plan::safe_component` accepted, never a joined string; no
+  link is followed anywhere below the root (probe with `symlink_metadata`, create with `O_EXCL` +
+  `O_NOFOLLOW`, replace only by rename, set attributes through open handles); a regular file is
+  written to a temporary file and published by one rename (or a no-clobber hard link), so it is
+  complete and exact or absent; a chunk's bytes are used only after `ChunkStore::get` succeeded
+  and the length matches the manifest; the default conflict mode is `fail` and is decided before
+  the first write; a directory is never removed or replaced; set-user-id/set-group-id are never
+  restored; the default link policy is `contained`; paths printed by the CLI go through
+  `format::escape`/`escape_path`. Directories are finished (attributes) last, also on
+  cancellation.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
-  manifests, `backup`, and the inspection commands `snapshots`, `show`, `ls`, `diff`. `restore`,
-  `check`, `prune` are stubs; nothing restores.
+  manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, and `restore`.
+  `check` and `prune` are stubs.
 - Tests that need privileges or special files must detect their absence at run time and say so
   (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
   any test that changes permissions must restore them with a guard so temporary directories can
@@ -115,12 +132,15 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   core mapping and printing; `CliError::exit_code`: 1 failure, 3 problem in the result (incomplete
   backup, damaged snapshots), 130 cancelled, clap's 2 for usage), `backup` (the `backup` command:
   unlock, progress line on a terminal only, SIGINT/SIGTERM to a `CancelToken`, summary),
+  `restore` (the `restore` command: policies, progress, report, problems listed on stderr,
+  exit 3 when some paths failed), `interrupt` and `progress` (shared by `backup` and `restore`),
   `inspect` (`snapshots`/`show`/`ls`/`diff`: `human` = text, `json` = one JSON document built
   from explicit `serde` structs, `tests` = golden output), `format` (sizes, UTC times, `escape`
   for names, `ls`-style modes), `passphrase` (including `unlock`), `logging` (tracing setup,
   stderr only). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
-- `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, and `CLI.md` (the command
-  reference; every new or changed command, option, or output goes there with an example).
+- `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, and `CLI.md` (the
+  command reference; every new or changed command, option, or output goes there with an
+  example).
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors
 are typed in core and converted at the CLI boundary; user-supplied identifiers are validated

@@ -99,18 +99,57 @@ The chunker itself processes untrusted file content only as opaque bytes, alloca
 - Key files and the repository are created with owner-only permissions (`0600` files, `0700`
   directories) on Unix.
 
-## Restore safety
+## Restore safety (built)
 
 Restore treats snapshot content as untrusted until authenticated, and even authenticated content
-as untrusted for path purposes:
+as untrusted for path purposes. A snapshot is written by a backup run on a machine that may have
+been compromised, so an authentic snapshot can still be hostile. The full specification is
+[`RESTORE.md`](RESTORE.md); the guarantees are:
 
-- Entry names must be a single path component: no `/`, no `..`, no empty or NUL-containing names.
-- Output is created only beneath the target directory. Existing symlinks along the destination
-  path are not followed out of it.
-- Files are created without following symlinks and are never overwritten silently unless
-  requested.
-- Special files (devices, sockets) are skipped unless explicitly enabled; setuid/setgid bits are
-  not restored by default.
+- **Authenticated chunks only.** The snapshot is loaded through authenticated decryption and
+  validated. Every chunk is authenticated, decrypted, and checked against its id before a byte is
+  written, and must have the length and add up to the size the snapshot records. A damaged,
+  truncated, modified, missing, or swapped chunk fails that file and releases no data.
+- **Paths cannot escape.** Every entry name and every component of every source path must be one
+  safe component: no `/`, no `.` or `..`, no empty or NUL-containing name, bounded length. This is
+  checked by the manifest and again, independently, by the restore's plan before the target is
+  touched. The destination of an entry is computed as the restore root plus checked components.
+- **Nothing outside the target is written.** No symbolic link along a destination is followed (a
+  directory is looked at without following links before use; files are created exclusively and
+  without following a link at the last component; names are replaced only by rename, which
+  replaces a link and never what it points to; attributes are set through open handles). A link
+  planted in the target is a conflict, skipped, or replaced itself, depending on the mode, and
+  what it points to is never touched. The target must not be inside the repository.
+- **Files are atomic.** Content goes to a private temporary file (`0600`, exclusive creation) in the
+  destination directory and is renamed into place; a file is complete and exact or absent. Nothing
+  half-written survives an error or a cancellation.
+- **Conflicts are explicit.** `fail` (default) restores nothing if anything would be replaced; `skip`
+  and `overwrite` are opt-in. A directory is never removed or replaced, and nothing in the target
+  is ever deleted.
+- **Symbolic links under a safe policy.** By default only links that cannot lead out of the
+  restore root are restored (relative, `..` only at the start and not above the root). Others
+  are skipped and listed. `skip` restores none; `as-recorded` restores all and is for snapshots you
+  trust.
+- **No privileges.** Special files (FIFOs, sockets, devices) are never created; set-user-id and
+  set-group-id bits are never restored, nor the sticky bit on files; owners are not restored.
+- **Output is escaped.** The paths and reasons printed by the command line come from the snapshot,
+  so they are escaped like in `ls` (no terminal control sequences, one line per record); this
+  includes the final error message.
+
+Residual risks, stated plainly:
+
+- **Races on the target.** The checks happen just before each operation, not atomically with it
+  (the code is `unsafe`-free and so cannot use `openat`). Someone who can write to the target
+  directory *while* the restore runs can swap a directory for a link between a check and its use.
+  Restore into a directory only you can write to.
+- **Links that were already there.** A contained link that descends through a link already in
+  the target can lead out. The policy only controls the links the restore creates.
+- **No `fsync`.** After a power failure a restored file may be short or empty; restoring again
+  repairs it.
+- **A killed restore** leaves `.vaultsnap-tmp-*` files and directories with owner-only
+  permissions until the restore is run again with `--on-conflict overwrite`.
+- **Restored data is plaintext** wherever the target is. Restoring into a shared or synchronized
+  directory publishes it.
 
 ## Input validation
 

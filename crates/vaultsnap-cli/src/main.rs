@@ -5,8 +5,11 @@ mod cli;
 mod commands;
 mod format;
 mod inspect;
+mod interrupt;
 mod logging;
 mod passphrase;
+mod progress;
+mod restore;
 
 use std::process::ExitCode;
 
@@ -19,7 +22,8 @@ async fn main() -> ExitCode {
     match commands::run(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("error: {err}");
+            // Messages can carry paths from a snapshot, which may hold anything.
+            eprintln!("error: {}", format::escape(err.to_string().as_bytes()));
             ExitCode::from(err.exit_code())
         }
     }

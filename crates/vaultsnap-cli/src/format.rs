@@ -2,6 +2,7 @@
 //! names made safe to print.
 
 use std::fmt::Write as _;
+use std::path::Path;
 
 use vaultsnap_core::history::EntryType;
 use vaultsnap_core::scan::Timestamp;
@@ -113,6 +114,23 @@ pub fn escape(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+#[cfg(unix)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().into_owned().into_bytes()
+}
+
+/// A path made safe to print, like [`escape`].
+pub fn escape_path(path: &Path) -> String {
+    escape(&path_bytes(path))
 }
 
 /// The `ls -l` style permission string: a type letter and nine permission letters, with the
@@ -232,6 +250,12 @@ mod tests {
         assert_eq!(escape("c1\u{85}".as_bytes()), "c1\\u{85}");
         assert_eq!(escape("rlo\u{202e}txt".as_bytes()), "rlo\\u{202e}txt");
         assert_eq!(escape("zero\u{200b}width\u{feff}".as_bytes()), "zero\\u{200b}width\\u{feff}");
+    }
+
+    #[test]
+    fn paths_are_escaped_like_names() {
+        assert_eq!(escape_path(Path::new("/out/data/plain.txt")), "/out/data/plain.txt");
+        assert_eq!(escape_path(Path::new("/out/new\nline\x1b[2J")), "/out/new\\nline\\x1b[2J");
     }
 
     #[test]
