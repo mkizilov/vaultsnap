@@ -71,23 +71,59 @@ pub const CASES: &[(&str, Case)] = &[
     ("empty_objects_are_objects", empty_objects_are_objects),
     ("big_objects_round_trip", big_objects_round_trip),
     ("create_never_overwrites", create_never_overwrites),
-    ("overwrite_creates_or_replaces", overwrite_creates_or_replaces),
-    ("conditional_replace_compares_versions", conditional_replace_compares_versions),
+    (
+        "overwrite_creates_or_replaces",
+        overwrite_creates_or_replaces,
+    ),
+    (
+        "conditional_replace_compares_versions",
+        conditional_replace_compares_versions,
+    ),
     ("exactly_one_creator_wins", exactly_one_creator_wins),
-    ("exactly_one_conditional_replacer_wins", exactly_one_conditional_replacer_wins),
-    ("independent_creators_do_not_interfere", independent_creators_do_not_interfere),
-    ("replacement_is_atomic_for_readers", replacement_is_atomic_for_readers),
-    ("missing_objects_are_not_found", missing_objects_are_not_found),
+    (
+        "exactly_one_conditional_replacer_wins",
+        exactly_one_conditional_replacer_wins,
+    ),
+    (
+        "independent_creators_do_not_interfere",
+        independent_creators_do_not_interfere,
+    ),
+    (
+        "replacement_is_atomic_for_readers",
+        replacement_is_atomic_for_readers,
+    ),
+    (
+        "missing_objects_are_not_found",
+        missing_objects_are_not_found,
+    ),
     ("the_size_limit_is_enforced", the_size_limit_is_enforced),
-    ("prefix_reads_report_the_whole_size", prefix_reads_report_the_whole_size),
-    ("listings_show_one_level_in_order", listings_show_one_level_in_order),
+    (
+        "prefix_reads_report_the_whole_size",
+        prefix_reads_report_the_whole_size,
+    ),
+    (
+        "listings_show_one_level_in_order",
+        listings_show_one_level_in_order,
+    ),
     ("listing_a_missing_directory", listing_a_missing_directory),
-    ("deleting_is_tolerant_and_final", deleting_is_tolerant_and_final),
-    ("directories_follow_the_declared_capability", directories_follow_the_declared_capability),
+    (
+        "deleting_is_tolerant_and_final",
+        deleting_is_tolerant_and_final,
+    ),
+    (
+        "directories_follow_the_declared_capability",
+        directories_follow_the_declared_capability,
+    ),
     ("no_temporary_objects_remain", no_temporary_objects_remain),
-    ("the_durability_barrier_succeeds", the_durability_barrier_succeeds),
+    (
+        "the_durability_barrier_succeeds",
+        the_durability_barrier_succeeds,
+    ),
     ("the_location_can_be_prepared", the_location_can_be_prepared),
-    ("the_capabilities_suffice_for_a_repository", the_capabilities_suffice_for_a_repository),
+    (
+        "the_capabilities_suffice_for_a_repository",
+        the_capabilities_suffice_for_a_repository,
+    ),
 ];
 
 /// Runs every case, each on a fresh backend from `make`, and returns one line per failure.
@@ -177,30 +213,74 @@ fn pattern(len: usize) -> Vec<u8> {
 fn names_are_validated(b: &dyn Backend) {
     let long = "a".repeat(MAX_NAME_LEN + 1);
     let bad_names = [
-        "", "/", "/abs", "a//b", "a/", "../x", "a/../b", ".hidden", "a/.b", ".tmp-0011", "a b",
-        "a\\b", long.as_str(),
+        "",
+        "/",
+        "/abs",
+        "a//b",
+        "a/",
+        "../x",
+        "a/../b",
+        ".hidden",
+        "a/.b",
+        ".tmp-0011",
+        "a b",
+        "a\\b",
+        long.as_str(),
     ];
     for bad in bad_names {
-        assert!(matches!(b.stat(bad), Err(Error::InvalidName(_))), "stat {bad:?}");
-        assert!(matches!(b.exists(bad), Err(Error::InvalidName(_))), "exists {bad:?}");
-        assert!(matches!(b.get(bad, 10), Err(Error::InvalidName(_))), "get {bad:?}");
-        assert!(matches!(b.get_prefix(bad, 10), Err(Error::InvalidName(_))), "get_prefix {bad:?}");
         assert!(
-            matches!(b.put(bad, b"x", PutMode::Create), Err(Error::InvalidName(_))),
+            matches!(b.stat(bad), Err(Error::InvalidName(_))),
+            "stat {bad:?}"
+        );
+        assert!(
+            matches!(b.exists(bad), Err(Error::InvalidName(_))),
+            "exists {bad:?}"
+        );
+        assert!(
+            matches!(b.get(bad, 10), Err(Error::InvalidName(_))),
+            "get {bad:?}"
+        );
+        assert!(
+            matches!(b.get_prefix(bad, 10), Err(Error::InvalidName(_))),
+            "get_prefix {bad:?}"
+        );
+        assert!(
+            matches!(
+                b.put(bad, b"x", PutMode::Create),
+                Err(Error::InvalidName(_))
+            ),
             "put (create) {bad:?}"
         );
         assert!(
-            matches!(b.put(bad, b"x", PutMode::Overwrite), Err(Error::InvalidName(_))),
+            matches!(
+                b.put(bad, b"x", PutMode::Overwrite),
+                Err(Error::InvalidName(_))
+            ),
             "put (overwrite) {bad:?}"
         );
-        assert!(matches!(b.delete(bad), Err(Error::InvalidName(_))), "delete {bad:?}");
-        assert!(matches!(b.create_dir(bad), Err(Error::InvalidName(_))), "create_dir {bad:?}");
+        assert!(
+            matches!(b.delete(bad), Err(Error::InvalidName(_))),
+            "delete {bad:?}"
+        );
+        assert!(
+            matches!(b.create_dir(bad), Err(Error::InvalidName(_))),
+            "create_dir {bad:?}"
+        );
     }
     for bad in ["../x", "a b", "/abs"] {
-        assert!(matches!(b.list_dir(bad), Err(Error::InvalidName(_))), "list_dir {bad:?}");
-        assert!(matches!(b.sync_dir(bad), Err(Error::InvalidName(_))), "sync_dir {bad:?}");
+        assert!(
+            matches!(b.list_dir(bad), Err(Error::InvalidName(_))),
+            "list_dir {bad:?}"
+        );
+        assert!(
+            matches!(b.sync_dir(bad), Err(Error::InvalidName(_))),
+            "sync_dir {bad:?}"
+        );
     }
-    assert!(names_in(b, "").is_empty(), "refused names must not create anything");
+    assert!(
+        names_in(b, "").is_empty(),
+        "refused names must not create anything"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -213,10 +293,16 @@ fn objects_read_back_exactly(b: &dyn Backend) {
     let object = b.get("config", BIG).expect("get");
     assert_eq!(object.data, data, "the bytes read are the bytes written");
     assert_eq!(object.info.len, data.len() as u64);
-    assert_eq!(object.info.version, version, "put returns the version of what it wrote");
+    assert_eq!(
+        object.info.version, version,
+        "put returns the version of what it wrote"
+    );
     let info = b.stat("config").expect("stat");
     assert_eq!(info.len, data.len() as u64);
-    assert_eq!(info.version, version, "stat reports the same version as put and get");
+    assert_eq!(
+        info.version, version,
+        "stat reports the same version as put and get"
+    );
     assert!(b.exists("config").expect("exists"));
     assert!(!b.exists("other").expect("exists"));
 }
@@ -233,7 +319,10 @@ fn empty_objects_are_objects(b: &dyn Backend) {
 fn big_objects_round_trip(b: &dyn Backend) {
     let data = pattern(3 * 1024 * 1024 + 17);
     create(b, "big", &data);
-    assert!(read(b, "big") == data, "a 3 MiB object must read back unchanged");
+    assert!(
+        read(b, "big") == data,
+        "a 3 MiB object must read back unchanged"
+    );
     assert_eq!(b.stat("big").expect("stat").len, data.len() as u64);
 }
 
@@ -243,7 +332,11 @@ fn create_never_overwrites(b: &dyn Backend) {
         .put("once", b"second", PutMode::Create)
         .expect_err("creating an existing object must fail");
     assert!(matches!(err, Error::AlreadyExists { .. }), "{err}");
-    assert_eq!(read(b, "once"), b"first", "the existing object is untouched");
+    assert_eq!(
+        read(b, "once"),
+        b"first",
+        "the existing object is untouched"
+    );
     assert_eq!(current_version(b, "once"), first);
 }
 
@@ -279,10 +372,17 @@ fn conditional_replace_compares_versions(b: &dyn Backend) {
         .put("absent", b"x", PutMode::Update(v2.clone()))
         .expect_err("a missing object has no version to match");
     assert!(matches!(err, Error::PreconditionFailed { .. }), "{err}");
-    assert!(!b.exists("absent").expect("exists"), "a refused update creates nothing");
+    assert!(
+        !b.exists("absent").expect("exists"),
+        "a refused update creates nothing"
+    );
 
     put(b, "meta", b"three", PutMode::Update(v2.clone()));
-    assert_eq!(read(b, "meta"), b"three", "the version returned by the last write is current");
+    assert_eq!(
+        read(b, "meta"),
+        b"three",
+        "the version returned by the last write is current"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -310,11 +410,21 @@ fn exactly_one_creator_wins(b: &dyn Backend) {
         .filter(|(_, result)| result.is_ok())
         .map(|(writer, _)| writer)
         .collect();
-    assert_eq!(winners.len(), 1, "exactly one creator may succeed: {results:?}");
+    assert_eq!(
+        winners.len(),
+        1,
+        "exactly one creator may succeed: {results:?}"
+    );
     for err in results.iter().filter_map(|result| result.as_ref().err()) {
-        assert!(matches!(err, Error::AlreadyExists { .. }), "a loser got: {err}");
+        assert!(
+            matches!(err, Error::AlreadyExists { .. }),
+            "a loser got: {err}"
+        );
     }
-    assert_eq!(read(b, "race"), format!("writer {}", winners[0]).into_bytes());
+    assert_eq!(
+        read(b, "race"),
+        format!("writer {}", winners[0]).into_bytes()
+    );
 }
 
 fn exactly_one_conditional_replacer_wins(b: &dyn Backend) {
@@ -343,11 +453,21 @@ fn exactly_one_conditional_replacer_wins(b: &dyn Backend) {
         .filter(|(_, result)| result.is_ok())
         .map(|(writer, _)| writer)
         .collect();
-    assert_eq!(winners.len(), 1, "exactly one update of the same version may succeed: {results:?}");
+    assert_eq!(
+        winners.len(),
+        1,
+        "exactly one update of the same version may succeed: {results:?}"
+    );
     for err in results.iter().filter_map(|result| result.as_ref().err()) {
-        assert!(matches!(err, Error::PreconditionFailed { .. }), "a loser got: {err}");
+        assert!(
+            matches!(err, Error::PreconditionFailed { .. }),
+            "a loser got: {err}"
+        );
     }
-    assert_eq!(read(b, "meta"), format!("writer {}", winners[0]).into_bytes());
+    assert_eq!(
+        read(b, "meta"),
+        format!("writer {}", winners[0]).into_bytes()
+    );
 }
 
 fn independent_creators_do_not_interfere(b: &dyn Backend) {
@@ -363,7 +483,10 @@ fn independent_creators_do_not_interfere(b: &dyn Backend) {
             })
             .collect();
         for handle in handles {
-            handle.join().expect("a creator panicked").expect("independent creates succeed");
+            handle
+                .join()
+                .expect("a creator panicked")
+                .expect("independent creates succeed");
         }
     });
     let names = names_in(b, "many");
@@ -387,7 +510,10 @@ fn replacement_is_atomic_for_readers(b: &dyn Backend) {
                     while !stop.load(Ordering::SeqCst) {
                         let data = b.get("flip", BIG).expect("read").data;
                         assert_eq!(data.len(), LEN, "a reader saw a partial object");
-                        assert!(data.iter().all(|byte| *byte == data[0]), "a reader saw a mixture");
+                        assert!(
+                            data.iter().all(|byte| *byte == data[0]),
+                            "a reader saw a mixture"
+                        );
                     }
                 })
             })
@@ -418,12 +544,17 @@ fn missing_objects_are_not_found(b: &dyn Backend) {
         assert!(err.is_not_found(), "{err}");
         assert!(!err.is_transient(), "{err}");
     }
-    assert!(!b.exists("nope").expect("a missing object is not an error for exists"));
+    assert!(!b
+        .exists("nope")
+        .expect("a missing object is not an error for exists"));
 }
 
 fn the_size_limit_is_enforced(b: &dyn Backend) {
     create(b, "ten", b"0123456789");
-    assert_eq!(b.get("ten", 10).expect("exactly at the limit").data.len(), 10);
+    assert_eq!(
+        b.get("ten", 10).expect("exactly at the limit").data.len(),
+        10
+    );
     let err = b.get("ten", 9).expect_err("one byte over the limit");
     assert!(matches!(err, Error::TooLarge { max_len: 9, .. }), "{err}");
     let err = b.get("ten", 0).expect_err("anything over a zero limit");
@@ -432,8 +563,14 @@ fn the_size_limit_is_enforced(b: &dyn Backend) {
 
 fn prefix_reads_report_the_whole_size(b: &dyn Backend) {
     create(b, "digits", b"0123456789");
-    assert_eq!(b.get_prefix("digits", 4).expect("prefix"), (b"0123".to_vec(), 10));
-    assert_eq!(b.get_prefix("digits", 100).expect("prefix"), (b"0123456789".to_vec(), 10));
+    assert_eq!(
+        b.get_prefix("digits", 4).expect("prefix"),
+        (b"0123".to_vec(), 10)
+    );
+    assert_eq!(
+        b.get_prefix("digits", 100).expect("prefix"),
+        (b"0123456789".to_vec(), 10)
+    );
     assert_eq!(b.get_prefix("digits", 0).expect("prefix"), (Vec::new(), 10));
 }
 
@@ -458,7 +595,10 @@ fn listings_show_one_level_in_order(b: &dyn Backend) {
     let item = |name: &str, kind: DirEntryKind, len: u64| (name.to_owned(), kind, len);
     assert_eq!(
         describe(""),
-        [item("a", DirEntryKind::Directory, 0), item("top", DirEntryKind::File, 3)]
+        [
+            item("a", DirEntryKind::Directory, 0),
+            item("top", DirEntryKind::File, 3)
+        ]
     );
     assert_eq!(
         describe("a"),
@@ -484,13 +624,23 @@ fn deleting_is_tolerant_and_final(b: &dyn Backend) {
     b.delete("drop").expect("delete");
     assert!(!b.exists("drop").expect("exists"));
     assert!(b.get("drop", 10).expect_err("deleted").is_not_found());
-    assert!(b.exists("keep").expect("exists"), "other objects are untouched");
+    assert!(
+        b.exists("keep").expect("exists"),
+        "other objects are untouched"
+    );
     match b.delete("drop") {
         Ok(()) => {}
-        Err(err) => assert!(err.is_not_found(), "deleting twice may only fail as not found: {err}"),
+        Err(err) => assert!(
+            err.is_not_found(),
+            "deleting twice may only fail as not found: {err}"
+        ),
     }
     create(b, "drop", b"again");
-    assert_eq!(read(b, "drop"), b"again", "a deleted name can be created again");
+    assert_eq!(
+        read(b, "drop"),
+        b"again",
+        "a deleted name can be created again"
+    );
 }
 
 fn directories_follow_the_declared_capability(b: &dyn Backend) {
@@ -503,10 +653,19 @@ fn directories_follow_the_declared_capability(b: &dyn Backend) {
             b.put("other/x", b"x", PutMode::Create).is_err(),
             "a write below a missing directory must fail"
         );
-        assert!(!b.dir_exists("other").expect("answer"), "and must not create the directory");
+        assert!(
+            !b.dir_exists("other").expect("answer"),
+            "and must not create the directory"
+        );
         create(b, "plain", b"x");
-        assert!(b.create_dir("plain").is_err(), "an object is not a directory");
-        assert!(b.create_dir("missing/child").is_err(), "the parent must exist");
+        assert!(
+            b.create_dir("plain").is_err(),
+            "an object is not a directory"
+        );
+        assert!(
+            b.create_dir("missing/child").is_err(),
+            "the parent must exist"
+        );
         make_dir(b, "d/e");
         create(b, "d/e/x", b"nested");
         assert_eq!(read(b, "d/e/x"), b"nested");
@@ -535,7 +694,8 @@ fn the_durability_barrier_succeeds(b: &dyn Backend) {
     make_dir(b, "d");
     create(b, "d/x", b"1");
     b.delete("d/x").expect("delete");
-    b.sync_dir("d").expect("a barrier on an existing directory succeeds");
+    b.sync_dir("d")
+        .expect("a barrier on an existing directory succeeds");
 }
 
 fn the_location_can_be_prepared(b: &dyn Backend) {
@@ -596,7 +756,11 @@ mod tests {
             self.0.list_dir(dir)
         }
         fn put(&self, name: &str, data: &[u8], mode: PutMode) -> Result<Version> {
-            let mode = if mode == PutMode::Create { PutMode::Overwrite } else { mode };
+            let mode = if mode == PutMode::Create {
+                PutMode::Overwrite
+            } else {
+                mode
+            };
             self.0.put(name, data, mode)
         }
         fn delete(&self, name: &str) -> Result<()> {
@@ -625,9 +789,13 @@ mod tests {
             read_after_write: false,
             ..MemoryBackend::new().capabilities()
         };
-        let failures = check(&|| Fixture::new(Arc::new(MemoryBackend::with_capabilities(weak.clone()))));
+        let failures =
+            check(&|| Fixture::new(Arc::new(MemoryBackend::with_capabilities(weak.clone()))));
         assert_eq!(failures.len(), 1, "{failures:?}");
-        assert!(failures[0].starts_with("the_capabilities_suffice_for_a_repository"), "{failures:?}");
+        assert!(
+            failures[0].starts_with("the_capabilities_suffice_for_a_repository"),
+            "{failures:?}"
+        );
     }
 
     #[test]
@@ -642,8 +810,16 @@ mod tests {
     #[test]
     fn a_failing_case_is_reported_with_its_message_and_does_not_stop_the_others() {
         let failures = check(&|| Fixture::new(Arc::new(LaxCreate(MemoryBackend::new()))));
-        assert!(failures.len() >= 2 && failures.len() < CASES.len(), "{failures:?}");
-        let line = failures.iter().find(|line| line.starts_with("create_never_overwrites"));
-        assert!(line.is_some_and(|line| line.contains("must fail")), "{failures:?}");
+        assert!(
+            failures.len() >= 2 && failures.len() < CASES.len(),
+            "{failures:?}"
+        );
+        let line = failures
+            .iter()
+            .find(|line| line.starts_with("create_never_overwrites"));
+        assert!(
+            line.is_some_and(|line| line.contains("must fail")),
+            "{failures:?}"
+        );
     }
 }

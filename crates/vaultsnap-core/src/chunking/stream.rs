@@ -250,7 +250,9 @@ mod tests {
 
     impl Read for Endless {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let count = buf.len().min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
+            let count = buf
+                .len()
+                .min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
             for byte in &mut buf[..count] {
                 self.state ^= self.state << 13;
                 self.state ^= self.state >> 7;
@@ -377,12 +379,18 @@ mod tests {
         let mut chunker = Chunker::new(reader, small());
         let mut delivered = 0;
         let err = loop {
-            match chunker.next().expect("the failure is reported before the end") {
+            match chunker
+                .next()
+                .expect("the failure is reported before the end")
+            {
                 Ok(_) => delivered += 1,
                 Err(err) => break err,
             }
         };
-        assert!(delivered > 0, "chunks before the failure are still delivered");
+        assert!(
+            delivered > 0,
+            "chunks before the failure are still delivered"
+        );
         assert!(err.to_string().contains("disk on fire"), "{err}");
         assert!(chunker.next().is_none());
         assert!(chunker.next().is_none());
@@ -421,9 +429,19 @@ mod tests {
         let chunks = collect(Cursor::new(data.clone()), config);
         let mean = data.len() as f64 / chunks.len() as f64;
         let target = config.avg_size() as f64;
-        assert!(mean > 0.6 * target && mean < 1.8 * target, "mean chunk size {mean}");
-        let forced = chunks.iter().filter(|c| c.data.len() == config.max_size()).count();
-        assert!(forced * 100 < chunks.len(), "{forced} of {} hit the maximum", chunks.len());
+        assert!(
+            mean > 0.6 * target && mean < 1.8 * target,
+            "mean chunk size {mean}"
+        );
+        let forced = chunks
+            .iter()
+            .filter(|c| c.data.len() == config.max_size())
+            .count();
+        assert!(
+            forced * 100 < chunks.len(),
+            "{forced} of {} hit the maximum",
+            chunks.len()
+        );
     }
 
     #[test]

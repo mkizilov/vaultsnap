@@ -92,7 +92,10 @@ mod tests {
         assert!(matches!(err, Error::Cancelled), "{err}");
         let store = repo.store();
         assert!(store.list("snapshots").expect("list").is_empty());
-        assert!(store.list("locks").expect("list").is_empty(), "the lock was released");
+        assert!(
+            store.list("locks").expect("list").is_empty(),
+            "the lock was released"
+        );
     }
 
     #[tokio::test]

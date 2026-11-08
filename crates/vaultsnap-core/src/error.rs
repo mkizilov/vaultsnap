@@ -347,7 +347,9 @@ pub enum Error {
         path: PathBuf,
     },
     /// The operation was cancelled; nothing was committed.
-    #[error("cancelled: no snapshot was created (chunks already stored are kept and will be reused)")]
+    #[error(
+        "cancelled: no snapshot was created (chunks already stored are kept and will be reused)"
+    )]
     Cancelled,
     /// A file could not be backed up and the error policy is to stop.
     #[error("cannot back up {}: {}", .path.display(), .reason)]
@@ -452,7 +454,10 @@ impl Error {
     /// True if a write was refused because of what already exists: the object exists (create) or
     /// is not in the state the caller expected (conditional replace).
     pub fn is_conflict(&self) -> bool {
-        matches!(self, Self::AlreadyExists { .. } | Self::PreconditionFailed { .. })
+        matches!(
+            self,
+            Self::AlreadyExists { .. } | Self::PreconditionFailed { .. }
+        )
     }
 }
 
@@ -487,7 +492,11 @@ mod tests {
         assert!(error(BackendErrorKind::NotFound).is_not_found());
         assert!(!error(BackendErrorKind::Transient).is_not_found());
         assert!(error(BackendErrorKind::Transient).is_transient());
-        for kind in [BackendErrorKind::Permission, BackendErrorKind::Other, BackendErrorKind::NotFound] {
+        for kind in [
+            BackendErrorKind::Permission,
+            BackendErrorKind::Other,
+            BackendErrorKind::NotFound,
+        ] {
             assert!(!error(kind).is_transient(), "{kind:?}");
         }
         assert_eq!(

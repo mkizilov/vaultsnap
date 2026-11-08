@@ -185,7 +185,10 @@ fn unused_name_error(dir: &Path) -> Error {
     Error::io(
         "create",
         dir,
-        io::Error::new(io::ErrorKind::AlreadyExists, "no unused temporary name was found"),
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "no unused temporary name was found",
+        ),
     )
 }
 
@@ -340,8 +343,12 @@ pub(super) fn finalize_directory(path: &Path, attributes: &Attributes) -> Result
     let mut options = OpenOptions::new();
     options.read(true);
     directory_open_options(&mut options);
-    let handle = options.open(path).map_err(|err| Error::io("open", path, err))?;
-    let meta = handle.metadata().map_err(|err| Error::io("inspect", path, err))?;
+    let handle = options
+        .open(path)
+        .map_err(|err| Error::io("open", path, err))?;
+    let meta = handle
+        .metadata()
+        .map_err(|err| Error::io("inspect", path, err))?;
     if !meta.is_dir() {
         let changed = io::Error::other("it is no longer a directory");
         return Err(Error::io("open", path, changed));
@@ -445,7 +452,11 @@ impl Destination {
                 },
             }
         }
-        Err(Error::io("create directory", path, io::Error::other("the path keeps changing")))
+        Err(Error::io(
+            "create directory",
+            path,
+            io::Error::other("the path keeps changing"),
+        ))
     }
 }
 
@@ -470,7 +481,9 @@ mod tests {
     #[test]
     fn missing_directories_are_created_one_by_one_and_remembered() {
         let (_dir, mut dest) = new_destination();
-        let Dir::Ready { path, created } = dest.ensure_dir(&rel(&["a", "b", "c"]), true, false).expect("ok")
+        let Dir::Ready { path, created } = dest
+            .ensure_dir(&rel(&["a", "b", "c"]), true, false)
+            .expect("ok")
         else {
             panic!("expected a ready directory");
         };
@@ -478,16 +491,22 @@ mod tests {
         assert_eq!(path, dest.path_of(&rel(&["a", "b", "c"])));
 
         // Asking again finds it (and still knows this restore made it).
-        let Dir::Ready { created, .. } = dest.ensure_dir(&rel(&["a", "b", "c"]), true, false).expect("ok")
+        let Dir::Ready { created, .. } = dest
+            .ensure_dir(&rel(&["a", "b", "c"]), true, false)
+            .expect("ok")
         else {
             panic!("expected a ready directory");
         };
         assert!(created);
-        let Dir::Ready { created, .. } = dest.ensure_dir(&rel(&["a", "b"]), true, false).expect("ok")
+        let Dir::Ready { created, .. } =
+            dest.ensure_dir(&rel(&["a", "b"]), true, false).expect("ok")
         else {
             panic!("expected a ready directory");
         };
-        assert!(created, "intermediate directories were made by this restore too");
+        assert!(
+            created,
+            "intermediate directories were made by this restore too"
+        );
     }
 
     #[test]
@@ -506,9 +525,14 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let (_dir, mut dest) = new_destination();
-        dest.ensure_dir(&rel(&["above", "entry"]), true, false).expect("ok");
+        dest.ensure_dir(&rel(&["above", "entry"]), true, false)
+            .expect("ok");
         let mode = |parts: &[&str]| {
-            fs::metadata(dest.path_of(&rel(parts))).expect("metadata").permissions().mode() & 0o777
+            fs::metadata(dest.path_of(&rel(parts)))
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777
         };
         assert_eq!(mode(&["above", "entry"]), 0o700);
         assert_ne!(mode(&["above"]) & 0o700, 0o000, "usable by the owner");
@@ -518,7 +542,9 @@ mod tests {
     fn existing_directories_are_merged_and_not_reported_as_created() {
         let (_dir, mut dest) = new_destination();
         fs::create_dir_all(dest.path_of(&rel(&["x", "y"]))).expect("mkdir");
-        let Dir::Ready { created, .. } = dest.ensure_dir(&rel(&["x", "y"]), true, false).expect("ok") else {
+        let Dir::Ready { created, .. } =
+            dest.ensure_dir(&rel(&["x", "y"]), true, false).expect("ok")
+        else {
             panic!("expected a ready directory");
         };
         assert!(!created);
@@ -532,7 +558,9 @@ mod tests {
         fs::create_dir(&real).expect("mkdir");
         std::os::unix::fs::symlink(&real, dest.path_of(&rel(&["link"]))).expect("symlink");
 
-        let outcome = dest.ensure_dir(&rel(&["link", "child"]), true, false).expect("ok");
+        let outcome = dest
+            .ensure_dir(&rel(&["link", "child"]), true, false)
+            .expect("ok");
         match outcome {
             Dir::Blocked { at, found } => {
                 assert_eq!(at, dest.path_of(&rel(&["link"])));
@@ -549,11 +577,21 @@ mod tests {
         let file = dest.path_of(&rel(&["name"]));
         fs::write(&file, b"data").expect("write");
 
-        let blocked = dest.ensure_dir(&rel(&["name", "sub"]), false, false).expect("ok");
-        assert!(matches!(blocked, Dir::Blocked { found: Present::File, .. }));
+        let blocked = dest
+            .ensure_dir(&rel(&["name", "sub"]), false, false)
+            .expect("ok");
+        assert!(matches!(
+            blocked,
+            Dir::Blocked {
+                found: Present::File,
+                ..
+            }
+        ));
         assert!(file.is_file(), "nothing was touched");
 
-        let replaced = dest.ensure_dir(&rel(&["name", "sub"]), false, true).expect("ok");
+        let replaced = dest
+            .ensure_dir(&rel(&["name", "sub"]), false, true)
+            .expect("ok");
         assert!(matches!(replaced, Dir::Ready { .. }));
         assert!(file.is_dir() && file.join("sub").is_dir());
     }
@@ -572,8 +610,14 @@ mod tests {
         assert!(matches!(outcome, Dir::Ready { created: true, .. }));
         let meta = fs::symlink_metadata(&link).expect("metadata");
         assert!(meta.is_dir() && !meta.file_type().is_symlink());
-        assert_eq!(fs::read(outside.join("precious")).expect("read"), b"keep me");
-        assert!(fs::read_dir(&outside).expect("read_dir").count() == 1, "nothing was added outside");
+        assert_eq!(
+            fs::read(outside.join("precious")).expect("read"),
+            b"keep me"
+        );
+        assert!(
+            fs::read_dir(&outside).expect("read_dir").count() == 1,
+            "nothing was added outside"
+        );
     }
 
     #[test]
@@ -608,7 +652,13 @@ mod tests {
     fn names(dir: &Path) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(dir)
             .expect("read_dir")
-            .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         names.sort();
         names
@@ -623,8 +673,18 @@ mod tests {
         let first = create_temp(dir.path()).expect("temp");
         let second = create_temp(dir.path()).expect("temp");
         assert_ne!(first.path, second.path);
-        assert!(first.path.file_name().and_then(OsStr::to_str).is_some_and(|n| n.starts_with(TEMP_PREFIX)));
-        let mode = first.file.metadata().expect("metadata").permissions().mode() & 0o777;
+        assert!(first
+            .path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|n| n.starts_with(TEMP_PREFIX)));
+        let mode = first
+            .file
+            .metadata()
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600);
     }
 
@@ -647,15 +707,29 @@ mod tests {
 
         let mut first = create_temp(dir.path()).expect("temp");
         first.file.write_all(b"first").expect("write");
-        assert_eq!(first.publish(&dest, false).expect("publish"), Published::Done);
+        assert_eq!(
+            first.publish(&dest, false).expect("publish"),
+            Published::Done
+        );
         assert_eq!(fs::read(&dest).expect("read"), b"first");
         assert_eq!(names(dir.path()), ["final"], "the temporary name is gone");
 
         let mut second = create_temp(dir.path()).expect("temp");
         second.file.write_all(b"second").expect("write");
-        assert_eq!(second.publish(&dest, false).expect("publish"), Published::Exists);
-        assert_eq!(fs::read(&dest).expect("read"), b"first", "the existing file is untouched");
-        assert_eq!(names(dir.path()), ["final"], "and the temporary file is removed");
+        assert_eq!(
+            second.publish(&dest, false).expect("publish"),
+            Published::Exists
+        );
+        assert_eq!(
+            fs::read(&dest).expect("read"),
+            b"first",
+            "the existing file is untouched"
+        );
+        assert_eq!(
+            names(dir.path()),
+            ["final"],
+            "and the temporary file is removed"
+        );
     }
 
     #[test]
@@ -692,7 +766,10 @@ mod tests {
         std::os::unix::fs::symlink(&victim, &dest).expect("symlink");
 
         let temp = create_temp(dir.path()).expect("temp");
-        assert_eq!(temp.publish(&dest, false).expect("publish"), Published::Exists);
+        assert_eq!(
+            temp.publish(&dest, false).expect("publish"),
+            Published::Exists
+        );
         assert!(!victim.exists(), "nothing was created through the link");
     }
 
@@ -722,10 +799,22 @@ mod tests {
     fn symbolic_links_are_created_exactly_as_recorded_and_never_replace_silently() {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let dest = dir.path().join("link");
-        assert_eq!(create_symlink(b"../x/y", dir.path(), &dest, false).expect("create"), Published::Done);
-        assert_eq!(fs::read_link(&dest).expect("read_link"), Path::new("../x/y"));
-        assert_eq!(create_symlink(b"other", dir.path(), &dest, false).expect("create"), Published::Exists);
-        assert_eq!(fs::read_link(&dest).expect("read_link"), Path::new("../x/y"));
+        assert_eq!(
+            create_symlink(b"../x/y", dir.path(), &dest, false).expect("create"),
+            Published::Done
+        );
+        assert_eq!(
+            fs::read_link(&dest).expect("read_link"),
+            Path::new("../x/y")
+        );
+        assert_eq!(
+            create_symlink(b"other", dir.path(), &dest, false).expect("create"),
+            Published::Exists
+        );
+        assert_eq!(
+            fs::read_link(&dest).expect("read_link"),
+            Path::new("../x/y")
+        );
     }
 
     #[cfg(unix)]
@@ -734,7 +823,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let dest = dir.path().join("link");
         std::os::unix::fs::symlink("old", &dest).expect("symlink");
-        assert_eq!(create_symlink(b"new", dir.path(), &dest, true).expect("create"), Published::Done);
+        assert_eq!(
+            create_symlink(b"new", dir.path(), &dest, true).expect("create"),
+            Published::Done
+        );
         assert_eq!(fs::read_link(&dest).expect("read_link"), Path::new("new"));
         assert_eq!(names(dir.path()), ["link"]);
 
@@ -751,16 +843,28 @@ mod tests {
         let original = dir.path().join("original");
         fs::write(&original, b"shared").expect("write");
         let alias = dir.path().join("alias");
-        assert_eq!(create_hard_link(&original, dir.path(), &alias, false).expect("link"), Published::Done);
+        assert_eq!(
+            create_hard_link(&original, dir.path(), &alias, false).expect("link"),
+            Published::Done
+        );
         assert_eq!(fs::read(&alias).expect("read"), b"shared");
-        assert_eq!(create_hard_link(&original, dir.path(), &alias, false).expect("link"), Published::Exists);
+        assert_eq!(
+            create_hard_link(&original, dir.path(), &alias, false).expect("link"),
+            Published::Exists
+        );
 
         fs::write(&alias, b"changed through the link").expect("write");
-        assert_eq!(fs::read(&original).expect("read"), b"changed through the link");
+        assert_eq!(
+            fs::read(&original).expect("read"),
+            b"changed through the link"
+        );
 
         let other = dir.path().join("other");
         fs::write(&other, b"to be replaced").expect("write");
-        assert_eq!(create_hard_link(&original, dir.path(), &other, true).expect("link"), Published::Done);
+        assert_eq!(
+            create_hard_link(&original, dir.path(), &other, true).expect("link"),
+            Published::Done
+        );
         assert_eq!(fs::read(&other).expect("read"), b"changed through the link");
         assert_eq!(names(dir.path()), ["alias", "original", "other"]);
     }
@@ -769,10 +873,25 @@ mod tests {
     fn times_before_and_after_the_epoch_are_converted() {
         let time = |secs, nanos| system_time(Timestamp { secs, nanos });
         assert_eq!(time(0, 0), Some(UNIX_EPOCH));
-        assert_eq!(time(1_700_000_000, 5), UNIX_EPOCH.checked_add(Duration::new(1_700_000_000, 5)));
-        assert_eq!(time(-1, 500_000_000), UNIX_EPOCH.checked_sub(Duration::from_millis(500)));
-        assert_eq!(time(-10, 0), UNIX_EPOCH.checked_sub(Duration::from_secs(10)));
-        assert_eq!(time(i64::MIN, 0), None, "out of range is reported, not wrapped");
+        assert_eq!(
+            time(1_700_000_000, 5),
+            UNIX_EPOCH.checked_add(Duration::new(1_700_000_000, 5))
+        );
+        assert_eq!(
+            time(-1, 500_000_000),
+            UNIX_EPOCH.checked_sub(Duration::from_millis(500))
+        );
+        assert_eq!(
+            time(-10, 0),
+            UNIX_EPOCH.checked_sub(Duration::from_secs(10))
+        );
+        // `SystemTime` holds a full `i64` of seconds on 64-bit systems, so the extreme times are
+        // representable there; they must still be on the right side of the epoch, never wrapped.
+        assert!(time(i64::MIN, 0).is_none_or(|t| t < UNIX_EPOCH));
+        assert!(time(i64::MAX, 0).is_none_or(|t| t > UNIX_EPOCH));
+        // A count of nanoseconds that carries past the largest second is out of range everywhere,
+        // and is reported, not wrapped.
+        assert_eq!(time(i64::MAX, 4_000_000_000), None);
     }
 
     fn attributes(mode: Option<u32>, modified: Option<Timestamp>) -> Attributes {
@@ -800,12 +919,23 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let path = dir.path().join("f");
         let file = File::create(&path).expect("create");
-        let wanted = Timestamp { secs: 1_600_000_000, nanos: 0 };
+        let wanted = Timestamp {
+            secs: 1_600_000_000,
+            nanos: 0,
+        };
         let problems = apply_attributes(&file, &attributes(Some(0o6755), Some(wanted)), false);
         assert!(problems.is_empty(), "{problems:?}");
         let meta = fs::metadata(&path).expect("metadata");
-        assert_eq!(meta.permissions().mode() & 0o7777, 0o755, "set-user-id and set-group-id are dropped");
-        let modified = meta.modified().expect("modified").duration_since(UNIX_EPOCH).expect("after the epoch");
+        assert_eq!(
+            meta.permissions().mode() & 0o7777,
+            0o755,
+            "set-user-id and set-group-id are dropped"
+        );
+        let modified = meta
+            .modified()
+            .expect("modified")
+            .duration_since(UNIX_EPOCH)
+            .expect("after the epoch");
         assert_eq!(modified.as_secs(), 1_600_000_000);
     }
 
@@ -817,10 +947,17 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let path = dir.path().join("d");
         fs::create_dir(&path).expect("mkdir");
-        let wanted = Timestamp { secs: 1_500_000_000, nanos: 0 };
-        let problems = finalize_directory(&path, &attributes(Some(0o3770), Some(wanted))).expect("finalize");
+        let wanted = Timestamp {
+            secs: 1_500_000_000,
+            nanos: 0,
+        };
+        let problems =
+            finalize_directory(&path, &attributes(Some(0o3770), Some(wanted))).expect("finalize");
         assert!(problems.is_empty(), "{problems:?}");
-        assert_eq!(fs::metadata(&path).expect("metadata").permissions().mode() & 0o7777, 0o1770);
+        assert_eq!(
+            fs::metadata(&path).expect("metadata").permissions().mode() & 0o7777,
+            0o1770
+        );
         // Restore the permissions so the temporary directory can be removed.
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).expect("chmod");
     }
@@ -832,20 +969,40 @@ mod tests {
         let outside = tempfile::tempdir().expect("create temporary directory");
         let link = dir.path().join("d");
         std::os::unix::fs::symlink(outside.path(), &link).expect("symlink");
-        let before = fs::metadata(outside.path()).expect("metadata").modified().expect("modified");
+        let before = fs::metadata(outside.path())
+            .expect("metadata")
+            .modified()
+            .expect("modified");
 
-        let wanted = Timestamp { secs: 1_000_000_000, nanos: 0 };
+        let wanted = Timestamp {
+            secs: 1_000_000_000,
+            nanos: 0,
+        };
         assert!(finalize_directory(&link, &attributes(Some(0o700), Some(wanted))).is_err());
-        let after = fs::metadata(outside.path()).expect("metadata").modified().expect("modified");
-        assert_eq!(before, after, "the directory the link points to was not touched");
+        let after = fs::metadata(outside.path())
+            .expect("metadata")
+            .modified()
+            .expect("modified");
+        assert_eq!(
+            before, after,
+            "the directory the link points to was not touched"
+        );
     }
 
     #[test]
     fn a_time_that_cannot_be_represented_is_reported_as_a_problem() {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let file = File::create(dir.path().join("f")).expect("create");
-        let impossible = Timestamp { secs: i64::MIN, nanos: 0 };
+        // No valid timestamp is unrepresentable on a 64-bit system, so this one carries its
+        // nanoseconds past the largest second.
+        let impossible = Timestamp {
+            secs: i64::MAX,
+            nanos: 4_000_000_000,
+        };
         let problems = apply_attributes(&file, &attributes(None, Some(impossible)), false);
-        assert_eq!(problems, ["the modification time cannot be represented here"]);
+        assert_eq!(
+            problems,
+            ["the modification time cannot be represented here"]
+        );
     }
 }

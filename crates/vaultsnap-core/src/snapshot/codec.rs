@@ -303,11 +303,17 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn fail<T>(&self, what: &str) -> Result<T> {
-        Err(Error::InvalidManifest(format!("{what} (at byte {})", self.pos)))
+        Err(Error::InvalidManifest(format!(
+            "{what} (at byte {})",
+            self.pos
+        )))
     }
 
     fn take(&mut self, len: usize) -> Result<&'a [u8]> {
-        let end = self.pos.checked_add(len).filter(|&end| end <= self.data.len());
+        let end = self
+            .pos
+            .checked_add(len)
+            .filter(|&end| end <= self.data.len());
         let Some(end) = end else {
             return self.fail("the manifest is truncated");
         };
@@ -350,7 +356,10 @@ impl<'a> Reader<'a> {
     fn count(&mut self, min_item_bytes: usize) -> Result<usize> {
         let count = usize::try_from(self.u32()?).unwrap_or(usize::MAX);
         let remaining = self.data.len() - self.pos;
-        if count.checked_mul(min_item_bytes).is_none_or(|needed| needed > remaining) {
+        if count
+            .checked_mul(min_item_bytes)
+            .is_none_or(|needed| needed > remaining)
+        {
             return self.fail("a count is larger than the data that follows");
         }
         Ok(count)
@@ -690,7 +699,11 @@ mod tests {
     #[test]
     fn the_encoder_produces_exactly_the_documented_layout() {
         let golden = Golden::minimal();
-        assert_eq!(golden.len(), 224, "the hand-assembled layout has the expected size");
+        assert_eq!(
+            golden.len(),
+            224,
+            "the hand-assembled layout has the expected size"
+        );
         assert_eq!(encoded(&minimal()), golden);
         assert_eq!(decode(&golden).expect("decodes"), minimal());
     }
@@ -700,7 +713,11 @@ mod tests {
         for manifest in [minimal(), rich()] {
             let bytes = encoded(&manifest);
             assert_eq!(decode(&bytes).expect("decodes"), manifest);
-            assert_eq!(encoded(&decode(&bytes).expect("decodes")), bytes, "stable re-encoding");
+            assert_eq!(
+                encoded(&decode(&bytes).expect("decodes")),
+                bytes,
+                "stable re-encoding"
+            );
         }
     }
 
@@ -709,7 +726,10 @@ mod tests {
         let manifest = rich();
         let decoded = decode(&encoded(&manifest)).expect("decodes");
         assert_eq!(decoded.roots[0].entries[6].name, b"bad-\xff\xfe-name");
-        assert_eq!(decoded.roots[0].entries[7].name, "unicode-日本語".as_bytes());
+        assert_eq!(
+            decoded.roots[0].entries[7].name,
+            "unicode-日本語".as_bytes()
+        );
         assert_eq!(decoded.roots[0].source, b"/home/me/Documents");
     }
 
@@ -742,7 +762,11 @@ mod tests {
         assert_eq!(w.buf.len(), ROOT_MIN_BYTES);
 
         let mut w = Writer::new();
-        let record = SkippedRecord { root: 0, path: Vec::new(), reason: SkippedReason::Vanished };
+        let record = SkippedRecord {
+            root: 0,
+            path: Vec::new(),
+            reason: SkippedReason::Vanished,
+        };
         write_skipped(&mut w, &record).expect("encode skipped");
         assert_eq!(w.buf.len(), SKIPPED_MIN_BYTES);
 
@@ -783,7 +807,10 @@ mod tests {
         // Even a body that makes no sense in any version is judged by its version first.
         let mut nonsense = vec![0xff; 40];
         nonsense[..4].copy_from_slice(&7_u32.to_le_bytes());
-        assert!(matches!(decode(&nonsense), Err(Error::UnsupportedManifestVersion { found: 7, .. })));
+        assert!(matches!(
+            decode(&nonsense),
+            Err(Error::UnsupportedManifestVersion { found: 7, .. })
+        ));
     }
 
     #[test]
@@ -804,7 +831,10 @@ mod tests {
         root.extend(huge.to_le_bytes()); // chunk count
         rejects(&Golden::assemble(1, &root, 0, [0; 7]), "chunk count");
 
-        rejects(&Golden::assemble(1, &Golden::minimal_root(), huge, [0; 7]), "skipped count");
+        rejects(
+            &Golden::assemble(1, &Golden::minimal_root(), huge, [0; 7]),
+            "skipped count",
+        );
 
         let mut bytes = Golden::minimal();
         bytes[114..118].copy_from_slice(&huge.to_le_bytes()); // includes count

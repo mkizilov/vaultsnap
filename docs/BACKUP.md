@@ -147,7 +147,8 @@ source bytes, after repeated runs and after modified, inserted, deleted, and add
 tests check that cancelled and failed runs leave no snapshot, release the lock, and (for
 cancellation) leave earlier snapshots intact. `restore` ([`RESTORE.md`](RESTORE.md)) rebuilds
 files from a snapshot the same way for users, and the `prune` tests restore every kept snapshot
-after pruning; the tests have not been run (see the README, "Known gaps").
+after pruning. [`RELIABILITY.md`](RELIABILITY.md) also describes the randomized round trips and the
+crash tests, which kill a backup at every storage call it makes.
 
 ## Limitations
 

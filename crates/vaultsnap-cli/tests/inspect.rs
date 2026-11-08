@@ -35,7 +35,12 @@ impl Repo {
     /// Runs a command that must succeed and returns its standard output.
     fn text(&self, args: &[&str]) -> String {
         let output = self.run(args);
-        assert_eq!(output.status.code(), Some(0), "{args:?}: {}", stderr(&output));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            stderr(&output)
+        );
         stdout(&output)
     }
 
@@ -44,7 +49,10 @@ impl Repo {
         let mut full = args.to_vec();
         full.push("--json");
         let text = self.text(&full);
-        assert!(text.ends_with('\n') && text.matches('\n').count() == 1, "one line: {text:?}");
+        assert!(
+            text.ends_with('\n') && text.matches('\n').count() == 1,
+            "one line: {text:?}"
+        );
         serde_json::from_str(&text).unwrap_or_else(|err| panic!("{err}: {text}"))
     }
 
@@ -80,11 +88,17 @@ fn write(root: &Path, rel: &str, contents: &[u8]) {
 
 /// The source as the snapshot records it (symbolic links in the temporary path resolved).
 fn recorded(path: &Path) -> String {
-    fs::canonicalize(path).expect("exists").to_str().expect("UTF-8 path").to_owned()
+    fs::canonicalize(path)
+        .expect("exists")
+        .to_str()
+        .expect("UTF-8 path")
+        .to_owned()
 }
 
 fn array<'a>(value: &'a Value, key: &str) -> &'a [Value] {
-    value[key].as_array().unwrap_or_else(|| panic!("{key} is not an array in {value}"))
+    value[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("{key} is not an array in {value}"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -117,7 +131,10 @@ fn snapshots_are_listed_oldest_first_with_their_sizes() {
 
     let list = repo.json(&["snapshots"]);
     let snapshots = array(&list, "snapshots");
-    let ids: Vec<&str> = snapshots.iter().map(|s| s["id"].as_str().expect("id")).collect();
+    let ids: Vec<&str> = snapshots
+        .iter()
+        .map(|s| s["id"].as_str().expect("id"))
+        .collect();
     assert_eq!(ids, [first.as_str(), second.as_str()]);
     assert!(snapshots[0]["created"].as_str() < snapshots[1]["created"].as_str());
     assert_eq!(snapshots[0]["short_id"], &first[..8]);
@@ -129,15 +146,24 @@ fn snapshots_are_listed_oldest_first_with_their_sizes() {
     assert_eq!(newer["logical_bytes"], 10_017);
     assert_eq!(snapshots[1]["files"], 3);
     let stored = older["stored_bytes"].as_u64().expect("number");
-    assert!(stored > 0 && stored < 10_005, "repeated bytes compress: {stored}");
-    assert_eq!(older["unique_stored_bytes"], 0, "everything in the first is also in the second");
+    assert!(
+        stored > 0 && stored < 10_005,
+        "repeated bytes compress: {stored}"
+    );
+    assert_eq!(
+        older["unique_stored_bytes"], 0,
+        "everything in the first is also in the second"
+    );
     assert!(newer["unique_stored_bytes"].as_u64().expect("number") > 0);
     assert_eq!(list["unique_sizes_exact"], true);
     assert_eq!(list["damaged"].as_array().map(Vec::len), Some(0));
 
     let text = repo.text(&["snapshots"]);
     let (at_first, at_second) = (text.find(&first[..8]), text.find(&second[..8]));
-    assert!(at_first.is_some() && at_first < at_second, "oldest first:\n{text}");
+    assert!(
+        at_first.is_some() && at_first < at_second,
+        "oldest first:\n{text}"
+    );
     assert!(text.starts_with("ID "), "{text}");
     assert!(text.contains("2 snapshots; they refer to "), "{text}");
 }
@@ -190,7 +216,10 @@ fn ls_lists_the_files_and_can_be_limited_to_a_path() {
     let root = recorded(&src);
 
     let text = repo.text(&["ls", &id[..8]]);
-    let listed: Vec<&str> = text.lines().map(|line| line.split("  ").last().expect("a path")).collect();
+    let listed: Vec<&str> = text
+        .lines()
+        .map(|line| line.split("  ").last().expect("a path"))
+        .collect();
     assert_eq!(
         listed,
         [
@@ -202,8 +231,14 @@ fn ls_lists_the_files_and_can_be_limited_to_a_path() {
             format!("{root}/dir/deeper/c.txt"),
         ]
     );
-    assert!(text.lines().next().expect("a line").starts_with('d'), "directories start with d");
-    assert!(text.contains("  6  "), "the size of b.txt is shown:\n{text}");
+    assert!(
+        text.lines().next().expect("a line").starts_with('d'),
+        "directories start with d"
+    );
+    assert!(
+        text.contains("  6  "),
+        "the size of b.txt is shown:\n{text}"
+    );
 
     let below = repo.text(&["ls", &id[..8], &format!("{root}/dir")]);
     assert_eq!(below.lines().count(), 4);
@@ -214,7 +249,10 @@ fn ls_lists_the_files_and_can_be_limited_to_a_path() {
     assert_eq!(entries["snapshot"], id.as_str());
     let entries = array(&entries, "entries");
     assert_eq!(entries.len(), 2);
-    assert_eq!(entries[1]["path"], format!("{root}/dir/deeper/c.txt").as_str());
+    assert_eq!(
+        entries[1]["path"],
+        format!("{root}/dir/deeper/c.txt").as_str()
+    );
     assert_eq!(entries[1]["type"], "file");
     assert_eq!(entries[1]["size"], 1);
     assert_eq!(entries[1]["chunks"], 1);
@@ -228,11 +266,19 @@ fn ls_of_a_path_that_is_not_in_the_snapshot_fails() {
     let id = repo.backup(&src);
     let root = recorded(&src);
 
-    for path in [format!("{root}/missing"), format!("{root}/a"), "/nowhere".to_owned()] {
+    for path in [
+        format!("{root}/missing"),
+        format!("{root}/a"),
+        "/nowhere".to_owned(),
+    ] {
         let output = repo.run(&["ls", &id[..8], &path]);
         assert_eq!(output.status.code(), Some(1), "{path}");
         assert!(stdout(&output).is_empty());
-        assert!(stderr(&output).contains("has no entry at or below"), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("has no entry at or below"),
+            "{}",
+            stderr(&output)
+        );
     }
 }
 
@@ -263,7 +309,10 @@ fn diff_reports_what_changed_between_two_real_backups() {
     assert_eq!(summary["added"], 1);
     assert_eq!(summary["deleted"], 1);
     assert_eq!(summary["modified"], 1);
-    assert_eq!(summary["unchanged"], 4, "the root, keep.txt, dir, and dir/inner.txt");
+    assert_eq!(
+        summary["unchanged"], 4,
+        "the root, keep.txt, dir, and dir/inner.txt"
+    );
     assert_eq!(summary["added_bytes"], 4);
     assert_eq!(summary["deleted_bytes"], 10);
     assert_eq!(summary["logical_bytes_from"], 9 + 6 + 10 + 5);
@@ -274,8 +323,15 @@ fn diff_reports_what_changed_between_two_real_backups() {
     let changes: Vec<(String, String)> = array(&document, "changes")
         .iter()
         .map(|c| {
-            let path = c["path"].as_str().expect("path").strip_prefix(&root).expect("below the root");
-            (c["status"].as_str().expect("status").to_owned(), path.to_owned())
+            let path = c["path"]
+                .as_str()
+                .expect("path")
+                .strip_prefix(&root)
+                .expect("below the root");
+            (
+                c["status"].as_str().expect("status").to_owned(),
+                path.to_owned(),
+            )
         })
         .collect();
     assert_eq!(
@@ -286,14 +342,22 @@ fn diff_reports_what_changed_between_two_real_backups() {
             ("deleted".to_owned(), "/remove.txt".to_owned()),
         ]
     );
-    let edited = array(&document, "changes")[1]["differences"].as_array().expect("array");
+    let edited = array(&document, "changes")[1]["differences"]
+        .as_array()
+        .expect("array");
     assert!(edited.contains(&Value::from("content")), "{edited:?}");
 
     let text = repo.text(&["diff", &first[..8], &second[..8]]);
     assert!(text.contains(&format!("+ {root}/added.txt\n")), "{text}");
     assert!(text.contains(&format!("- {root}/remove.txt\n")), "{text}");
-    assert!(text.contains(&format!("M {root}/edit.txt  (content")), "{text}");
-    assert!(text.contains("1 added, 1 deleted, 1 modified, 4 unchanged\n"), "{text}");
+    assert!(
+        text.contains(&format!("M {root}/edit.txt  (content")),
+        "{text}"
+    );
+    assert!(
+        text.contains("1 added, 1 deleted, 1 modified, 4 unchanged\n"),
+        "{text}"
+    );
     assert!(!text.contains("keep.txt"), "unchanged files are not listed");
 }
 
@@ -326,7 +390,13 @@ fn diff_of_a_snapshot_with_itself_finds_nothing_and_order_decides_direction() {
 fn hostile_file_names_are_escaped_in_text_and_exact_in_json() {
     let repo = Repo::new();
     let src = repo.env.path("src");
-    let names = ["new\nline.txt", "esc\x1b[2Jclear", "tab\there", "back\\slash", "cr\rname"];
+    let names = [
+        "new\nline.txt",
+        "esc\x1b[2Jclear",
+        "tab\there",
+        "back\\slash",
+        "cr\rname",
+    ];
     for name in names {
         write(&src, name, b"x");
     }
@@ -337,27 +407,47 @@ fn hostile_file_names_are_escaped_in_text_and_exact_in_json() {
     let second = repo.backup(&src);
     let root = recorded(&src);
 
-    for command in [vec!["ls", &first[..8]], vec!["diff", &first[..8], &second[..8]]] {
+    for command in [
+        vec!["ls", &first[..8]],
+        vec!["diff", &first[..8], &second[..8]],
+    ] {
         let text = repo.text(&command);
         for forbidden in ['\x1b', '\r'] {
-            assert!(!text.contains(forbidden), "{command:?} printed {forbidden:?}:\n{text:?}");
+            assert!(
+                !text.contains(forbidden),
+                "{command:?} printed {forbidden:?}:\n{text:?}"
+            );
         }
     }
     let ls = repo.text(&["ls", &first[..8]]);
-    assert_eq!(ls.lines().count(), names.len() + 1, "one line per entry, whatever the names hold");
-    assert!(ls.contains(r"new\nline.txt") && ls.contains(r"esc\x1b[2Jclear"), "{ls}");
+    assert_eq!(
+        ls.lines().count(),
+        names.len() + 1,
+        "one line per entry, whatever the names hold"
+    );
+    assert!(
+        ls.contains(r"new\nline.txt") && ls.contains(r"esc\x1b[2Jclear"),
+        "{ls}"
+    );
     assert!(ls.contains(r"tab\there") && ls.contains(r"back\\slash") && ls.contains(r"cr\rname"));
 
     let entries = repo.json(&["ls", &first[..8]]);
-    let paths: Vec<&str> =
-        array(&entries, "entries").iter().map(|e| e["path"].as_str().expect("path")).collect();
+    let paths: Vec<&str> = array(&entries, "entries")
+        .iter()
+        .map(|e| e["path"].as_str().expect("path"))
+        .collect();
     for name in names {
-        assert!(paths.contains(&format!("{root}/{name}").as_str()), "{name:?} in {paths:?}");
+        assert!(
+            paths.contains(&format!("{root}/{name}").as_str()),
+            "{name:?} in {paths:?}"
+        );
     }
 
     let diff = repo.json(&["diff", &first[..8], &second[..8]]);
     assert_eq!(array(&diff, "changes").len(), names.len());
-    assert!(array(&diff, "changes").iter().all(|c| c["status"] == "modified"));
+    assert!(array(&diff, "changes")
+        .iter()
+        .all(|c| c["status"] == "modified"));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -370,9 +460,15 @@ fn a_wrong_passphrase_shows_nothing() {
     let src = repo.env.path("src");
     write(&src, "a.txt", b"secret plans");
     let id = repo.backup(&src);
-    let wrong = repo.env.write_password_file("wrong", b"not the passphrase\n");
+    let wrong = repo
+        .env
+        .write_password_file("wrong", b"not the passphrase\n");
 
-    for args in [vec!["snapshots"], vec!["show", &id[..8]], vec!["ls", &id[..8]]] {
+    for args in [
+        vec!["snapshots"],
+        vec!["show", &id[..8]],
+        vec!["ls", &id[..8]],
+    ] {
         let output = repo.env.run_with_password_file(&wrong, &args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");
         assert!(stdout(&output).is_empty(), "{args:?}");
@@ -385,7 +481,11 @@ fn without_a_passphrase_source_the_commands_fail_before_reading_anything() {
     let repo = Repo::new();
     let output = repo.env.run(&["snapshots"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("no terminal available"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("no terminal available"),
+        "{}",
+        stderr(&output)
+    );
     assert!(stdout(&output).is_empty());
 }
 
@@ -396,16 +496,29 @@ fn bad_references_are_usage_errors_and_unknown_ones_are_reported() {
     write(&src, "a.txt", b"one");
     let id = repo.backup(&src);
 
-    for args in [vec!["show", "abc"], vec!["show", "latest"], vec!["diff", &id[..8]], vec!["ls", "XYZ1"]] {
+    for args in [
+        vec!["show", "abc"],
+        vec!["show", "latest"],
+        vec!["diff", &id[..8]],
+        vec!["ls", "XYZ1"],
+    ] {
         let output = repo.run(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(stdout(&output).is_empty());
     }
     let other = if id.starts_with('0') { "1111" } else { "0000" };
-    for args in [vec!["show", other], vec!["ls", other], vec!["diff", &id[..8], other]] {
+    for args in [
+        vec!["show", other],
+        vec!["ls", other],
+        vec!["diff", &id[..8], other],
+    ] {
         let output = repo.run(&args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");
-        assert!(stderr(&output).contains("does not exist"), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("does not exist"),
+            "{}",
+            stderr(&output)
+        );
     }
 }
 
@@ -422,7 +535,10 @@ fn a_tampered_snapshot_is_reported_and_never_shown() {
     let output = repo.run(&["snapshots"]);
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
     assert!(stdout(&output).contains(&good[..8]));
-    assert!(!stdout(&output).contains(&bad[..8]), "a damaged snapshot is not listed as if it were fine");
+    assert!(
+        !stdout(&output).contains(&bad[..8]),
+        "a damaged snapshot is not listed as if it were fine"
+    );
     assert!(stderr(&output).contains(&bad), "{}", stderr(&output));
     assert!(stderr(&output).contains("damaged and not shown"));
 
@@ -433,15 +549,26 @@ fn a_tampered_snapshot_is_reported_and_never_shown() {
     assert_eq!(array(&document, "damaged")[0]["id"], bad.as_str());
     assert_eq!(document["unique_sizes_exact"], false);
 
-    for args in [vec!["show", &bad[..8]], vec!["ls", &bad[..8]], vec!["diff", &good[..8], &bad[..8]]] {
+    for args in [
+        vec!["show", &bad[..8]],
+        vec!["ls", &bad[..8]],
+        vec!["diff", &good[..8], &bad[..8]],
+    ] {
         let output = repo.run(&args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");
         assert!(stdout(&output).is_empty(), "{args:?}");
         assert!(stderr(&output).contains("corrupt"), "{}", stderr(&output));
     }
     let output = repo.run(&["show", &good[..8]]);
-    assert_eq!(output.status.code(), Some(0), "the good snapshot still works");
-    assert!(stdout(&output).contains("may be too large"), "and says its unique size is uncertain");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "the good snapshot still works"
+    );
+    assert!(
+        stdout(&output).contains("may be too large"),
+        "and says its unique size is uncertain"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -477,6 +604,8 @@ fn output_is_identical_every_time_and_the_repository_is_never_changed() {
         assert!(!once.is_empty());
     }
     assert_eq!(before, (snapshot_bytes(&first), snapshot_bytes(&second)));
-    let locks = fs::read_dir(repo.env.repo_path().join("locks")).expect("read locks").count();
+    let locks = fs::read_dir(repo.env.repo_path().join("locks"))
+        .expect("read locks")
+        .count();
     assert_eq!(locks, 0, "no lock is left behind");
 }

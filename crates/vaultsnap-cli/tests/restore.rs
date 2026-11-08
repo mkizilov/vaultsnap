@@ -35,7 +35,12 @@ impl Repo {
 
     fn ok(&self, args: &[&str]) -> String {
         let output = self.run(args);
-        assert_eq!(output.status.code(), Some(0), "{args:?}: {}", stderr(&output));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            stderr(&output)
+        );
         stdout(&output)
     }
 
@@ -111,7 +116,11 @@ fn files_below(root: &Path) -> BTreeMap<String, Vec<u8>> {
             if meta.is_dir() {
                 pending.push(path);
             } else if meta.is_file() {
-                let relative = path.strip_prefix(root).expect("inside").to_string_lossy().into_owned();
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("inside")
+                    .to_string_lossy()
+                    .into_owned();
                 found.insert(relative, fs::read(&path).expect("read"));
             }
         }
@@ -140,15 +149,28 @@ fn a_snapshot_is_restored_byte_for_byte() {
     let id = repo.backup(&src);
     let target = repo.env.path("out");
 
-    let text = repo.ok(&["restore", &id, "--target", target.to_str().expect("UTF-8 path")]);
-    assert!(text.starts_with(&format!("restored snapshot {id} into ")), "{text}");
+    let text = repo.ok(&[
+        "restore",
+        &id,
+        "--target",
+        target.to_str().expect("UTF-8 path"),
+    ]);
+    assert!(
+        text.starts_with(&format!("restored snapshot {id} into ")),
+        "{text}"
+    );
     assert!(text.contains("  files         6 ("), "{text}");
     assert!(text.contains("  directories   "), "{text}");
 
     let root = restored(&target, &src);
     assert_eq!(files_below(&root), files_below(&src));
-    assert_eq!(fs::read(root.join("docs/archive/data.bin")).expect("read"), pseudo_random(200_000, 1));
-    let locks = fs::read_dir(repo.env.repo_path().join("locks")).expect("read locks").count();
+    assert_eq!(
+        fs::read(root.join("docs/archive/data.bin")).expect("read"),
+        pseudo_random(200_000, 1)
+    );
+    let locks = fs::read_dir(repo.env.repo_path().join("locks"))
+        .expect("read locks")
+        .count();
     assert_eq!(locks, 0, "no lock is left behind");
 }
 
@@ -197,7 +219,10 @@ fn selected_paths_are_restored_and_nothing_else() {
     );
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let files = files_below(&restored(&target, &src));
-    assert_eq!(files.keys().map(String::as_str).collect::<Vec<_>>(), ["docs/archive/data.bin", "readme.txt"]);
+    assert_eq!(
+        files.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["docs/archive/data.bin", "readme.txt"]
+    );
     assert_eq!(files["readme.txt"], b"hello restore");
 }
 
@@ -211,7 +236,11 @@ fn an_unknown_selection_fails_and_creates_nothing() {
 
     let output = repo.restore(&id, &target, &["--include", "/no/such/path"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("has no entry at or below /no/such/path"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("has no entry at or below /no/such/path"),
+        "{}",
+        stderr(&output)
+    );
     assert!(!target.exists());
 }
 
@@ -241,9 +270,21 @@ fn the_default_is_to_fail_and_change_nothing() {
     let output = repo.restore(&id, &target, &[]);
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout(&output).is_empty());
-    assert!(stderr(&output).contains("already exist"), "{}", stderr(&output));
-    assert!(stderr(&output).contains("nothing was restored"), "{}", stderr(&output));
-    assert_eq!(files_below(&target), before, "the target is exactly as it was");
+    assert!(
+        stderr(&output).contains("already exist"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("nothing was restored"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        files_below(&target),
+        before,
+        "the target is exactly as it was"
+    );
     assert_eq!(fs::read(readme).expect("read"), b"my own version");
 }
 
@@ -257,10 +298,21 @@ fn skip_keeps_what_is_there_and_fills_the_gaps() {
 
     let output = repo.restore(&id, &target, &["--on-conflict", "skip"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert!(stdout(&output).contains("  skipped       5 "), "{}", stdout(&output));
-    assert!(stderr(&output).contains("5 skipped:"), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("  skipped       5 "),
+        "{}",
+        stdout(&output)
+    );
+    assert!(
+        stderr(&output).contains("5 skipped:"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(fs::read(readme).expect("read"), b"my own version");
-    assert!(restored(&target, &src).join("empty.bin").exists(), "the missing file was restored");
+    assert!(
+        restored(&target, &src).join("empty.bin").exists(),
+        "the missing file was restored"
+    );
 }
 
 #[test]
@@ -296,17 +348,45 @@ fn links_are_restored_only_when_they_cannot_lead_out() {
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let root = restored(&target, &src);
     assert!(root.join("good.link").symlink_metadata().is_ok());
-    assert!(root.join("absolute.link").symlink_metadata().is_err(), "refused by default");
-    assert!(stderr(&output).contains("1 skipped:"), "{}", stderr(&output));
-    assert!(stderr(&output).contains("absolute.link"), "{}", stderr(&output));
-    assert!(stderr(&output).contains("--symlinks as-recorded"), "{}", stderr(&output));
+    assert!(
+        root.join("absolute.link").symlink_metadata().is_err(),
+        "refused by default"
+    );
+    assert!(
+        stderr(&output).contains("1 skipped:"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("absolute.link"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("--symlinks as-recorded"),
+        "{}",
+        stderr(&output)
+    );
 
     let target = repo.env.path("none");
-    assert_eq!(repo.restore(&id, &target, &["--symlinks", "skip"]).status.code(), Some(0));
-    assert!(restored(&target, &src).join("good.link").symlink_metadata().is_err());
+    assert_eq!(
+        repo.restore(&id, &target, &["--symlinks", "skip"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert!(restored(&target, &src)
+        .join("good.link")
+        .symlink_metadata()
+        .is_err());
 
     let target = repo.env.path("all");
-    assert_eq!(repo.restore(&id, &target, &["--symlinks", "as-recorded"]).status.code(), Some(0));
+    assert_eq!(
+        repo.restore(&id, &target, &["--symlinks", "as-recorded"])
+            .status
+            .code(),
+        Some(0)
+    );
     let link = fs::read_link(restored(&target, &src).join("absolute.link")).expect("link");
     assert_eq!(link, Path::new("/etc/passwd"));
 }
@@ -337,14 +417,33 @@ fn a_damaged_chunk_fails_that_file_alone_and_exits_with_status_three() {
     let target = repo.env.path("out");
     let output = repo.restore(&id, &target, &[]);
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
-    assert!(stderr(&output).contains("1 could not be restored:"), "{}", stderr(&output));
-    assert!(stderr(&output).contains("victim.bin"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("1 could not be restored:"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("victim.bin"),
+        "{}",
+        stderr(&output)
+    );
     assert!(stderr(&output).contains("corrupt"), "{}", stderr(&output));
-    assert!(stderr(&output).contains("the restore is incomplete"), "{}", stderr(&output));
-    assert!(stdout(&output).contains("  failed        1"), "{}", stdout(&output));
+    assert!(
+        stderr(&output).contains("the restore is incomplete"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stdout(&output).contains("  failed        1"),
+        "{}",
+        stdout(&output)
+    );
 
     let files = files_below(&restored(&target, &src));
-    assert_eq!(files.keys().map(String::as_str).collect::<Vec<_>>(), ["good-1.txt", "good-2.txt"]);
+    assert_eq!(
+        files.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["good-1.txt", "good-2.txt"]
+    );
     assert_eq!(files["good-1.txt"], b"a good file");
 }
 
@@ -373,13 +472,24 @@ fn a_wrong_passphrase_restores_nothing() {
     let src = repo.env.path("src");
     sample(&src);
     let id = repo.backup(&src);
-    let wrong = repo.env.write_password_file("wrong", b"not the passphrase\n");
+    let wrong = repo
+        .env
+        .write_password_file("wrong", b"not the passphrase\n");
 
     let target = repo.env.path("out");
-    let args = ["restore", id.as_str(), "--target", target.to_str().expect("UTF-8 path")];
+    let args = [
+        "restore",
+        id.as_str(),
+        "--target",
+        target.to_str().expect("UTF-8 path"),
+    ];
     let output = repo.env.run_with_password_file(&wrong, &args);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("incorrect passphrase"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("incorrect passphrase"),
+        "{}",
+        stderr(&output)
+    );
     assert!(!target.exists());
 }
 
@@ -397,7 +507,11 @@ fn a_target_inside_the_repository_is_refused() {
 
     let output = repo.restore(&id, &inside, &[]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("inside the repository"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("inside the repository"),
+        "{}",
+        stderr(&output)
+    );
     assert!(!inside.exists());
 }
 
@@ -412,7 +526,11 @@ fn a_target_that_is_a_file_is_refused_and_left_alone() {
 
     let output = repo.restore(&id, &file, &[]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("not a directory"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("not a directory"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(fs::read(&file).expect("read"), b"precious");
 }
 
@@ -427,7 +545,11 @@ fn unknown_snapshots_and_bad_arguments_are_reported() {
     let other = if id.starts_with('0') { "1111" } else { "0000" };
     let output = repo.restore(other, &target, &[]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("does not exist"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("does not exist"),
+        "{}",
+        stderr(&output)
+    );
 
     for bad in [
         vec!["--on-conflict", "merge"],
@@ -438,7 +560,10 @@ fn unknown_snapshots_and_bad_arguments_are_reported() {
         assert_eq!(output.status.code(), Some(2), "{bad:?}");
         assert!(stdout(&output).is_empty());
     }
-    for args in [vec!["restore", "abc", "--target", "out"], vec!["restore", id.as_str()]] {
+    for args in [
+        vec!["restore", "abc", "--target", "out"],
+        vec!["restore", id.as_str()],
+    ] {
         assert_eq!(repo.run(&args).status.code(), Some(2), "{args:?}");
     }
     assert!(!target.exists());
@@ -448,7 +573,12 @@ fn unknown_snapshots_and_bad_arguments_are_reported() {
 fn a_missing_repository_is_reported_and_nothing_is_created() {
     let env = TestEnv::default();
     let target = env.path("out");
-    let args = ["restore", "abcd", "--target", target.to_str().expect("UTF-8 path")];
+    let args = [
+        "restore",
+        "abcd",
+        "--target",
+        target.to_str().expect("UTF-8 path"),
+    ];
     let output = env.run_with_password_file(&env.password_file(), &args);
     assert_eq!(output.status.code(), Some(1));
     assert!(!target.exists());
@@ -467,7 +597,11 @@ fn names_in_error_output_cannot_inject_terminal_control_sequences() {
     write(&src, "fine.txt", b"fine");
     repo.backup(&src);
     let known = repo.objects();
-    write(&src, "evil\x1b[2J\x07name\nforged line", &pseudo_random(3000, 11));
+    write(
+        &src,
+        "evil\x1b[2J\x07name\nforged line",
+        &pseudo_random(3000, 11),
+    );
     let id = repo.backup(&src);
     for object in repo.objects().difference(&known) {
         let mut bytes = fs::read(object).expect("read object");
@@ -479,8 +613,14 @@ fn names_in_error_output_cannot_inject_terminal_control_sequences() {
     assert_eq!(output.status.code(), Some(3));
     let err = stderr(&output);
     for forbidden in ['\x1b', '\x07'] {
-        assert!(!err.contains(forbidden), "{forbidden:?} reached standard error:\n{err:?}");
+        assert!(
+            !err.contains(forbidden),
+            "{forbidden:?} reached standard error:\n{err:?}"
+        );
     }
     assert!(err.contains(r"evil\x1b[2J\x07name\nforged line"), "{err}");
-    assert!(!err.lines().any(|line| line.starts_with("forged line")), "a name started a new line");
+    assert!(
+        !err.lines().any(|line| line.starts_with("forged line")),
+        "a name started a new line"
+    );
 }

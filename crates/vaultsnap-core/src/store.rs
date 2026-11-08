@@ -1,5 +1,5 @@
 //! The repository's view of its storage: a cheap, cloneable handle on a
-//! [`Backend`](crate::storage::Backend).
+//! [`Backend`].
 //!
 //! Everything that reads or writes repository files (keys, locks, the chunk store, the snapshot
 //! store, `check`, `prune`) holds a [`Store`] and nothing else, so the same code runs on any
@@ -260,9 +260,18 @@ mod tests {
     fn a_prefix_is_read_together_with_the_size_of_the_whole_file() {
         let (_dir, store) = store();
         store.write_new("config", b"0123456789").expect("write");
-        assert_eq!(store.read_prefix("config", 4).expect("read"), (b"0123".to_vec(), 10));
-        assert_eq!(store.read_prefix("config", 100).expect("read"), (b"0123456789".to_vec(), 10));
-        assert_eq!(store.read_prefix("config", 0).expect("read"), (Vec::new(), 10));
+        assert_eq!(
+            store.read_prefix("config", 4).expect("read"),
+            (b"0123".to_vec(), 10)
+        );
+        assert_eq!(
+            store.read_prefix("config", 100).expect("read"),
+            (b"0123456789".to_vec(), 10)
+        );
+        assert_eq!(
+            store.read_prefix("config", 0).expect("read"),
+            (Vec::new(), 10)
+        );
         let err = store.read_prefix("absent", 4).expect_err("must fail");
         assert!(err.is_not_found(), "{err}");
     }
@@ -314,7 +323,10 @@ mod tests {
     fn oversized_file_is_rejected() {
         let (_dir, store) = store();
         store.write_new("big", &[7_u8; 11]).expect("write");
-        assert!(matches!(store.read("big", 10), Err(Error::TooLarge { max_len: 10, .. })));
+        assert!(matches!(
+            store.read("big", 10),
+            Err(Error::TooLarge { max_len: 10, .. })
+        ));
         assert_eq!(store.read("big", 11).expect("read").len(), 11);
     }
 
@@ -342,7 +354,10 @@ mod tests {
             long.as_str(),
         ];
         for name in names {
-            assert!(matches!(store.exists(name), Err(Error::InvalidName(_))), "{name:?}");
+            assert!(
+                matches!(store.exists(name), Err(Error::InvalidName(_))),
+                "{name:?}"
+            );
             assert!(store.write_new(name, b"x").is_err(), "{name:?}");
         }
         assert!(store.list("").expect("list").is_empty());
@@ -360,7 +375,9 @@ mod tests {
     #[test]
     fn writing_into_a_missing_directory_fails_without_creating_it() {
         let (dir, store) = store();
-        let err = store.write_new("missing/file", b"x").expect_err("must fail");
+        let err = store
+            .write_new("missing/file", b"x")
+            .expect_err("must fail");
         assert!(err.is_not_found(), "{err}");
         assert!(!dir.path().join("missing").exists());
     }
@@ -401,7 +418,10 @@ mod tests {
         let err = store.write_new("link/file", b"x").expect_err("must fail");
         assert!(matches!(err, Error::Symlink { .. }));
         assert!(matches!(store.read("link", 10), Err(Error::Symlink { .. })));
-        assert!(fs::read_dir(outside.path()).expect("read_dir").next().is_none());
+        assert!(fs::read_dir(outside.path())
+            .expect("read_dir")
+            .next()
+            .is_none());
     }
 
     #[cfg(unix)]
@@ -428,8 +448,14 @@ mod tests {
         store.write_new("config", b"12345").expect("write");
         assert_eq!(store.file_len("config").expect("len"), 5);
         assert!(store.modified("config").expect("modified") <= SystemTime::now());
-        assert!(store.file_len("absent").expect_err("missing").is_not_found());
-        assert!(store.modified("absent").expect_err("missing").is_not_found());
+        assert!(store
+            .file_len("absent")
+            .expect_err("missing")
+            .is_not_found());
+        assert!(store
+            .modified("absent")
+            .expect_err("missing")
+            .is_not_found());
     }
 
     #[test]
@@ -465,7 +491,11 @@ mod tests {
                 handle.join().expect("a counting thread panicked");
             }
         });
-        assert_eq!(store.read("counter", 100).expect("read"), b"20", "no increment was lost");
+        assert_eq!(
+            store.read("counter", 100).expect("read"),
+            b"20",
+            "no increment was lost"
+        );
     }
 
     #[test]
@@ -526,14 +556,19 @@ mod tests {
                 runs += 1;
                 if runs == 1 {
                     // Somebody else gets in after we have read.
-                    store.write_replace("meta", b"interloper").expect("interfere");
+                    store
+                        .write_replace("meta", b"interloper")
+                        .expect("interfere");
                 }
                 let mut next = current.map(<[u8]>::to_vec).unwrap_or_default();
                 next.extend_from_slice(b"+mine");
                 Ok(next)
             })
             .expect("update");
-        assert_eq!(runs, 2, "the first try was refused and the change ran again");
+        assert_eq!(
+            runs, 2,
+            "the first try was refused and the change ran again"
+        );
         assert_eq!(store.read("meta", 100).expect("read"), b"interloper+mine");
     }
 
@@ -544,7 +579,9 @@ mod tests {
             ..MemoryBackend::new().capabilities()
         });
         let store = Store::new(Arc::new(incapable));
-        let err = store.update("meta", 100, |_| Ok(Vec::new())).expect_err("unsupported");
+        let err = store
+            .update("meta", 100, |_| Ok(Vec::new()))
+            .expect_err("unsupported");
         assert!(matches!(err, Error::UnsupportedBackend(_)), "{err}");
         assert!(!store.exists("meta").expect("exists"));
     }

@@ -155,7 +155,9 @@ impl Backend for LocalBackend {
     fn stat(&self, name: &str) -> Result<ObjectInfo> {
         let path = self.resolve(name)?;
         let meta = fs::symlink_metadata(&path).map_err(|err| Error::io("inspect", &path, err))?;
-        let modified = meta.modified().map_err(|err| Error::io("inspect", &path, err))?;
+        let modified = meta
+            .modified()
+            .map_err(|err| Error::io("inspect", &path, err))?;
         Ok(ObjectInfo {
             len: meta.len(),
             modified,
@@ -168,8 +170,12 @@ impl Backend for LocalBackend {
         let file = File::open(&path).map_err(|err| Error::io("open", &path, err))?;
         // The version comes from the open file, so it describes the bytes read below even if the
         // name is replaced in the meantime.
-        let meta = file.metadata().map_err(|err| Error::io("inspect", &path, err))?;
-        let modified = meta.modified().map_err(|err| Error::io("inspect", &path, err))?;
+        let meta = file
+            .metadata()
+            .map_err(|err| Error::io("inspect", &path, err))?;
+        let modified = meta
+            .modified()
+            .map_err(|err| Error::io("inspect", &path, err))?;
         let mut data = Vec::new();
         file.take(max_len.saturating_add(1))
             .read_to_end(&mut data)
@@ -229,7 +235,11 @@ impl Backend for LocalBackend {
             entries.push(DirEntryInfo {
                 name: entry.file_name().to_string_lossy().into_owned(),
                 kind,
-                len: if kind == DirEntryKind::File { meta.len() } else { 0 },
+                len: if kind == DirEntryKind::File {
+                    meta.len()
+                } else {
+                    0
+                },
             });
         }
         entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -408,7 +418,9 @@ mod tests {
         fs::write(&file, b"x").expect("write");
         let state = LocalBackend::new(&file).probe().expect("probe");
         match state {
-            LocationState::Unusable(reason) => assert!(reason.contains("not a directory"), "{reason}"),
+            LocationState::Unusable(reason) => {
+                assert!(reason.contains("not a directory"), "{reason}")
+            }
             other => panic!("expected Unusable, got {other:?}"),
         }
     }
@@ -418,7 +430,9 @@ mod tests {
         let (_dir, backend) = backend();
         let first = backend.put("a", b"same", PutMode::Create).expect("create");
         assert_eq!(backend.stat("a").expect("stat").version, first);
-        let second = backend.put("a", b"same", PutMode::Overwrite).expect("overwrite");
+        let second = backend
+            .put("a", b"same", PutMode::Overwrite)
+            .expect("overwrite");
         assert_ne!(first, second);
         let read = backend.get("a", 100).expect("get");
         assert_eq!(read.info.version, second);
@@ -428,8 +442,12 @@ mod tests {
     #[test]
     fn an_update_made_after_a_replacement_is_refused_and_changes_nothing() {
         let (_dir, backend) = backend();
-        let seen = backend.put("meta", b"one", PutMode::Create).expect("create");
-        backend.put("meta", b"two", PutMode::Overwrite).expect("someone else replaces it");
+        let seen = backend
+            .put("meta", b"one", PutMode::Create)
+            .expect("create");
+        backend
+            .put("meta", b"two", PutMode::Overwrite)
+            .expect("someone else replaces it");
 
         let err = backend
             .put("meta", b"three", PutMode::Update(seen))
@@ -438,7 +456,9 @@ mod tests {
         assert_eq!(backend.get("meta", 100).expect("get").data, b"two");
 
         let current = backend.stat("meta").expect("stat").version;
-        backend.put("meta", b"three", PutMode::Update(current)).expect("current version");
+        backend
+            .put("meta", b"three", PutMode::Update(current))
+            .expect("current version");
         assert_eq!(backend.get("meta", 100).expect("get").data, b"three");
     }
 
@@ -446,9 +466,15 @@ mod tests {
     fn a_published_object_leaves_no_temporary_file_and_is_private() {
         let (dir, backend) = backend();
         backend.create_dir("d").expect("mkdir");
-        backend.put("d/x", b"data", PutMode::Create).expect("create");
-        backend.put("d/x", b"data2", PutMode::Overwrite).expect("overwrite");
-        let err = backend.put("d/x", b"again", PutMode::Create).expect_err("exists");
+        backend
+            .put("d/x", b"data", PutMode::Create)
+            .expect("create");
+        backend
+            .put("d/x", b"data2", PutMode::Overwrite)
+            .expect("overwrite");
+        let err = backend
+            .put("d/x", b"again", PutMode::Create)
+            .expect_err("exists");
         assert!(matches!(err, Error::AlreadyExists { .. }), "{err}");
 
         let names: Vec<String> = backend
@@ -462,7 +488,8 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
 
-            let mode = |path: PathBuf| fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+            let mode =
+                |path: PathBuf| fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
             assert_eq!(mode(dir.path().join("d")), 0o700);
             assert_eq!(mode(dir.path().join("d/x")), 0o600);
         }
@@ -473,15 +500,27 @@ mod tests {
     #[test]
     fn the_names_that_resolve_are_the_valid_ones_and_links_are_refused() {
         let (dir, backend) = backend();
-        assert_eq!(backend.resolve("a/b").expect("resolve"), dir.path().join("a").join("b"));
-        assert!(matches!(backend.resolve("../x"), Err(Error::InvalidName(_))));
+        assert_eq!(
+            backend.resolve("a/b").expect("resolve"),
+            dir.path().join("a").join("b")
+        );
+        assert!(matches!(
+            backend.resolve("../x"),
+            Err(Error::InvalidName(_))
+        ));
         assert!(matches!(backend.resolve(""), Err(Error::InvalidName(_))));
         #[cfg(unix)]
         {
             let outside = tempfile::tempdir().expect("create temporary directory");
             std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).expect("symlink");
-            assert!(matches!(backend.resolve("link/x"), Err(Error::Symlink { .. })));
-            assert!(matches!(backend.get("link/x", 10), Err(Error::Symlink { .. })));
+            assert!(matches!(
+                backend.resolve("link/x"),
+                Err(Error::Symlink { .. })
+            ));
+            assert!(matches!(
+                backend.get("link/x", 10),
+                Err(Error::Symlink { .. })
+            ));
         }
     }
 

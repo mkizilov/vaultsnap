@@ -91,6 +91,10 @@ impl fmt::Display for ApiError {
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
 /// S3 error codes that mean the caller is not allowed, whatever the status says.
+///
+/// Only the SDK adapter calls [`classify_response`] and uses these tables, but they are compiled
+/// and tested without the `s3` feature too, so that the logic cannot rot unnoticed.
+#[cfg_attr(not(feature = "s3"), allow(dead_code))]
 const DENIED_CODES: [&str; 11] = [
     "AccessDenied",
     "AllAccessDisabled",
@@ -106,6 +110,7 @@ const DENIED_CODES: [&str; 11] = [
 ];
 
 /// S3 error codes that mean "try again", whatever the status says.
+#[cfg_attr(not(feature = "s3"), allow(dead_code))]
 const TRANSIENT_CODES: [&str; 9] = [
     "ConditionalRequestConflict",
     "InternalError",
@@ -122,6 +127,7 @@ const TRANSIENT_CODES: [&str; 9] = [
 ///
 /// A concurrent conditional write (`409 ConditionalRequestConflict`) is transient: repeating it
 /// gets the real answer, a `412` or a success.
+#[cfg_attr(not(feature = "s3"), allow(dead_code))]
 pub fn classify_response(status: Option<u16>, code: Option<&str>) -> ApiErrorKind {
     if code == Some("NoSuchBucket") {
         return ApiErrorKind::NoSuchBucket;
@@ -257,14 +263,24 @@ mod tests {
             (None, None, Other),
         ];
         for (status, code, expected) in cases {
-            assert_eq!(classify_response(status, code), expected, "{status:?} {code:?}");
+            assert_eq!(
+                classify_response(status, code),
+                expected,
+                "{status:?} {code:?}"
+            );
         }
     }
 
     #[test]
     fn a_throttling_code_wins_over_a_status_that_would_not_be_retried() {
-        assert_eq!(classify_response(Some(400), Some("SlowDown")), ApiErrorKind::Transient);
-        assert_eq!(classify_response(Some(200), Some("InternalError")), ApiErrorKind::Transient);
+        assert_eq!(
+            classify_response(Some(400), Some("SlowDown")),
+            ApiErrorKind::Transient
+        );
+        assert_eq!(
+            classify_response(Some(200), Some("InternalError")),
+            ApiErrorKind::Transient
+        );
     }
 
     #[test]
@@ -273,9 +289,15 @@ mod tests {
         assert_eq!(full.to_string(), "SlowDown (HTTP 503): reduce the rate");
         let bare = ApiError::new(ApiErrorKind::Other, "no route to host");
         assert_eq!(bare.to_string(), "no route to host");
-        let status_only = ApiError { status: Some(502), ..bare.clone() };
+        let status_only = ApiError {
+            status: Some(502),
+            ..bare.clone()
+        };
         assert_eq!(status_only.to_string(), "HTTP 502: no route to host");
-        let code_only = ApiError { code: Some("X".to_owned()), ..bare };
+        let code_only = ApiError {
+            code: Some("X".to_owned()),
+            ..bare
+        };
         assert_eq!(code_only.to_string(), "X: no route to host");
     }
 }

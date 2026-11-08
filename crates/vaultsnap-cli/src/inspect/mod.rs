@@ -51,7 +51,10 @@ pub async fn snapshots(
         }
     })?;
     for damaged in &list.damaged {
-        eprintln!("warning: snapshot {} is damaged and not shown: {}", damaged.id, damaged.error);
+        eprintln!(
+            "warning: snapshot {} is damaged and not shown: {}",
+            damaged.id, damaged.error
+        );
     }
     match list.damaged.len() {
         0 => Ok(()),

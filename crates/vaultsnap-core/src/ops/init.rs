@@ -247,7 +247,9 @@ mod tests {
             .await
             .expect_err("must fail");
         assert!(matches!(err, Error::AlreadyInitialized { .. }), "{err}");
-        repo.unlock(&passphrase()).await.expect("original passphrase still works");
+        repo.unlock(&passphrase())
+            .await
+            .expect("original passphrase still works");
         assert!(repo.unlock(&other).await.is_err());
     }
 
@@ -275,7 +277,10 @@ mod tests {
             let before = tree_state(dir.path());
 
             let err = init(&repo).await.expect_err("must fail");
-            assert!(matches!(err, Error::UnsupportedVersion { .. }), "{version}: {err}");
+            assert!(
+                matches!(err, Error::UnsupportedVersion { .. }),
+                "{version}: {err}"
+            );
             assert_eq!(tree_state(dir.path()), before);
             assert_eq!(fs::read_to_string(&path).expect("read config"), modified);
         }
@@ -288,7 +293,10 @@ mod tests {
         let repo = Repository::at(dir.path());
         let err = init(&repo).await.expect_err("must fail");
         assert!(matches!(err, Error::InvalidConfig(_)), "{err}");
-        assert_eq!(fs::read(dir.path().join("config")).expect("read"), b"garbage");
+        assert_eq!(
+            fs::read(dir.path().join("config")).expect("read"),
+            b"garbage"
+        );
         assert!(!dir.path().join("data").exists());
         assert!(!dir.path().join("keys").exists());
     }
@@ -324,7 +332,9 @@ mod tests {
         let dir = temp();
         fs::write(dir.path().join("photos.jpg"), b"jpeg").expect("write file");
         let before = tree_state(dir.path());
-        let err = init(&Repository::at(dir.path())).await.expect_err("must fail");
+        let err = init(&Repository::at(dir.path()))
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::InvalidPath(_)), "{err}");
         assert!(err.to_string().contains("photos.jpg"), "{err}");
         assert_eq!(tree_state(dir.path()), before);
@@ -384,7 +394,11 @@ mod tests {
         let config = init(&repo).await.expect("init");
         assert_eq!(repo.load_config().await.expect("loads"), config);
         let names = repo.store().list("").expect("list");
-        assert_eq!(names, ["config", "keys"], "object stores keep objects, not empty directories");
+        assert_eq!(
+            names,
+            ["config", "keys"],
+            "object stores keep objects, not empty directories"
+        );
         repo.unlock(&passphrase()).await.expect("unlocks");
         let err = init(&repo).await.expect_err("must fail");
         assert!(matches!(err, Error::AlreadyInitialized { .. }), "{err}");
@@ -394,20 +408,27 @@ mod tests {
     async fn a_lost_answer_for_the_config_does_not_cost_the_repository_its_key() {
         let memory = Arc::new(MemoryBackend::new());
         // The first put is the key file, the second the config, whose answer is lost.
-        let flaky = FlakyBackend::scripted_for(memory.clone(), &["put"], [Fault::After]).skipping(1);
+        let flaky =
+            FlakyBackend::scripted_for(memory.clone(), &["put"], [Fault::After]).skipping(1);
         let repo = Repository::with_backend(Arc::new(flaky));
 
         let err = init(&repo).await.expect_err("the answer was lost");
         assert!(err.is_transient(), "{err}");
-        assert!(memory.object_names().contains(&"config".to_owned()), "but the config was written");
+        assert!(
+            memory.object_names().contains(&"config".to_owned()),
+            "but the config was written"
+        );
         repo.load_config().await.expect("the repository opens");
-        repo.unlock(&passphrase()).await.expect("and its key file is still there");
+        repo.unlock(&passphrase())
+            .await
+            .expect("and its key file is still there");
     }
 
     #[tokio::test]
     async fn a_config_that_was_never_written_leaves_a_key_file_that_the_next_init_ignores() {
         let memory = Arc::new(MemoryBackend::new());
-        let flaky = FlakyBackend::scripted_for(memory.clone(), &["put"], [Fault::Before]).skipping(1);
+        let flaky =
+            FlakyBackend::scripted_for(memory.clone(), &["put"], [Fault::Before]).skipping(1);
         let repo = Repository::with_backend(Arc::new(flaky));
 
         let err = init(&repo).await.expect_err("the request was lost");
@@ -437,11 +458,21 @@ mod tests {
         let winners = results.iter().filter(|r| r.is_ok()).count();
         assert_eq!(winners, 1, "{results:?}");
         for result in results.iter().filter_map(|r| r.as_ref().err()) {
-            assert!(matches!(result, Error::AlreadyInitialized { .. }), "{result}");
+            assert!(
+                matches!(result, Error::AlreadyInitialized { .. }),
+                "{result}"
+            );
         }
-        let winner = results.iter().find_map(|r| r.as_ref().ok()).expect("a winner");
+        let winner = results
+            .iter()
+            .find_map(|r| r.as_ref().ok())
+            .expect("a winner");
         assert_eq!(&RepositoryConfig::load(&store).expect("loads"), winner);
         crate::keys::unlock(&store, &winner.repository_id, &pass).expect("winner's keys unlock");
-        assert_eq!(store.list("keys").expect("list").len(), 1, "losers remove their key files");
+        assert_eq!(
+            store.list("keys").expect("list").len(),
+            1,
+            "losers remove their key files"
+        );
     }
 }

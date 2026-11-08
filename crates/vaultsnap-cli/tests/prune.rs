@@ -64,7 +64,12 @@ impl Repo {
 
     fn ok(&self, args: &[&str]) -> String {
         let output = self.run(args);
-        assert_eq!(output.status.code(), Some(0), "{args:?}: {}", stderr(&output));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            stderr(&output)
+        );
         stdout(&output)
     }
 
@@ -84,14 +89,22 @@ impl Repo {
     fn snapshot_files(&self) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(self.env.repo_path().join("snapshots"))
             .expect("read snapshots")
-            .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         names.sort();
         names
     }
 
     fn assert_unlocked(&self) {
-        let locks = fs::read_dir(self.env.repo_path().join("locks")).expect("read locks").count();
+        let locks = fs::read_dir(self.env.repo_path().join("locks"))
+            .expect("read locks")
+            .count();
         assert_eq!(locks, 0, "no lock is left behind");
     }
 }
@@ -153,7 +166,10 @@ fn plan_line<'a>(text: &'a str, id: &str) -> &'a str {
 /// The plan of `with_history` under `--keep-last 1`: the first two snapshots go, the third stays.
 fn assert_the_plan(text: &str, ids: &[String]) {
     assert!(text.starts_with("Policy       keep last 1\n"), "{text}");
-    assert!(text.contains("Snapshots    3 (1 kept, 2 to remove)\n"), "{text}");
+    assert!(
+        text.contains("Snapshots    3 (1 kept, 2 to remove)\n"),
+        "{text}"
+    );
     for id in &ids[..2] {
         let line = plan_line(text, id);
         assert!(line.starts_with("  REMOVE  "), "{line:?}");
@@ -161,8 +177,14 @@ fn assert_the_plan(text: &str, ids: &[String]) {
     }
     let kept = plan_line(text, &ids[2]);
     assert!(kept.starts_with("  KEEP    "), "{kept:?}");
-    assert!(kept.ends_with("Z  last"), "{kept:?}: it says why it is kept");
-    assert!(text.contains("Chunks       2 in use by the kept snapshots\n"), "{text}");
+    assert!(
+        kept.ends_with("Z  last"),
+        "{kept:?}: it says why it is kept"
+    );
+    assert!(
+        text.contains("Chunks       2 in use by the kept snapshots\n"),
+        "{text}"
+    );
     assert!(text.contains("Unreferenced 2 objects ("), "{text}");
     assert!(text.contains(") that no kept snapshot needs\n"), "{text}");
 }
@@ -191,14 +213,20 @@ fn a_dry_run_shows_the_plan_and_changes_nothing() {
 
     let text = repo.ok(&["prune", "--keep-last", "1", "--dry-run"]);
     assert_the_plan(&text, &repo.ids);
-    assert!(text.ends_with("\nDry run: nothing was changed.\n"), "{text}");
+    assert!(
+        text.ends_with("\nDry run: nothing was changed.\n"),
+        "{text}"
+    );
     assert!(!text.contains("Removed"), "{text}");
     assert_eq!(repo.state(), before);
     repo.assert_unlocked();
 
     // --dry-run wins over --yes.
     let both = repo.ok(&["prune", "--keep-last", "1", "--yes", "--dry-run"]);
-    assert!(both.ends_with("\nDry run: nothing was changed.\n"), "{both}");
+    assert!(
+        both.ends_with("\nDry run: nothing was changed.\n"),
+        "{both}"
+    );
     assert_eq!(repo.state(), before);
 }
 
@@ -210,20 +238,31 @@ fn yes_deletes_what_the_plan_showed_and_every_kept_snapshot_stays_whole() {
 
     let text = repo.ok(&["prune", "--keep-last", "1", "--yes"]);
     assert_the_plan(&text, &repo.ids);
-    assert!(text.contains("\nRemoved      2 snapshots and 2 chunk objects ("), "{text}");
+    assert!(
+        text.contains("\nRemoved      2 snapshots and 2 chunk objects ("),
+        "{text}"
+    );
     assert!(text.contains(VERIFIED), "{text}");
     assert!(!text.contains("Dry run"), "{text}");
-    assert_eq!(repo.snapshot_files(), [kept.clone()]);
+    assert_eq!(repo.snapshot_files(), std::slice::from_ref(&kept));
     repo.assert_unlocked();
 
     let listing = repo.ok(&["snapshots"]);
     assert!(listing.contains(&kept[..8]), "{listing}");
     for gone in &repo.ids[..2] {
-        assert!(!listing.contains(&gone[..8]), "{gone} should be gone:\n{listing}");
+        assert!(
+            !listing.contains(&gone[..8]),
+            "{gone} should be gone:\n{listing}"
+        );
     }
 
     let target = repo.env.path("out");
-    repo.ok(&["restore", &kept, "--target", target.to_str().expect("UTF-8 path")]);
+    repo.ok(&[
+        "restore",
+        &kept,
+        "--target",
+        target.to_str().expect("UTF-8 path"),
+    ]);
     assert_eq!(files_below(&restored(&target, &src)), files_below(&src));
     repo.ok(&["check", "--read-data"]);
 }
@@ -235,8 +274,14 @@ fn pruning_again_has_nothing_to_do() {
     let after = repo.state();
 
     let text = repo.ok(&["prune", "--keep-last", "1", "--yes"]);
-    assert!(text.contains("Snapshots    1 (1 kept, 0 to remove)\n"), "{text}");
-    assert!(text.contains("\nRemoved      0 snapshots and 0 chunk objects (0 B)\n"), "{text}");
+    assert!(
+        text.contains("Snapshots    1 (1 kept, 0 to remove)\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nRemoved      0 snapshots and 0 chunk objects (0 B)\n"),
+        "{text}"
+    );
     assert_eq!(repo.state(), after);
 }
 
@@ -245,8 +290,14 @@ fn a_policy_that_keeps_everything_removes_nothing() {
     let repo = Repo::with_history();
     let before = repo.state();
     let text = repo.ok(&["prune", "--keep-last", "10", "--yes"]);
-    assert!(text.contains("Snapshots    3 (3 kept, 0 to remove)\n"), "{text}");
-    assert!(text.contains("\nRemoved      0 snapshots and 0 chunk objects (0 B)\n"), "{text}");
+    assert!(
+        text.contains("Snapshots    3 (3 kept, 0 to remove)\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nRemoved      0 snapshots and 0 chunk objects (0 B)\n"),
+        "{text}"
+    );
     assert_eq!(repo.state(), before);
 }
 
@@ -260,7 +311,10 @@ fn without_a_person_to_ask_and_without_yes_nothing_is_deleted() {
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     let text = stderr(&output);
     assert!(text.contains("standard input is not a terminal"), "{text}");
-    assert!(text.contains("--dry-run") && text.contains("--yes"), "{text}");
+    assert!(
+        text.contains("--dry-run") && text.contains("--yes"),
+        "{text}"
+    );
     assert_eq!(stdout(&output), "");
     assert_eq!(repo.state(), before);
     repo.assert_unlocked();
@@ -272,19 +326,41 @@ fn policies_that_could_delete_everything_are_refused_and_nothing_is_touched() {
     let before = repo.state();
     let cases: [(&[&str], &str); 3] = [
         (&["prune", "--yes"], "at least one keep rule is required"),
-        (&["prune", "--keep-last", "0", "--yes"], "keep counts must be greater than zero"),
-        (&["prune", "--keep-last", "2", "--keep-daily", "0", "--dry-run"], "greater than zero"),
+        (
+            &["prune", "--keep-last", "0", "--yes"],
+            "keep counts must be greater than zero",
+        ),
+        (
+            &[
+                "prune",
+                "--keep-last",
+                "2",
+                "--keep-daily",
+                "0",
+                "--dry-run",
+            ],
+            "greater than zero",
+        ),
     ];
     for (args, message) in cases {
         let output = repo.run(args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");
-        assert!(stderr(&output).contains(message), "{args:?}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains(message),
+            "{args:?}: {}",
+            stderr(&output)
+        );
         assert_eq!(stdout(&output), "", "{args:?}");
     }
     assert_eq!(repo.state(), before);
 
     let output = repo.run(&["prune", "--keep-last", "many", "--yes"]);
-    assert_eq!(output.status.code(), Some(2), "a usage error: {}", stderr(&output));
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a usage error: {}",
+        stderr(&output)
+    );
     assert_eq!(repo.state(), before);
 }
 
@@ -292,11 +368,19 @@ fn policies_that_could_delete_everything_are_refused_and_nothing_is_touched() {
 fn a_wrong_passphrase_prunes_nothing() {
     let repo = Repo::with_history();
     let before = repo.state();
-    let wrong = repo.env.write_password_file("wrong", b"not the passphrase\n");
+    let wrong = repo
+        .env
+        .write_password_file("wrong", b"not the passphrase\n");
 
-    let output = repo.env.run_with_password_file(&wrong, &["prune", "--keep-last", "1", "--yes"]);
+    let output = repo
+        .env
+        .run_with_password_file(&wrong, &["prune", "--keep-last", "1", "--yes"]);
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
-    assert!(stderr(&output).contains("incorrect passphrase"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("incorrect passphrase"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(repo.state(), before);
     repo.assert_unlocked();
 }
@@ -316,11 +400,23 @@ fn a_snapshot_that_cannot_be_read_stops_the_prune_before_anything_is_deleted() {
         ["prune", "--keep-last", "1", "--dry-run"].as_slice(),
     ] {
         let output = repo.run(args);
-        assert_eq!(output.status.code(), Some(1), "{args:?}: {}", stderr(&output));
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{args:?}: {}",
+            stderr(&output)
+        );
         let text = stderr(&output);
         assert!(text.contains("1 snapshot(s) cannot be read"), "{text}");
-        assert!(text.contains(&repo.ids[1]), "the damaged snapshot is named: {text}");
-        assert_eq!(stdout(&output), "", "no plan is printed from data that cannot be trusted");
+        assert!(
+            text.contains(&repo.ids[1]),
+            "the damaged snapshot is named: {text}"
+        );
+        assert_eq!(
+            stdout(&output),
+            "",
+            "no plan is printed from data that cannot be trusted"
+        );
         assert_eq!(repo.state(), before);
     }
     repo.assert_unlocked();
@@ -366,10 +462,19 @@ fn objects_that_cannot_be_deleted_make_the_prune_incomplete_and_harm_no_kept_sna
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
     let errors = stderr(&output);
     assert!(errors.contains("2 could not be deleted:"), "{errors}");
-    assert!(errors.contains("2 unreferenced object(s) could not be deleted"), "{errors}");
+    assert!(
+        errors.contains("2 unreferenced object(s) could not be deleted"),
+        "{errors}"
+    );
     let text = stdout(&output);
-    assert!(text.contains("\nRemoved      2 snapshots and 0 chunk objects (0 B)\n"), "{text}");
-    assert!(text.contains("\nNot removed  2 objects (listed on standard error"), "{text}");
+    assert!(
+        text.contains("\nRemoved      2 snapshots and 0 chunk objects (0 B)\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nNot removed  2 objects (listed on standard error"),
+        "{text}"
+    );
     assert!(text.contains(VERIFIED), "{text}");
     assert_eq!(repo.snapshot_files(), [repo.ids[2].clone()]);
     repo.assert_unlocked();
@@ -381,6 +486,9 @@ fn objects_that_cannot_be_deleted_make_the_prune_incomplete_and_harm_no_kept_sna
         fs::set_permissions(shard, fs::Permissions::from_mode(0o755)).expect("chmod");
     }
     let text = repo.ok(&["prune", "--keep-last", "1", "--yes"]);
-    assert!(text.contains("\nRemoved      0 snapshots and 2 chunk objects ("), "{text}");
+    assert!(
+        text.contains("\nRemoved      0 snapshots and 2 chunk objects ("),
+        "{text}"
+    );
     repo.ok(&["check", "--read-data"]);
 }

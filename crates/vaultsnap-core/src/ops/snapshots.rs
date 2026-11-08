@@ -122,7 +122,10 @@ mod tests {
         let repo = Repository::at(dir.path().join("nope"));
         let err = repo.snapshots(&keys).await.expect_err("must fail");
         assert!(matches!(err, Error::NotARepository { .. }), "{err}");
-        let err = repo.snapshot(&keys, &reference("abcd")).await.expect_err("must fail");
+        let err = repo
+            .snapshot(&keys, &reference("abcd"))
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::NotARepository { .. }), "{err}");
     }
 
@@ -132,10 +135,19 @@ mod tests {
         let unknown = reference("abcd");
         let err = repo.snapshot(&keys, &unknown).await.expect_err("must fail");
         assert!(matches!(err, Error::SnapshotNotFound(_)), "{err}");
-        let err = repo.snapshot_details(&keys, &unknown).await.expect_err("must fail");
+        let err = repo
+            .snapshot_details(&keys, &unknown)
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::SnapshotNotFound(_)), "{err}");
-        let err = repo.compare_snapshots(&keys, &unknown, &unknown).await.expect_err("must fail");
+        let err = repo
+            .compare_snapshots(&keys, &unknown, &unknown)
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::SnapshotNotFound(_)), "{err}");
-        assert!(repo.store().list("locks").expect("list").is_empty(), "the lock was released");
+        assert!(
+            repo.store().list("locks").expect("list").is_empty(),
+            "the lock was released"
+        );
     }
 }

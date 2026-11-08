@@ -140,7 +140,10 @@ pub struct Diff {
 impl Diff {
     /// How many paths have the given status.
     pub fn count(&self, status: Status) -> usize {
-        self.changes.iter().filter(|change| change.status == status).count()
+        self.changes
+            .iter()
+            .filter(|change| change.status == status)
+            .count()
     }
 
     /// True if the two snapshots hold the same paths with the same content and attributes.
@@ -297,7 +300,9 @@ pub(crate) fn compare(from: &Manifest, to: &Manifest, chunks: &ChunkStore) -> Re
         changes
             .iter()
             .filter(|change| change.status == status)
-            .fold(0_u64, |total, change| total.saturating_add(change.file_bytes()))
+            .fold(0_u64, |total, change| {
+                total.saturating_add(change.file_bytes())
+            })
     };
     Ok(Diff {
         from: from.summary(),
@@ -358,7 +363,9 @@ mod tests {
         for _ in 0..3 {
             new.roots[0].entries.pop(); // `other`, `disk`, and `tty`, the last three entries
         }
-        new.roots[0].entries.push(file(0, b"new.txt", vec![chunk(5, 10), chunk(6, 20)]));
+        new.roots[0]
+            .entries
+            .push(file(0, b"new.txt", vec![chunk(5, 10), chunk(6, 20)]));
 
         let result = compare_trees(&old, &new);
         let added = change(&result, &format!("{DOCS}/new.txt"));
@@ -385,9 +392,16 @@ mod tests {
         let report = change(&result, &format!("{DOCS}/docs/report.txt"));
         assert_eq!(report.status, Status::Modified);
         assert_eq!(report.aspects, [Aspect::Content]);
-        assert_eq!((report.previous_size, report.size), (Some(1500), Some(1500)));
+        assert_eq!(
+            (report.previous_size, report.size),
+            (Some(1500), Some(1500))
+        );
         let alias = change(&result, &format!("{DOCS}/docs/alias"));
-        assert_eq!(alias.aspects, [Aspect::Content], "the link shares the changed data");
+        assert_eq!(
+            alias.aspects,
+            [Aspect::Content],
+            "the link shares the changed data"
+        );
         assert_eq!(alias.kind, EntryType::HardLink);
         assert_eq!(result.changes.len(), 2);
     }
@@ -398,7 +412,10 @@ mod tests {
         let mut new = rich();
         entry_mut(&mut new, b"report.txt").attributes.size = 1;
         let result = compare_trees(&old, &new);
-        assert_eq!(change(&result, &format!("{DOCS}/docs/report.txt")).aspects, [Aspect::Content]);
+        assert_eq!(
+            change(&result, &format!("{DOCS}/docs/report.txt")).aspects,
+            [Aspect::Content]
+        );
     }
 
     #[test]
@@ -411,7 +428,10 @@ mod tests {
         report.attributes.modified = Some(crate::scan::Timestamp { secs: 5, nanos: 6 });
 
         let result = compare_trees(&old, &new);
-        assert_eq!(change(&result, &format!("{DOCS}/docs/empty")).aspects, [Aspect::Mode]);
+        assert_eq!(
+            change(&result, &format!("{DOCS}/docs/empty")).aspects,
+            [Aspect::Mode]
+        );
         assert_eq!(
             change(&result, &format!("{DOCS}/docs/report.txt")).aspects,
             [Aspect::Owner, Aspect::ModifiedTime]
@@ -429,7 +449,10 @@ mod tests {
 
         entry_mut(&mut new, b"docs").attributes.mode = Some(0o700);
         let result = compare_trees(&old, &new);
-        assert_eq!(change(&result, &format!("{DOCS}/docs")).aspects, [Aspect::Mode]);
+        assert_eq!(
+            change(&result, &format!("{DOCS}/docs")).aspects,
+            [Aspect::Mode]
+        );
     }
 
     #[test]
@@ -437,7 +460,9 @@ mod tests {
         let old = rich();
         let mut new = rich();
         let report = entry_mut(&mut new, b"report.txt");
-        report.kind = NodeKind::Symlink { target: b"elsewhere".to_vec() };
+        report.kind = NodeKind::Symlink {
+            target: b"elsewhere".to_vec(),
+        };
         report.attributes.mode = Some(0o777);
 
         let result = compare_trees(&old, &new);
@@ -451,9 +476,14 @@ mod tests {
     fn a_retargeted_symbolic_link_is_named() {
         let old = rich();
         let mut new = rich();
-        entry_mut(&mut new, b"link").kind = NodeKind::Symlink { target: b"other/place".to_vec() };
+        entry_mut(&mut new, b"link").kind = NodeKind::Symlink {
+            target: b"other/place".to_vec(),
+        };
         let result = compare_trees(&old, &new);
-        assert_eq!(change(&result, &format!("{DOCS}/link")).aspects, [Aspect::LinkTarget]);
+        assert_eq!(
+            change(&result, &format!("{DOCS}/link")).aspects,
+            [Aspect::LinkTarget]
+        );
     }
 
     #[test]
@@ -461,7 +491,9 @@ mod tests {
         let old = rich();
         let mut new = rich();
         let alias = entry_mut(&mut new, b"alias");
-        alias.kind = NodeKind::File { chunks: vec![chunk(1, 1000), chunk(2, 500)] };
+        alias.kind = NodeKind::File {
+            chunks: vec![chunk(1, 1000), chunk(2, 500)],
+        };
         assert!(compare_trees(&old, &new).changes.is_empty());
     }
 
@@ -470,7 +502,9 @@ mod tests {
         let build = |names: &[&[u8]]| {
             let mut manifest = minimal();
             for name in names {
-                manifest.roots[0].entries.push(file(0, name, vec![chunk(3, 5)]));
+                manifest.roots[0]
+                    .entries
+                    .push(file(0, name, vec![chunk(3, 5)]));
             }
             manifest
         };
@@ -478,9 +512,11 @@ mod tests {
         let new = build(&[b"zebra", b"a b", b"a", b"\xff", b"Apple"]);
         let result = compare_trees(&old, &new);
         let order: Vec<&[u8]> = result.changes.iter().map(|c| c.path.as_slice()).collect();
-        let expected: [&[u8]; 5] =
-            [b"/r/Apple", b"/r/a", b"/r/a b", b"/r/zebra", b"/r/\xff"];
-        assert_eq!(order, expected, "plain byte order: uppercase first, 0xff last");
+        let expected: [&[u8]; 5] = [b"/r/Apple", b"/r/a", b"/r/a b", b"/r/zebra", b"/r/\xff"];
+        assert_eq!(
+            order, expected,
+            "plain byte order: uppercase first, 0xff last"
+        );
     }
 
     #[test]
@@ -490,7 +526,10 @@ mod tests {
         entry_mut(&mut new, b"bad-\xff\xfe-name").attributes.mode = Some(0o600);
         let result = compare_trees(&old, &new);
         assert_eq!(result.changes.len(), 1);
-        assert_eq!(result.changes[0].path, b"/home/me/Documents/bad-\xff\xfe-name");
+        assert_eq!(
+            result.changes[0].path,
+            b"/home/me/Documents/bad-\xff\xfe-name"
+        );
     }
 
     #[test]
@@ -500,7 +539,11 @@ mod tests {
         new.roots[0].source = b"/elsewhere".to_vec();
         let result = compare_trees(&old, &new);
         let statuses: Vec<Status> = result.changes.iter().map(|c| c.status).collect();
-        assert_eq!(statuses, [Status::Added, Status::Deleted], "/elsewhere sorts before /r");
+        assert_eq!(
+            statuses,
+            [Status::Added, Status::Deleted],
+            "/elsewhere sorts before /r"
+        );
         assert_eq!(result.unchanged, 0);
     }
 
@@ -533,7 +576,10 @@ mod tests {
             let data = pseudo_random(2000, seed);
             let result = store.put(&data).expect("put");
             stored_len.insert(result.id, store.stored_len(&result.id).expect("length"));
-            ChunkRef { id: result.id, len: 2000 }
+            ChunkRef {
+                id: result.id,
+                len: 2000,
+            }
         };
         let (shared, only_old, only_new) = (put(1), put(2), put(3));
 
@@ -553,7 +599,10 @@ mod tests {
         assert_eq!((diff.chunks_only_in_from, diff.chunks_only_in_to), (1, 1));
         assert_eq!(diff.stored_only_in_from, stored_len[&only_old.id]);
         assert_eq!(diff.stored_only_in_to, stored_len[&only_new.id]);
-        assert_eq!((diff.added_bytes, diff.deleted_bytes, diff.missing_chunks), (0, 0, 0));
+        assert_eq!(
+            (diff.added_bytes, diff.deleted_bytes, diff.missing_chunks),
+            (0, 0, 0)
+        );
         assert!(diff.chunker_differs);
         assert!(!diff.is_empty());
         assert_eq!(diff.from.id, old.id);
@@ -571,7 +620,14 @@ mod tests {
         let store = ChunkStore::new(Store::local(dir.path()), &keys).expect("chunk store");
         let mut manifest = minimal();
         let missing: ChunkId = store.chunk_id(b"never stored");
-        manifest.roots[0].entries.push(file(0, b"f", vec![ChunkRef { id: missing, len: 10 }]));
+        manifest.roots[0].entries.push(file(
+            0,
+            b"f",
+            vec![ChunkRef {
+                id: missing,
+                len: 10,
+            }],
+        ));
         manifest.stats = manifest.compute_stats();
         let diff = compare(&manifest, &manifest, &store).expect("compare");
         assert_eq!(diff.missing_chunks, 1);

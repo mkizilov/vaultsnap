@@ -57,7 +57,11 @@ fn run_stream<R: Read>(reader: R, config: ChunkerConfig) -> (Vec<Range<usize>>, 
     let mut joined = Vec::new();
     for chunk in Chunker::new(reader, config) {
         let chunk = chunk.expect("read chunk");
-        assert_eq!(chunk.offset, joined.len() as u64, "chunk offsets are contiguous");
+        assert_eq!(
+            chunk.offset,
+            joined.len() as u64,
+            "chunk offsets are contiguous"
+        );
         ranges.push(joined.len()..joined.len() + chunk.data.len());
         joined.extend_from_slice(&chunk.data);
     }
@@ -234,11 +238,17 @@ fn small_insertions_preserve_almost_every_chunk() {
         modified.extend_from_slice(&original[position..]);
 
         let kept = preserved_fraction(&config, &original, &modified);
-        assert!(kept >= 0.90, "trial {trial}: only {kept:.3} preserved (insert at {position})");
+        assert!(
+            kept >= 0.90,
+            "trial {trial}: only {kept:.3} preserved (insert at {position})"
+        );
         total += kept;
     }
     let mean = total / f64::from(trials);
-    assert!(mean >= 0.97, "on average only {mean:.4} of the data was preserved");
+    assert!(
+        mean >= 0.97,
+        "on average only {mean:.4} of the data was preserved"
+    );
 }
 
 #[test]
@@ -255,11 +265,17 @@ fn small_deletions_preserve_almost_every_chunk() {
         modified.extend_from_slice(&original[end..]);
 
         let kept = preserved_fraction(&config, &original, &modified);
-        assert!(kept >= 0.90, "trial {trial}: only {kept:.3} preserved (delete at {position})");
+        assert!(
+            kept >= 0.90,
+            "trial {trial}: only {kept:.3} preserved (delete at {position})"
+        );
         total += kept;
     }
     let mean = total / f64::from(trials);
-    assert!(mean >= 0.97, "on average only {mean:.4} of the data was preserved");
+    assert!(
+        mean >= 0.97,
+        "on average only {mean:.4} of the data was preserved"
+    );
 }
 
 #[test]
@@ -271,7 +287,10 @@ fn prepending_bytes_shifts_every_offset_but_keeps_the_chunks() {
         let mut modified = rng.bytes(prefix_len);
         modified.extend_from_slice(&original);
         let kept = preserved_fraction(&config, &original, &modified);
-        assert!(kept >= 0.97, "prefix of {prefix_len} bytes: only {kept:.3} preserved");
+        assert!(
+            kept >= 0.97,
+            "prefix of {prefix_len} bytes: only {kept:.3} preserved"
+        );
     }
 }
 
@@ -291,11 +310,19 @@ fn mixed_content_types_are_chunked_consistently() {
     mixed.extend_from_slice(&[0_u8; 40_000]);
     mixed.extend_from_slice(&sparse);
 
-    for (name, data) in [("text", text), ("counter", counter), ("sparse", sparse), ("mixed", mixed)] {
+    for (name, data) in [
+        ("text", text),
+        ("counter", counter),
+        ("sparse", sparse),
+        ("mixed", mixed),
+    ] {
         let (ranges, joined) = run_stream(Cursor::new(&data), config);
         assert_eq!(joined, data, "{name}");
         assert_eq!(ranges, config.split(&data), "{name}");
-        assert!(ranges.iter().all(|range| range.len() <= config.max_size()), "{name}");
+        assert!(
+            ranges.iter().all(|range| range.len() <= config.max_size()),
+            "{name}"
+        );
     }
 }
 
@@ -309,7 +336,9 @@ fn very_large_streams_are_chunked_exactly_without_being_held_in_memory() {
     }
     impl Read for Generated {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let count = buf.len().min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
+            let count = buf
+                .len()
+                .min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
             for chunk in buf[..count].chunks_mut(8) {
                 let word = self.rng.next_u64().to_le_bytes();
                 chunk.copy_from_slice(&word[..chunk.len()]);
@@ -321,7 +350,10 @@ fn very_large_streams_are_chunked_exactly_without_being_held_in_memory() {
 
     let config = ChunkerConfig::default();
     let total: u64 = 64 * 1024 * 1024;
-    let source = Generated { remaining: total, rng: Rng(99) };
+    let source = Generated {
+        remaining: total,
+        rng: Rng(99),
+    };
     let mut seen = 0_u64;
     let mut count = 0_u64;
     let mut chunker = Chunker::new(source, config);

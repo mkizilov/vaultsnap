@@ -47,7 +47,9 @@ pub(crate) fn take_exact(fields: &mut Fields<'_>, key: &str, expected: &str) -> 
     if value == expected {
         Ok(())
     } else {
-        Err(format!("unsupported `{key}`: {value:?} (expected {expected:?})"))
+        Err(format!(
+            "unsupported `{key}`: {value:?} (expected {expected:?})"
+        ))
     }
 }
 

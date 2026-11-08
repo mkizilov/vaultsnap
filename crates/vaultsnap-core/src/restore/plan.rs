@@ -101,8 +101,8 @@ pub(super) fn plan<'m>(manifest: &'m Manifest, includes: &[PathBuf]) -> Result<P
     for include in includes {
         let mut matched = false;
         // An empty path would otherwise be a prefix of everything.
-        let candidates = entries(manifest, Some(include.as_path()))
-            .filter(|_| !include.as_os_str().is_empty());
+        let candidates =
+            entries(manifest, Some(include.as_path())).filter(|_| !include.as_os_str().is_empty());
         for listed in candidates {
             selected[listed.root][listed.index] = true;
             matched = true;
@@ -139,7 +139,10 @@ pub(super) fn plan<'m>(manifest: &'m Manifest, includes: &[PathBuf]) -> Result<P
             let location = || format!("root {root_index}, entry {index}");
             if index == 0 {
                 if entry.parent.is_some() || !entry.name.is_empty() {
-                    return Err(unsafe_path(location(), "entry 0 must be the unnamed root entry"));
+                    return Err(unsafe_path(
+                        location(),
+                        "entry 0 must be the unnamed root entry",
+                    ));
                 }
                 rels[0] = sources.clone();
             } else {
@@ -148,7 +151,10 @@ pub(super) fn plan<'m>(manifest: &'m Manifest, includes: &[PathBuf]) -> Result<P
                     .and_then(|parent| usize::try_from(parent).ok())
                     .filter(|&parent| parent < index)
                     .ok_or_else(|| {
-                        unsafe_path(location(), "the parent of an entry must be an earlier entry")
+                        unsafe_path(
+                            location(),
+                            "the parent of an entry must be an earlier entry",
+                        )
                     })?;
                 let name = safe_component(&entry.name).ok_or_else(|| {
                     unsafe_path(location(), "the name is not a safe path component")
@@ -161,10 +167,16 @@ pub(super) fn plan<'m>(manifest: &'m Manifest, includes: &[PathBuf]) -> Result<P
                 continue;
             }
             if index == 0 && !matches!(entry.kind, NodeKind::Directory) && sources.is_empty() {
-                return Err(unsafe_path(location(), "the entry would replace the restore root"));
+                return Err(unsafe_path(
+                    location(),
+                    "the entry would replace the restore root",
+                ));
             }
             if selected[root_index][index]
-                && matches!(entry.kind, NodeKind::File { .. } | NodeKind::HardLink { .. })
+                && matches!(
+                    entry.kind,
+                    NodeKind::File { .. } | NodeKind::HardLink { .. }
+                )
             {
                 files += 1;
                 bytes = bytes.saturating_add(entry.attributes.size);
@@ -224,8 +236,11 @@ mod tests {
         plan.entries
             .iter()
             .map(|planned| {
-                let parts: Vec<String> =
-                    planned.rel.iter().map(|part| part.to_string_lossy().into_owned()).collect();
+                let parts: Vec<String> = planned
+                    .rel
+                    .iter()
+                    .map(|part| part.to_string_lossy().into_owned())
+                    .collect();
                 parts.join("/")
             })
             .collect()
@@ -261,7 +276,10 @@ mod tests {
         assert_eq!(planned[1], "home/me/Documents/docs");
         assert_eq!(planned[2], "home/me/Documents/docs/report.txt");
         assert_eq!(planned[12], "home/me/notes.txt");
-        assert_eq!(plan.files, 5, "three files and the hard link of root 0, one file of root 1");
+        assert_eq!(
+            plan.files, 5,
+            "three files and the hard link of root 0, one file of root 1"
+        );
         assert_eq!(plan.bytes, 1500 + 1500 + 1000 + 77);
     }
 
@@ -305,7 +323,10 @@ mod tests {
         let manifest = rich();
         for include in ["/nowhere", "/home/me/Doc", "relative/path", ""] {
             let result = plan(&manifest, &[PathBuf::from(include)]);
-            assert!(matches!(result, Err(Error::IncludeNotFound { .. })), "{include:?}");
+            assert!(
+                matches!(result, Err(Error::IncludeNotFound { .. })),
+                "{include:?}"
+            );
         }
     }
 
@@ -319,7 +340,10 @@ mod tests {
         }
         let long = vec![b'x'; 5000];
         let manifest = manifest_with(b"/data", vec![file(0, &long, vec![chunk(1, 4)])]);
-        assert!(matches!(plan(&manifest, &[]), Err(Error::UnsafePath { .. })));
+        assert!(matches!(
+            plan(&manifest, &[]),
+            Err(Error::UnsafePath { .. })
+        ));
     }
 
     #[test]
@@ -328,7 +352,10 @@ mod tests {
         for source in bad {
             let manifest = manifest_with(source, vec![]);
             let reason = unsafe_reason(plan(&manifest, &[]));
-            assert_eq!(reason, "the source path has a component that is not a safe name");
+            assert_eq!(
+                reason,
+                "the source path has a component that is not a safe name"
+            );
         }
     }
 

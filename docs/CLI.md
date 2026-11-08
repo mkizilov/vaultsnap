@@ -15,6 +15,7 @@ vaultsnap [--repo PATH|s3://BUCKET[/FOLDER]] [S3 options] [--password-file FILE]
 | [`restore`](#restore) | Restore a snapshot, or selected paths, into a directory | implemented |
 | [`check`](#check) | Verify repository integrity, quick or full; report only, never repairs | implemented |
 | [`prune`](#prune) | Remove snapshots outside a retention policy and the chunks nothing needs; the only command that deletes | implemented |
+| [`version`](#version) | Show the version, the build, and the repository formats this binary reads and writes | implemented |
 
 ## Global options
 
@@ -622,6 +623,42 @@ removed by hand; see [`PRUNE.md`](PRUNE.md#locking).
 
 ---
 
+## version
+
+```
+vaultsnap --version      # one line: the version and the commit it was built from
+vaultsnap version        # everything below
+```
+
+Neither needs a repository or a passphrase.
+
+```
+$ vaultsnap --version
+vaultsnap 0.1.0 (3f9a1c20b7de)
+
+$ vaultsnap version
+vaultsnap
+version              0.1.0
+commit               3f9a1c20b7de
+target               aarch64-apple-darwin
+profile              release
+repository format    1
+snapshot schema      1
+snapshot container   1
+chunk object format  1
+key file version     1
+encryption           XChaCha20-Poly1305
+key derivation       Argon2id (passphrase), HKDF-SHA256 (purpose keys)
+chunk ids            BLAKE3, keyed
+```
+
+The commit is `unknown` for a build outside a git checkout (set `VAULTSNAP_BUILD_COMMIT` when
+building to record one) and ends in `-dirty` if tracked files had uncommitted changes. The format
+numbers are the ones the code compares against: a binary refuses a repository whose
+`repository format` is higher than its own, and never modifies it (see
+[`DISASTER_RECOVERY.md`](DISASTER_RECOVERY.md)). The output is for people; its layout may gain
+lines, so scripts should look a value up by its name.
+
 ## Sizes
 
 Four numbers describe how much a snapshot holds. They are computed from the verified manifests
@@ -723,8 +760,8 @@ and `previous_size` (content sizes as in `ls`), and `differences`: for `modified
 
 ### Recipes
 
-These are examples of how the output can be used; they were not run in the environment this
-documentation was written in.
+These are examples of how the output can be used. All three were run with `jq` 1.7.1 against a
+real repository, as was the `jq` line in [`GUIDE.md`](GUIDE.md).
 
 ```sh
 # The id of the newest snapshot
@@ -744,8 +781,7 @@ vaultsnap --repo ~/backups snapshots --json |
 ## Notes and limits
 
 * The examples marked as test fixture output are the exact text and JSON that the unit tests in
-  `crates/vaultsnap-cli/src/inspect/tests.rs` assert. At the time of writing those tests had not
-  been run (see the README's known gaps).
+  `crates/vaultsnap-cli/src/inspect/tests.rs` assert, and those tests pass.
 * A listing reads and decrypts every snapshot, and `show` too (to find what is unique to the
   snapshot). The cost is proportional to the total size of the manifests plus one `stat` per
   distinct chunk. Memory is bounded by the largest manifest plus one small record per distinct

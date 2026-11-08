@@ -48,7 +48,8 @@ impl RepositoryKeys {
 
     /// Encrypts `plaintext` under the key for `purpose`, authenticating `aad` as well.
     pub fn seal(&self, purpose: KeyPurpose, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
-        crypto::seal(&self.derive(purpose)?, aad, plaintext)
+        let key = self.derive(purpose)?;
+        crypto::seal(&key, aad, plaintext)
     }
 
     /// Authenticates and decrypts the output of [`RepositoryKeys::seal`].
@@ -58,7 +59,8 @@ impl RepositoryKeys {
         aad: &[u8],
         sealed: &[u8],
     ) -> Result<Zeroizing<Vec<u8>>> {
-        crypto::open(&self.derive(purpose)?, aad, sealed)
+        let key = self.derive(purpose)?;
+        crypto::open(&key, aad, sealed)
     }
 }
 
@@ -97,7 +99,9 @@ impl KeySlot {
         let kek = crypto::derive_wrapping_key(passphrase.as_bytes(), &self.salt, &self.kdf)?;
         let plain = crypto::open(&kek, &self.aad(repository_id), &self.sealed)?;
         if plain.len() != KEY_LEN {
-            return Err(Error::InvalidKeyFile("wrapped key has the wrong length".to_owned()));
+            return Err(Error::InvalidKeyFile(
+                "wrapped key has the wrong length".to_owned(),
+            ));
         }
         let mut master = Zeroizing::new([0_u8; KEY_LEN]);
         master.copy_from_slice(&plain);
@@ -148,8 +152,8 @@ impl KeySlot {
             });
         }
         kv::take_exact(&mut fields, "kdf", KDF_NAME).map_err(invalid)?;
-        let argon2_version = kv::take_number::<u32>(&mut fields, "kdf_argon2_version")
-            .map_err(invalid)?;
+        let argon2_version =
+            kv::take_number::<u32>(&mut fields, "kdf_argon2_version").map_err(invalid)?;
         if argon2_version != ARGON2_VERSION {
             return Err(Error::InvalidKeyFile(format!(
                 "unsupported Argon2 version {argon2_version}"
@@ -264,7 +268,9 @@ mod tests {
     }
 
     fn overwrite(f: &Fixture, text: &str) {
-        f.store.write_replace(&f.slot, text.as_bytes()).expect("write");
+        f.store
+            .write_replace(&f.slot, text.as_bytes())
+            .expect("write");
     }
 
     fn assert_same_keys(a: &RepositoryKeys, b: &RepositoryKeys) {
@@ -303,12 +309,17 @@ mod tests {
     fn keys_persist_across_store_handles() {
         let f = fixture();
         let purpose = KeyPurpose::DataEncryption;
-        let sealed = f.keys.seal(purpose, b"pack-1", b"chunk data").expect("seal");
+        let sealed = f
+            .keys
+            .seal(purpose, b"pack-1", b"chunk data")
+            .expect("seal");
         let reopened = Store::local(f.store.root());
         let unlocked = unlock(&reopened, REPO_ID, &passphrase()).expect("unlock");
         let opened = unlocked.open(purpose, b"pack-1", &sealed).expect("open");
         assert_eq!(opened.as_slice(), b"chunk data");
-        assert!(unlocked.open(KeyPurpose::MetadataEncryption, b"pack-1", &sealed).is_err());
+        assert!(unlocked
+            .open(KeyPurpose::MetadataEncryption, b"pack-1", &sealed)
+            .is_err());
     }
 
     #[test]
@@ -319,7 +330,10 @@ mod tests {
         let a = slot_text(&f);
         let b = String::from_utf8(f.store.read(&second, 4096).expect("read")).expect("utf-8");
         let field = |text: &str, key: &str| {
-            text.lines().find_map(|l| l.strip_prefix(key)).expect("field").to_owned()
+            text.lines()
+                .find_map(|l| l.strip_prefix(key))
+                .expect("field")
+                .to_owned()
         };
         assert_ne!(field(&a, "kdf_salt="), field(&b, "kdf_salt="));
         assert_ne!(field(&a, "sealed="), field(&b, "sealed="));
@@ -350,7 +364,10 @@ mod tests {
             bytes[index] = if bytes[index] == b'0' { b'1' } else { b'0' };
             f.store.write_replace(&f.slot, &bytes).expect("write");
             let result = unlock(&f.store, REPO_ID, &passphrase());
-            assert!(matches!(result, Err(Error::WrongPassphrase)), "digit {index}");
+            assert!(
+                matches!(result, Err(Error::WrongPassphrase)),
+                "digit {index}"
+            );
         }
     }
 
@@ -374,7 +391,10 @@ mod tests {
         for (from, to) in edits {
             overwrite(&f, &original.replace(from, to));
             let result = unlock(&f.store, REPO_ID, &passphrase());
-            assert!(matches!(result, Err(Error::WrongPassphrase)), "{from} -> {to}: {result:?}");
+            assert!(
+                matches!(result, Err(Error::WrongPassphrase)),
+                "{from} -> {to}: {result:?}"
+            );
         }
         overwrite(&f, &original);
         unlock(&f.store, REPO_ID, &passphrase()).expect("restored file unlocks again");
@@ -420,7 +440,10 @@ mod tests {
         for case in cases {
             overwrite(&f, &case);
             let result = unlock(&f.store, REPO_ID, &passphrase());
-            assert!(matches!(result, Err(Error::InvalidKeyFile(_))), "{case:?} gave {result:?}");
+            assert!(
+                matches!(result, Err(Error::InvalidKeyFile(_))),
+                "{case:?} gave {result:?}"
+            );
         }
     }
 
@@ -431,7 +454,13 @@ mod tests {
         overwrite(&f, &format!("{text}from_the_future=1\n"));
         let result = unlock(&f.store, REPO_ID, &passphrase());
         assert!(
-            matches!(result, Err(Error::UnsupportedKeyVersion { found: 2, supported: 1 })),
+            matches!(
+                result,
+                Err(Error::UnsupportedKeyVersion {
+                    found: 2,
+                    supported: 1
+                })
+            ),
             "{result:?}"
         );
     }
@@ -442,7 +471,10 @@ mod tests {
         let text = slot_text(&f).replace("kdf_m_cost_kib=64", "kdf_m_cost_kib=4000000");
         overwrite(&f, &text);
         let result = unlock(&f.store, REPO_ID, &passphrase());
-        assert!(matches!(result, Err(Error::InvalidKdfParams(_))), "{result:?}");
+        assert!(
+            matches!(result, Err(Error::InvalidKdfParams(_))),
+            "{result:?}"
+        );
     }
 
     #[test]
@@ -461,7 +493,10 @@ mod tests {
 
         let f = fixture();
         let path = f.store.root().join(&f.slot);
-        let mode = std::fs::metadata(path).expect("metadata").permissions().mode();
+        let mode = std::fs::metadata(path)
+            .expect("metadata")
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 
@@ -474,7 +509,11 @@ mod tests {
     #[test]
     fn key_files_are_inspected_without_a_passphrase() {
         let f = fixture();
-        let name = f.store.list(RepositoryLayout::KEYS_DIR).expect("list").remove(0);
+        let name = f
+            .store
+            .list(RepositoryLayout::KEYS_DIR)
+            .expect("list")
+            .remove(0);
         assert_eq!(key_file_problem(&f.store, &name), None);
 
         overwrite(&f, "vaultsnap-key\nkey_version=1\n");

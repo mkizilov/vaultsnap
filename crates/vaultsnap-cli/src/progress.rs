@@ -42,13 +42,17 @@ impl Ticker {
 pub fn draw(text: &str) {
     let mut stderr = std::io::stderr().lock();
     // A terminal that went away must not fail the command, so write errors are ignored.
-    write!(stderr, "\r\x1b[K{text}").and_then(|()| stderr.flush()).ok();
+    write!(stderr, "\r\x1b[K{text}")
+        .and_then(|()| stderr.flush())
+        .ok();
 }
 
 /// Erases the status line.
 pub fn clear() {
     let mut stderr = std::io::stderr().lock();
-    write!(stderr, "\r\x1b[K").and_then(|()| stderr.flush()).ok();
+    write!(stderr, "\r\x1b[K")
+        .and_then(|()| stderr.flush())
+        .ok();
 }
 
 #[cfg(test)]
@@ -58,10 +62,16 @@ mod tests {
     #[test]
     fn a_redraw_is_due_once_per_interval_and_only_for_one_caller() {
         let ticker = Ticker::new();
-        assert!(!ticker.claim(0), "nothing has been drawn for no time at all");
+        assert!(
+            !ticker.claim(0),
+            "nothing has been drawn for no time at all"
+        );
         assert!(!ticker.claim(DRAW_INTERVAL_MS - 1));
         assert!(ticker.claim(DRAW_INTERVAL_MS), "due after the interval");
-        assert!(!ticker.claim(DRAW_INTERVAL_MS), "taken: the second caller does not draw");
+        assert!(
+            !ticker.claim(DRAW_INTERVAL_MS),
+            "taken: the second caller does not draw"
+        );
         assert!(!ticker.claim(DRAW_INTERVAL_MS + 10));
         assert!(ticker.claim(2 * DRAW_INTERVAL_MS));
     }

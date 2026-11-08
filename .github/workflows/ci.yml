@@ -4,9 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,21 +24,109 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The build records the commit it was built from (`git describe`).
+          fetch-depth: 0
+      - name: Read the pinned toolchain
+        shell: bash
+        run: |
+          echo "TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_ENV"
+          # Until the first Cargo.lock is committed there is nothing to lock to.
+          if [ -f Cargo.lock ]; then echo "LOCKED=--locked" >> "$GITHUB_ENV"; fi
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.85.0
+          toolchain: ${{ env.TOOLCHAIN }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets $LOCKED -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace $LOCKED
       - name: Docs
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps $LOCKED
         env:
           RUSTDOCFLAGS: -D warnings
+      - name: Without the S3 client (the feature is optional)
+        run: |
+          cargo clippy -p vaultsnap-core --no-default-features --all-targets $LOCKED -- -D warnings
+          cargo test -p vaultsnap-core --no-default-features --lib $LOCKED
+      - name: Scripts
+        run: |
+          sh contrib/test-scheduled.sh
+          sh scripts/test-package.sh
+
+  # Windows is not a supported platform yet (docs/LIMITATIONS.md): the code has fallbacks for
+  # systems without Unix permissions and links, but they have never been built. This job says
+  # whether they at least compile; it cannot fail the build.
+  windows:
+    name: windows (experimental build check)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read the pinned toolchain
+        shell: bash
+        run: echo "TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  # The benchmarks must keep running; their numbers go to the log and are not compared with
+  # anything (they depend on the runner).
+  bench:
+    name: benchmarks (smoke)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read the pinned toolchain
+        shell: bash
+        run: echo "TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench -p vaultsnap-core --bench chunking -- --quick
+      - run: cargo bench -p vaultsnap-core --bench throughput -- --quick
+
+  # MinIO is built from source by scripts/minio-local.sh (its binary downloads were withdrawn when
+  # the project was archived) and run on loopback. The same steps passed on macOS (Apple silicon);
+  # this job has not run on GitHub. It is allowed to fail until it has passed once there; then
+  # remove `continue-on-error`. docker/minio/compose.yaml is an alternative that was not run.
+  s3-minio:
+    name: S3 tests against MinIO
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read the pinned toolchain
+        shell: bash
+        run: echo "TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and start MinIO (credentials are made up for this run)
+        run: |
+          sh scripts/minio-local.sh install
+          sh scripts/minio-local.sh start
+      - name: Test
+        run: |
+          eval "$(sh scripts/minio-local.sh env)"
+          cargo test -p vaultsnap-core --test s3_minio -- --test-threads=2
+      - name: Stop MinIO
+        if: always()
+        run: sh scripts/minio-local.sh clean

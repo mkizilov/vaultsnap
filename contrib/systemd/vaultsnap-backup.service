@@ -1,0 +1,23 @@
+# Runs one scheduled VaultSnap backup (docs/GUIDE.md). Install:
+#
+#   install -m 0755 contrib/vaultsnap-scheduled.sh /usr/local/bin/vaultsnap-scheduled
+#   install -d -m 0700 /etc/vaultsnap
+#   install -m 0600 contrib/vaultsnap.env.example /etc/vaultsnap/vaultsnap.env   # then edit it
+#   install -m 0644 contrib/systemd/vaultsnap-backup.* /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now vaultsnap-backup.timer
+#
+# A failed or incomplete run (status 1 or 3) leaves the unit in the failed state, which
+# `systemctl status vaultsnap-backup` and any monitoring of failed units will show.
+[Unit]
+Description=VaultSnap backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/vaultsnap/vaultsnap.env
+ExecStart=/usr/local/bin/vaultsnap-scheduled
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+NoNewPrivileges=true

@@ -238,18 +238,21 @@ impl Root {
             return invalid(format!("root {root} has too many entries"));
         }
         if first.parent.is_some() || !first.name.is_empty() {
-            return invalid(format!("root {root}: entry 0 must be the unnamed root entry"));
+            return invalid(format!(
+                "root {root}: entry 0 must be the unnamed root entry"
+            ));
         }
         if !matches!(first.kind, NodeKind::Directory) && self.entries.len() != 1 {
-            return invalid(format!("root {root} is not a directory but has more entries"));
+            return invalid(format!(
+                "root {root} is not a directory but has more entries"
+            ));
         }
 
         let mut names: HashSet<(u32, &[u8])> = HashSet::new();
         for (index, entry) in self.entries.iter().enumerate() {
             let context = |what: &str| format!("root {root}, entry {index}: {what}");
-            check_attributes(&entry.attributes).map_err(|what| {
-                Error::InvalidManifest(context(what))
-            })?;
+            check_attributes(&entry.attributes)
+                .map_err(|what| Error::InvalidManifest(context(what)))?;
 
             if index > 0 {
                 let Some(parent) = entry.parent else {
@@ -323,7 +326,11 @@ fn check_attributes(attributes: &Attributes) -> std::result::Result<(), &'static
         attributes.changed,
         attributes.created,
     ];
-    if times.iter().flatten().any(|time| time.nanos >= 1_000_000_000) {
+    if times
+        .iter()
+        .flatten()
+        .any(|time| time.nanos >= 1_000_000_000)
+    {
         return Err("a timestamp has out-of-range nanoseconds");
     }
     Ok(())
@@ -510,9 +517,15 @@ pub(crate) mod testing {
     pub(crate) fn attributes(size: u64) -> Attributes {
         Attributes {
             size,
-            modified: Some(Timestamp { secs: 1_700_000_000, nanos: 123_456_789 }),
+            modified: Some(Timestamp {
+                secs: 1_700_000_000,
+                nanos: 123_456_789,
+            }),
             accessed: None,
-            changed: Some(Timestamp { secs: 1_700_000_001, nanos: 0 }),
+            changed: Some(Timestamp {
+                secs: 1_700_000_001,
+                nanos: 0,
+            }),
             created: None,
             mode: Some(0o644),
             uid: Some(1000),
@@ -542,7 +555,10 @@ pub(crate) mod testing {
     }
 
     pub(crate) fn chunk(seed: u8, len: u32) -> ChunkRef {
-        ChunkRef { id: ChunkId::from_bytes([seed; 32]), len }
+        ChunkRef {
+            id: ChunkId::from_bytes([seed; 32]),
+            len,
+        }
     }
 
     pub(crate) fn dir(parent: Option<u32>, name: &[u8]) -> ManifestEntry {
@@ -584,13 +600,17 @@ pub(crate) mod testing {
             ManifestEntry {
                 parent: Some(0),
                 name: b"link".to_vec(),
-                kind: NodeKind::Symlink { target: b"docs/report.txt".to_vec() },
+                kind: NodeKind::Symlink {
+                    target: b"docs/report.txt".to_vec(),
+                },
                 attributes: attributes(15),
             },
             ManifestEntry {
                 parent: Some(0),
                 name: b"bad-\xff\xfe-name".to_vec(),
-                kind: NodeKind::File { chunks: vec![chunk(1, 1000)] },
+                kind: NodeKind::File {
+                    chunks: vec![chunk(1, 1000)],
+                },
                 attributes: attributes(1000),
             },
             ManifestEntry {
@@ -625,36 +645,56 @@ pub(crate) mod testing {
             },
         ];
         let roots = vec![
-            Root { source: b"/home/me/Documents".to_vec(), entries },
+            Root {
+                source: b"/home/me/Documents".to_vec(),
+                entries,
+            },
             Root {
                 source: b"/home/me/notes.txt".to_vec(),
                 entries: vec![ManifestEntry {
                     parent: None,
                     name: Vec::new(),
-                    kind: NodeKind::File { chunks: vec![chunk(9, 77)] },
+                    kind: NodeKind::File {
+                        chunks: vec![chunk(9, 77)],
+                    },
                     attributes: attributes(77),
                 }],
             },
         ];
         let skipped = vec![
-            SkippedRecord { root: 0, path: b"locked".to_vec(), reason: SkippedReason::Vanished },
+            SkippedRecord {
+                root: 0,
+                path: b"locked".to_vec(),
+                reason: SkippedReason::Vanished,
+            },
             SkippedRecord {
                 root: 0,
                 path: b"secret".to_vec(),
-                reason: SkippedReason::Unreadable { detail: "read directory: denied".to_owned() },
+                reason: SkippedReason::Unreadable {
+                    detail: "read directory: denied".to_owned(),
+                },
             },
-            SkippedRecord { root: 1, path: Vec::new(), reason: SkippedReason::OtherFilesystem },
+            SkippedRecord {
+                root: 1,
+                path: Vec::new(),
+                reason: SkippedReason::OtherFilesystem,
+            },
             SkippedRecord {
                 root: 0,
                 path: b"pipe2".to_vec(),
-                reason: SkippedReason::SpecialFile { kind: "Fifo".to_owned() },
+                reason: SkippedReason::SpecialFile {
+                    kind: "Fifo".to_owned(),
+                },
             },
         ];
         let mut manifest = Manifest {
             format_version: MANIFEST_FORMAT_VERSION,
             id: "ab".repeat(32).parse().expect("valid id"),
             repository_id: REPO_ID.to_owned(),
-            created: Timestamp { secs: 1_750_000_000, nanos: 5 },
+            created: Timestamp {
+                secs: 1_750_000_000,
+                nanos: 5,
+            },
             host: "workstation".to_owned(),
             tags: vec!["laptop".to_owned(), "weekly".to_owned()],
             program: "vaultsnap 0.1.0".to_owned(),
@@ -708,7 +748,10 @@ mod tests {
         change(&mut manifest);
         manifest.stats = manifest.compute_stats();
         let result = manifest.validate();
-        assert!(matches!(result, Err(Error::InvalidManifest(_))), "{why}: {result:?}");
+        assert!(
+            matches!(result, Err(Error::InvalidManifest(_))),
+            "{why}: {result:?}"
+        );
     }
 
     #[test]
@@ -733,8 +776,18 @@ mod tests {
     fn each_root_has_its_own_statistics_that_add_up_to_the_totals() {
         let manifest = rich();
         let documents = manifest.roots[0].stats();
-        assert_eq!((documents.directories, documents.files, documents.bytes), (2, 3, 2500));
-        assert_eq!((documents.symlinks, documents.hard_links, documents.special_files), (1, 1, 5));
+        assert_eq!(
+            (documents.directories, documents.files, documents.bytes),
+            (2, 3, 2500)
+        );
+        assert_eq!(
+            (
+                documents.symlinks,
+                documents.hard_links,
+                documents.special_files
+            ),
+            (1, 1, 5)
+        );
         assert_eq!(documents.skipped, 0, "skipped paths belong to the manifest");
         let notes = manifest.roots[1].stats();
         assert_eq!((notes.directories, notes.files, notes.bytes), (0, 1, 77));
@@ -745,7 +798,10 @@ mod tests {
     fn stored_totals_must_match() {
         let mut manifest = rich();
         manifest.stats.files += 1;
-        assert!(matches!(manifest.validate(), Err(Error::InvalidManifest(_))));
+        assert!(matches!(
+            manifest.validate(),
+            Err(Error::InvalidManifest(_))
+        ));
     }
 
     #[test]
@@ -766,7 +822,10 @@ mod tests {
         manifest.format_version = 2;
         assert!(matches!(
             manifest.validate(),
-            Err(Error::UnsupportedManifestVersion { found: 2, supported: 1 })
+            Err(Error::UnsupportedManifestVersion {
+                found: 2,
+                supported: 1
+            })
         ));
     }
 
@@ -776,22 +835,71 @@ mod tests {
         rejects(base.clone(), |m| m.roots.clear(), "no roots");
         rejects(base.clone(), |m| m.roots[0].entries.clear(), "no entries");
         rejects(base.clone(), |m| m.roots[0].source.clear(), "empty source");
-        rejects(base.clone(), |m| m.roots[0].source = b"a\0b".to_vec(), "NUL in source");
-        rejects(base.clone(), |m| m.repository_id = "XYZ".to_owned(), "bad repository id");
-        rejects(base.clone(), |m| m.created.nanos = 1_000_000_000, "bad creation nanos");
         rejects(
             base.clone(),
-            |m| m.roots[0].entries[2].attributes.modified = Some(Timestamp { secs: 0, nanos: 2_000_000_000 }),
+            |m| m.roots[0].source = b"a\0b".to_vec(),
+            "NUL in source",
+        );
+        rejects(
+            base.clone(),
+            |m| m.repository_id = "XYZ".to_owned(),
+            "bad repository id",
+        );
+        rejects(
+            base.clone(),
+            |m| m.created.nanos = 1_000_000_000,
+            "bad creation nanos",
+        );
+        rejects(
+            base.clone(),
+            |m| {
+                m.roots[0].entries[2].attributes.modified = Some(Timestamp {
+                    secs: 0,
+                    nanos: 2_000_000_000,
+                })
+            },
             "bad entry nanos",
         );
-        rejects(base.clone(), |m| m.roots[0].entries[0].name = b"x".to_vec(), "named root entry");
-        rejects(base.clone(), |m| m.roots[0].entries[0].parent = Some(0), "root with parent");
-        rejects(base.clone(), |m| m.roots[0].entries[1].parent = None, "second root entry");
-        rejects(base.clone(), |m| m.roots[0].entries[2].parent = Some(2), "own parent");
-        rejects(base.clone(), |m| m.roots[0].entries[2].parent = Some(9), "parent after child");
-        rejects(base.clone(), |m| m.roots[0].entries[4].parent = Some(2), "file as parent");
-        rejects(base.clone(), |m| m.roots[0].entries[2].parent = Some(500), "parent out of range");
-        rejects(base.clone(), |m| m.skipped[0].root = 7, "skipped record for a missing root");
+        rejects(
+            base.clone(),
+            |m| m.roots[0].entries[0].name = b"x".to_vec(),
+            "named root entry",
+        );
+        rejects(
+            base.clone(),
+            |m| m.roots[0].entries[0].parent = Some(0),
+            "root with parent",
+        );
+        rejects(
+            base.clone(),
+            |m| m.roots[0].entries[1].parent = None,
+            "second root entry",
+        );
+        rejects(
+            base.clone(),
+            |m| m.roots[0].entries[2].parent = Some(2),
+            "own parent",
+        );
+        rejects(
+            base.clone(),
+            |m| m.roots[0].entries[2].parent = Some(9),
+            "parent after child",
+        );
+        rejects(
+            base.clone(),
+            |m| m.roots[0].entries[4].parent = Some(2),
+            "file as parent",
+        );
+        rejects(
+            base.clone(),
+            |m| m.roots[0].entries[2].parent = Some(500),
+            "parent out of range",
+        );
+        rejects(
+            base.clone(),
+            |m| m.skipped[0].root = 7,
+            "skipped record for a missing root",
+        );
         rejects(
             base,
             |m| m.roots[1].entries.push(dir(Some(0), b"below-a-file")),
@@ -802,13 +910,24 @@ mod tests {
     #[test]
     fn names_that_could_escape_the_restore_directory_are_rejected() {
         let hostile: [&[u8]; 9] = [
-            b"", b".", b"..", b"a/b", b"/etc", b"x/", b"nul\0byte", b"../../etc/passwd", b"a\0",
+            b"",
+            b".",
+            b"..",
+            b"a/b",
+            b"/etc",
+            b"x/",
+            b"nul\0byte",
+            b"../../etc/passwd",
+            b"a\0",
         ];
         for name in hostile {
             let mut manifest = rich();
             manifest.roots[0].entries[2].name = name.to_vec();
             let result = manifest.validate();
-            assert!(matches!(result, Err(Error::InvalidManifest(_))), "{name:?}: {result:?}");
+            assert!(
+                matches!(result, Err(Error::InvalidManifest(_))),
+                "{name:?}: {result:?}"
+            );
         }
         let too_long = [b'x'; MAX_NAME_LEN + 1];
         assert!(!is_valid_name(&too_long));
@@ -822,13 +941,17 @@ mod tests {
     fn duplicate_sibling_names_are_rejected_but_equal_names_elsewhere_are_fine() {
         let mut manifest = rich();
         manifest.roots[0].entries[3].name = b"report.txt".to_vec();
-        assert!(matches!(manifest.validate(), Err(Error::InvalidManifest(_))));
+        assert!(matches!(
+            manifest.validate(),
+            Err(Error::InvalidManifest(_))
+        ));
 
         let mut ok = rich();
         let nested = dir(Some(1), b"link");
         ok.roots[0].entries.push(nested);
         ok.stats = ok.compute_stats();
-        ok.validate().expect("the same name in a different directory is fine");
+        ok.validate()
+            .expect("the same name in a different directory is fine");
     }
 
     #[test]
@@ -842,9 +965,18 @@ mod tests {
             manifest.validate()
         };
         assert!(set(vec![chunk(1, 10), chunk(2, 20)], 30).is_ok());
-        assert!(set(vec![chunk(1, 10)], 11).is_err(), "sum differs from the size");
-        assert!(set(vec![chunk(1, 10), chunk(2, 0)], 10).is_err(), "zero-length chunk");
-        assert!(set(vec![chunk(1, u32::MAX)], u64::from(u32::MAX)).is_err(), "oversized chunk");
+        assert!(
+            set(vec![chunk(1, 10)], 11).is_err(),
+            "sum differs from the size"
+        );
+        assert!(
+            set(vec![chunk(1, 10), chunk(2, 0)], 10).is_err(),
+            "zero-length chunk"
+        );
+        assert!(
+            set(vec![chunk(1, u32::MAX)], u64::from(u32::MAX)).is_err(),
+            "oversized chunk"
+        );
         assert!(set(Vec::new(), 5).is_err(), "no chunks but a size");
         assert!(set(Vec::new(), 0).is_ok(), "empty file");
     }
@@ -860,7 +992,10 @@ mod tests {
         assert!(with_link_target(4).is_err(), "link to itself");
         assert!(with_link_target(9).is_err(), "link to a later entry");
         assert!(with_link_target(1).is_err(), "link to a directory");
-        assert!(with_link_target(5).is_err(), "link to a symlink (and a later entry)");
+        assert!(
+            with_link_target(5).is_err(),
+            "link to a symlink (and a later entry)"
+        );
         assert!(with_link_target(77).is_err(), "link out of range");
 
         for target in [Vec::new(), b"a\0b".to_vec()] {
@@ -869,9 +1004,12 @@ mod tests {
             assert!(manifest.validate().is_err());
         }
         let mut dangling_is_fine = rich();
-        dangling_is_fine.roots[0].entries[5].kind =
-            NodeKind::Symlink { target: b"../../outside/../x".to_vec() };
-        dangling_is_fine.validate().expect("link targets are data and are never followed");
+        dangling_is_fine.roots[0].entries[5].kind = NodeKind::Symlink {
+            target: b"../../outside/../x".to_vec(),
+        };
+        dangling_is_fine
+            .validate()
+            .expect("link targets are data and are never followed");
     }
 
     #[test]
@@ -888,7 +1026,13 @@ mod tests {
         let summary = manifest.summary();
         assert_eq!(summary.id, manifest.id);
         assert_eq!(summary.host, "workstation");
-        assert_eq!(summary.roots, vec![b"/home/me/Documents".to_vec(), b"/home/me/notes.txt".to_vec()]);
+        assert_eq!(
+            summary.roots,
+            vec![
+                b"/home/me/Documents".to_vec(),
+                b"/home/me/notes.txt".to_vec()
+            ]
+        );
         assert_eq!(summary.stats, manifest.stats);
     }
 }

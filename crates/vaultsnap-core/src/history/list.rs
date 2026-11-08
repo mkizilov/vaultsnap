@@ -210,8 +210,13 @@ mod tests {
             manifest.created = Timestamp { secs, nanos: 0 };
             for (name, seed) in files {
                 let put = self.chunks.put(&pseudo_random(1000, *seed)).expect("put");
-                let chunks = vec![ChunkRef { id: put.id, len: 1000 }];
-                manifest.roots[0].entries.push(file(0, name.as_bytes(), chunks));
+                let chunks = vec![ChunkRef {
+                    id: put.id,
+                    len: 1000,
+                }];
+                manifest.roots[0]
+                    .entries
+                    .push(file(0, name.as_bytes(), chunks));
             }
             manifest.stats = manifest.compute_stats();
             self.snapshots.commit(&manifest).expect("commit");
@@ -228,7 +233,10 @@ mod tests {
     }
 
     fn ids(list: &SnapshotList) -> Vec<String> {
-        list.snapshots.iter().map(|info| info.summary.id.as_str()[..2].to_owned()).collect()
+        list.snapshots
+            .iter()
+            .map(|info| info.summary.id.as_str()[..2].to_owned())
+            .collect()
     }
 
     #[test]
@@ -256,7 +264,8 @@ mod tests {
             .write(true)
             .open(fx.dir.path().join(older.id.object_name()))
             .expect("open");
-        file.set_modified(std::time::SystemTime::now()).expect("set mtime");
+        file.set_modified(std::time::SystemTime::now())
+            .expect("set mtime");
         drop(file);
 
         let list = list(&fx.snapshots, &fx.chunks).expect("list");
@@ -269,7 +278,10 @@ mod tests {
         let fx = Fixture::new();
         let list = list(&fx.snapshots, &fx.chunks).expect("list");
         assert!(list.snapshots.is_empty() && list.damaged.is_empty());
-        assert_eq!((list.referenced_chunks, list.referenced_stored_bytes), (0, 0));
+        assert_eq!(
+            (list.referenced_chunks, list.referenced_stored_bytes),
+            (0, 0)
+        );
     }
 
     #[test]
@@ -281,10 +293,24 @@ mod tests {
         let list = list(&fx.snapshots, &fx.chunks).expect("list");
         let (first, second) = (&list.snapshots[0].sizes, &list.snapshots[1].sizes);
         assert_eq!(first.logical_bytes, 2000);
-        assert_eq!(second.logical_bytes, 3000, "a repeated chunk still counts in the logical size");
-        assert_eq!((first.chunks, second.chunks), (2, 2), "repeats inside a snapshot count once");
-        assert_eq!((first.deduplicated_bytes, second.deduplicated_bytes), (2000, 2000));
-        assert_eq!((first.unique_chunks, second.unique_chunks), (1, 1), "`two` is shared");
+        assert_eq!(
+            second.logical_bytes, 3000,
+            "a repeated chunk still counts in the logical size"
+        );
+        assert_eq!(
+            (first.chunks, second.chunks),
+            (2, 2),
+            "repeats inside a snapshot count once"
+        );
+        assert_eq!(
+            (first.deduplicated_bytes, second.deduplicated_bytes),
+            (2000, 2000)
+        );
+        assert_eq!(
+            (first.unique_chunks, second.unique_chunks),
+            (1, 1),
+            "`two` is shared"
+        );
         assert!(first.stored_bytes >= 2000 && first.stored_bytes > first.unique_stored_bytes);
         let shared = first.stored_bytes - first.unique_stored_bytes;
         assert_eq!(
@@ -317,12 +343,20 @@ mod tests {
         let fx = Fixture::new();
         let mut manifest = minimal();
         manifest.id = "ab".repeat(32).parse().expect("valid id");
-        manifest.skipped = crate::snapshot::testing::rich().skipped;
+        // `rich` has two roots and `minimal` one, so every record is moved to root 0.
+        manifest.skipped = crate::snapshot::testing::rich()
+            .skipped
+            .into_iter()
+            .map(|record| crate::snapshot::SkippedRecord { root: 0, ..record })
+            .collect();
         manifest.stats = manifest.compute_stats();
         fx.snapshots.commit(&manifest).expect("commit");
 
         let list = list(&fx.snapshots, &fx.chunks).expect("list");
-        assert_eq!(list.snapshots[0].unreadable, 1, "one of the four skipped paths was unreadable");
+        assert_eq!(
+            list.snapshots[0].unreadable, 1,
+            "one of the four skipped paths was unreadable"
+        );
         assert_eq!(list.snapshots[0].summary.stats.skipped, 4);
         assert_eq!(unreadable_paths(&minimal()), 0);
     }
@@ -335,7 +369,10 @@ mod tests {
 
         let found = details(&fx.snapshots, &fx.chunks, &first.id).expect("details");
         assert_eq!(found.manifest, first);
-        assert_eq!(found.sizes.unique_chunks, 1, "only `one` is particular to the first");
+        assert_eq!(
+            found.sizes.unique_chunks, 1,
+            "only `one` is particular to the first"
+        );
         assert_eq!(found.sizes.chunks, 2);
         assert!(found.unique_sizes_exact);
         assert_eq!(found.roots.len(), 1);
@@ -351,7 +388,10 @@ mod tests {
 
         let found = details(&fx.snapshots, &fx.chunks, &first.id).expect("details");
         assert!(!found.unique_sizes_exact);
-        assert_eq!(found.sizes.unique_chunks, 1, "overstated, which is what the flag warns about");
+        assert_eq!(
+            found.sizes.unique_chunks, 1,
+            "overstated, which is what the flag warns about"
+        );
     }
 
     #[test]
@@ -361,7 +401,10 @@ mod tests {
         manifest.id = "ab".repeat(32).parse().expect("valid id");
         // The hand-built chunk ids are not stored, so give the files real chunks.
         let put = fx.chunks.put(&pseudo_random(1000, 5)).expect("put");
-        let real = ChunkRef { id: put.id, len: 1000 };
+        let real = ChunkRef {
+            id: put.id,
+            len: 1000,
+        };
         for root in &mut manifest.roots {
             for entry in &mut root.entries {
                 if let crate::snapshot::NodeKind::File { chunks } = &mut entry.kind {

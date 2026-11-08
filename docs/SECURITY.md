@@ -215,7 +215,8 @@ file change in a way the checks cannot see (see `SCANNING.md`).
 - **Bounded work.** Counts and lengths are checked against the bytes left before allocating; the
   manifest is capped at 1 GiB; decompression is capped at the authenticated length. Malformed
   and hostile inputs are meant to fail with an error and never panic; tests truncate the
-  encoding at every length and mutate every byte (they have not been run yet).
+  encoding at every length and mutate every byte, and property tests feed arbitrary bytes to the
+  parsers and to the chunk, snapshot, and key-file readers (`crates/vaultsnap-core/tests/properties.rs`).
 - **Atomic, complete-or-absent.** A snapshot is published in one no-overwrite step, only after it
   validates and all its chunks are confirmed present. Incomplete snapshots are never visible;
   damaged ones are reported as damaged. Snapshots are never overwritten, so a later bug cannot

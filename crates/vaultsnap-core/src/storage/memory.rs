@@ -90,7 +90,12 @@ impl MemoryBackend {
     }
 
     fn not_found(operation: &'static str, name: &str) -> Error {
-        Error::backend(operation, name, BackendErrorKind::NotFound, "no such object")
+        Error::backend(
+            operation,
+            name,
+            BackendErrorKind::NotFound,
+            "no such object",
+        )
     }
 
     fn info(stored: &Stored) -> ObjectInfo {
@@ -211,7 +216,8 @@ impl Backend for MemoryBackend {
                 });
             }
             (PutMode::Update(expected), current) => {
-                let unchanged = current.is_some_and(|stored| Self::info(stored).version == *expected);
+                let unchanged =
+                    current.is_some_and(|stored| Self::info(stored).version == *expected);
                 if !unchanged {
                     return Err(Error::PreconditionFailed {
                         path: self.root.join(name),
@@ -284,7 +290,10 @@ mod tests {
             ]
         );
         assert_eq!(kinds("a/b"), [("c".to_owned(), DirEntryKind::File, 1)]);
-        assert!(kinds("nothing").is_empty(), "a prefix without objects is just empty");
+        assert!(
+            kinds("nothing").is_empty(),
+            "a prefix without objects is just empty"
+        );
         assert_eq!(backend.object_names(), ["a/b/c", "a/d", "top"]);
         assert!(backend.dir_exists("nothing").expect("answer"));
     }
@@ -304,8 +313,17 @@ mod tests {
         let backend = MemoryBackend::new();
         let err = backend.get("absent", 10).expect_err("missing");
         assert!(err.is_not_found() && !err.is_transient(), "{err}");
-        assert!(matches!(err, Error::Backend { kind: BackendErrorKind::NotFound, .. }));
-        assert_eq!(err.to_string(), "storage backend could not get absent: no such object");
+        assert!(matches!(
+            err,
+            Error::Backend {
+                kind: BackendErrorKind::NotFound,
+                ..
+            }
+        ));
+        assert_eq!(
+            err.to_string(),
+            "storage backend could not get absent: no such object"
+        );
     }
 
     #[test]

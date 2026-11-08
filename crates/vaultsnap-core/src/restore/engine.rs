@@ -57,8 +57,8 @@ pub(crate) fn run(
         fs::create_dir_all(&target.path)
             .map_err(|err| Error::io("create directory", &target.path, err))?;
     }
-    let root = fs::canonicalize(&target.path)
-        .map_err(|err| Error::io("resolve", &target.path, err))?;
+    let root =
+        fs::canonicalize(&target.path).map_err(|err| Error::io("resolve", &target.path, err))?;
 
     let mut restorer = Restorer {
         manifest,
@@ -112,8 +112,13 @@ fn resolve_target(target: &Path, repository_root: Option<&Path>) -> Result<Targe
             missing.push(component.as_os_str().to_os_string());
         }
     }
-    if missing.iter().any(|name| name == OsStr::new("..") || name == OsStr::new(".")) {
-        return Err(invalid("a part of the path that does not exist yet contains `.` or `..`"));
+    if missing
+        .iter()
+        .any(|name| name == OsStr::new("..") || name == OsStr::new("."))
+    {
+        return Err(invalid(
+            "a part of the path that does not exist yet contains `.` or `..`",
+        ));
     }
 
     let base = fs::canonicalize(&existing).map_err(|err| Error::io("resolve", &existing, err))?;
@@ -121,7 +126,9 @@ fn resolve_target(target: &Path, repository_root: Option<&Path>) -> Result<Targe
         .map_err(|err| Error::io("inspect", &base, err))?
         .is_dir();
     if !is_directory {
-        return Err(invalid("it is not a directory (or lies below something that is not)"));
+        return Err(invalid(
+            "it is not a directory (or lies below something that is not)",
+        ));
     }
     let mut path = base;
     path.extend(&missing);
@@ -181,7 +188,11 @@ fn preflight(plan: &Plan<'_>, root: &Path, inspect_disk: bool) -> Result<()> {
             None => false,
         };
         let conflict = if clash {
-            Some(item.rel.iter().fold(root.to_path_buf(), |path, part| path.join(part)))
+            Some(
+                item.rel
+                    .iter()
+                    .fold(root.to_path_buf(), |path, part| path.join(part)),
+            )
         } else if inspect_disk {
             find_conflict(root, &item.rel, is_directory, &mut known)?
         } else {
@@ -434,7 +445,10 @@ impl<'a> Restorer<'a> {
     fn symlink(&mut self, planned: &PlannedEntry<'a>, target: &[u8]) -> Result<()> {
         match self.options.symlinks {
             RestoreSymlinks::Skip => {
-                self.skip(planned, "symbolic links are not restored (--symlinks skip)".to_owned());
+                self.skip(
+                    planned,
+                    "symbolic links are not restored (--symlinks skip)".to_owned(),
+                );
                 return Ok(());
             }
             RestoreSymlinks::Contained

@@ -60,8 +60,22 @@ impl Content {
             // Prose-like text built from a small vocabulary.
             Self::Text => {
                 const WORDS: [&str; 16] = [
-                    "backup", "chunk", "snapshot", "the", "of", "repository", "encrypted", "and",
-                    "incremental", "restore", "data", "a", "file", "boundary", "hash", "stream",
+                    "backup",
+                    "chunk",
+                    "snapshot",
+                    "the",
+                    "of",
+                    "repository",
+                    "encrypted",
+                    "and",
+                    "incremental",
+                    "restore",
+                    "data",
+                    "a",
+                    "file",
+                    "boundary",
+                    "hash",
+                    "stream",
                 ];
                 let mut out = Vec::with_capacity(len + 16);
                 while out.len() < len {
@@ -72,10 +86,7 @@ impl Content {
                 out
             }
             // Database pages or arrays of integers: highly structured binary.
-            Self::Counter => (0_u32..)
-                .flat_map(u32::to_le_bytes)
-                .take(len)
-                .collect(),
+            Self::Counter => (0_u32..).flat_map(u32::to_le_bytes).take(len).collect(),
             // Bitmaps, logs with few distinct bytes.
             Self::LowEntropy => rng.bytes(len).into_iter().map(|byte| byte & 3).collect(),
         }

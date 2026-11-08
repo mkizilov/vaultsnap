@@ -25,7 +25,7 @@ impl Repository {
     /// `keys` come from [`Repository::unlock_for_check`] (or [`Repository::unlock`]). A quick
     /// check ([`CheckOptions::read_data`] false) authenticates every snapshot and examines the
     /// structure of every chunk object; a full check also reads, authenticates, and decrypts
-    /// every object. See the [`check`](crate::check) module for exactly what each finds.
+    /// every object. See the [`check`] module for exactly what each finds.
     ///
     /// Damage is **reported** in [`CheckReport::findings`], not returned as an error. An error
     /// means the check could not be carried out: this is not a repository, its `config` is
@@ -85,7 +85,10 @@ mod tests {
             assert_eq!(report.repository_id.len(), 32);
             assert_eq!(report.format_version, 1);
         }
-        assert!(repo.store().list("locks").expect("list").is_empty(), "the lock was released");
+        assert!(
+            repo.store().list("locks").expect("list").is_empty(),
+            "the lock was released"
+        );
     }
 
     #[tokio::test]
@@ -93,7 +96,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let keys = RepositoryKeys::generate().expect("generate");
         let repo = Repository::at(dir.path().join("nope"));
-        let err = repo.check(&keys, CheckOptions::default()).await.expect_err("must fail");
+        let err = repo
+            .check(&keys, CheckOptions::default())
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::NotARepository { .. }), "{err}");
     }
 
@@ -101,17 +107,25 @@ mod tests {
     async fn an_exclusive_lock_stops_the_check_and_is_left_alone() {
         let (_dir, repo, keys) = repository().await;
         let held = repo.lock(LockKind::Exclusive).await.expect("lock");
-        let err = repo.check(&keys, CheckOptions::default()).await.expect_err("must fail");
+        let err = repo
+            .check(&keys, CheckOptions::default())
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::Locked { .. }), "{err}");
         drop(held);
-        repo.check(&keys, CheckOptions::default()).await.expect("check");
+        repo.check(&keys, CheckOptions::default())
+            .await
+            .expect("check");
     }
 
     #[tokio::test]
     async fn a_shared_lock_does_not_stop_the_check_but_is_reported() {
         let (_dir, repo, keys) = repository().await;
         let held = repo.lock(LockKind::Shared).await.expect("lock");
-        let report = repo.check(&keys, CheckOptions::default()).await.expect("check");
+        let report = repo
+            .check(&keys, CheckOptions::default())
+            .await
+            .expect("check");
         assert!(report.is_ok());
         assert_eq!(report.count(crate::check::FindingKind::LockPresent), 1);
         assert_eq!(report.warnings, 1);
@@ -122,7 +136,10 @@ mod tests {
     async fn a_missing_locks_directory_is_reported_and_the_check_still_runs() {
         let (_dir, repo, keys) = repository().await;
         std::fs::remove_dir_all(repo.layout().locks_dir()).expect("remove");
-        let report = repo.check(&keys, CheckOptions::default()).await.expect("check");
+        let report = repo
+            .check(&keys, CheckOptions::default())
+            .await
+            .expect("check");
         assert_eq!(report.count(crate::check::FindingKind::MissingDirectory), 1);
         assert_eq!(report.findings[0].subject, "locks");
         assert!(!report.is_ok());

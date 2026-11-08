@@ -279,20 +279,23 @@ the backend on the fake, so the mapping is tested without a network.
    objects, and the times of writes are visible to the store ([`SECURITY.md`](SECURITY.md)).
 9. **Tests.** The contract against a store in a container on a loopback port (21100 to 21199 in this
    project). Running it is the acceptance test for the capabilities the backend declares.
-   **Built:** `tests/s3_minio.rs` runs whole-repository scenarios against MinIO
-   (`docker/minio/compose.yaml`, [`S3.md`](S3.md)); it does not run the contract itself against
-   MinIO, which remains to be added.
+   **Built:** `tests/s3_minio.rs` runs whole-repository scenarios against MinIO, and **the whole
+   contract** (`scripts/minio-local.sh`, [`S3.md`](S3.md)). Running the contract against a real
+   server found that MinIO's `If-Match` creates a missing object, which is why the probe tests
+   that case.
 
 Costs to design around: every `HEAD` and `LIST` is a billed request, so the repository should not
 `stat` what it can learn from one listing; `prune` and `check` already list once per shard.
 
 ## What is and is not verified
 
-Nothing in this change has been compiled or run: the authoring environment has no Rust toolchain
-and no network. The contract, the backends, the retry logic, and the end-to-end tests were written
-and read carefully, not executed. In particular unverified are the concurrency cases (8 racing
-creators and updaters, readers against a replacement), the timing-free retry tests, and the
-behavior of the rewritten `Store` under every existing test. The S3 mappings in this document have
-been exercised only against `FakeS3`, which was written by the same hand as the backend and so
-shares its misreadings of S3; no test has met a real store, because the MinIO tests of
-[`S3.md`](S3.md) need Docker, which this environment may not operate, and were never run.
+The contract (22 cases, including the racing creators and updaters and readers against a
+replacement) passes on the directory backend, the in-memory backend, the in-memory backend behind
+retries over a storage that fails every fourth call, the S3 backend on the in-process fake (with small
+listing pages), and the S3 backend on a real MinIO server through the AWS SDK. The retry logic, the
+whole-repository scenarios of `tests/storage.rs` (including moving a repository between backends
+byte for byte), and the crash tests pass on macOS ([`RELIABILITY.md`](RELIABILITY.md)).
+
+Not verified: the S3 mappings against AWS S3 itself (the real server was MinIO, built from source, over
+plain HTTP, and it deviates from S3 in the one way described above), other S3-compatible services,
+and any of this on Linux or Windows.

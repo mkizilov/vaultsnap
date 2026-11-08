@@ -215,7 +215,10 @@ mod tests {
         ];
         for (min, avg, max) in cases {
             let result = ChunkerConfig::new(min, avg, max);
-            assert!(matches!(result, Err(Error::InvalidChunkerConfig(_))), "{min} {avg} {max}");
+            assert!(
+                matches!(result, Err(Error::InvalidChunkerConfig(_))),
+                "{min} {avg} {max}"
+            );
         }
     }
 
@@ -253,7 +256,9 @@ mod tests {
         let config = config(64, 256, 1024);
         for seed in 0..50 {
             let data = pseudo_random(4096, seed);
-            let cut = config.cut_point(&data).expect("input is longer than the maximum");
+            let cut = config
+                .cut_point(&data)
+                .expect("input is longer than the maximum");
             assert!((64..=1024).contains(&cut), "cut {cut}");
         }
     }
@@ -279,7 +284,11 @@ mod tests {
             let mut altered = original.clone();
             let noise = pseudo_random(config.min_size() - WINDOW, seed + 1000);
             altered[..noise.len()].copy_from_slice(&noise);
-            assert_eq!(config.cut_point(&original), config.cut_point(&altered), "seed {seed}");
+            assert_eq!(
+                config.cut_point(&original),
+                config.cut_point(&altered),
+                "seed {seed}"
+            );
         }
     }
 
@@ -288,7 +297,11 @@ mod tests {
         let config = config(256, 256, 256);
         let data = pseudo_random(1000, 3);
         assert_eq!(config.cut_point(&data), Some(256));
-        let lengths: Vec<usize> = config.split(&data).iter().map(ExactSizeIterator::len).collect();
+        let lengths: Vec<usize> = config
+            .split(&data)
+            .iter()
+            .map(ExactSizeIterator::len)
+            .collect();
         assert_eq!(lengths, [256, 256, 256, 232]);
     }
 
@@ -319,7 +332,10 @@ mod tests {
             let ranges = config.split(&data);
             let first = ranges[0].len();
             let last = ranges.len() - 1;
-            assert!(ranges[..last].iter().all(|range| range.len() == first), "byte {byte}");
+            assert!(
+                ranges[..last].iter().all(|range| range.len() == first),
+                "byte {byte}"
+            );
             assert!(ranges[last].len() <= first);
         }
     }

@@ -1,0 +1,14 @@
+# A nightly VaultSnap backup from cron (docs/GUIDE.md). Install with `crontab -e` and paste the
+# line below, after installing the script:
+#
+#   install -m 0755 contrib/vaultsnap-scheduled.sh ~/.local/bin/vaultsnap-scheduled
+#   install -d -m 0700 ~/.config/vaultsnap
+#   mkdir -p ~/.local/state
+#   install -m 0600 contrib/vaultsnap.env.example ~/.config/vaultsnap/env      # then edit it
+#
+# cron has almost no environment: the line loads the settings file and gives the script a PATH.
+# The output goes to a log, because cron would otherwise mail it or lose it. The job needs no
+# terminal. Exit status 3 means "the snapshot exists but something needs a person's eyes".
+#
+# minute hour day month weekday  command
+30 2 * * *  PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin; set -a; . $HOME/.config/vaultsnap/env; set +a; vaultsnap-scheduled >> $HOME/.local/state/vaultsnap.log 2>&1

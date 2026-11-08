@@ -143,7 +143,7 @@ impl FlakyBackend {
                 }
             }
             Plan::Periodic { period } => {
-                if *period > 0 && calls % *period == 0 {
+                if *period > 0 && calls.is_multiple_of(*period) {
                     if (calls / *period) % 2 == 1 {
                         Some(Fault::After)
                     } else {
@@ -260,7 +260,9 @@ mod tests {
         let err = flaky.put("x", b"1", PutMode::Create).expect_err("injected");
         assert!(err.is_transient(), "{err}");
         assert!(inner.object_names().is_empty());
-        flaky.put("x", b"1", PutMode::Create).expect("the script is used up");
+        flaky
+            .put("x", b"1", PutMode::Create)
+            .expect("the script is used up");
         assert_eq!(inner.object_names(), ["x"]);
     }
 
@@ -268,7 +270,9 @@ mod tests {
     fn a_fault_after_the_call_has_its_effect_but_loses_the_answer() {
         let inner = memory();
         let flaky = FlakyBackend::scripted(inner.clone(), [Fault::After]);
-        let err = flaky.put("x", b"1", PutMode::Create).expect_err("the answer is lost");
+        let err = flaky
+            .put("x", b"1", PutMode::Create)
+            .expect_err("the answer is lost");
         assert!(err.is_transient(), "{err}");
         assert_eq!(inner.object_names(), ["x"], "the write happened");
     }
@@ -298,13 +302,24 @@ mod tests {
     #[test]
     fn a_script_can_let_the_first_calls_pass() {
         let inner = memory();
-        let flaky = FlakyBackend::scripted_for(inner.clone(), &["put"], [Fault::Before])
-            .skipping(2);
-        flaky.put("a", b"1", PutMode::Create).expect("first put passes");
-        assert!(flaky.exists("a").expect("not a put: does not use up the skip"));
-        flaky.put("b", b"1", PutMode::Create).expect("second put passes");
-        assert!(flaky.put("c", b"1", PutMode::Create).is_err(), "third put is the fault");
-        flaky.put("c", b"1", PutMode::Create).expect("and then it is over");
+        let flaky =
+            FlakyBackend::scripted_for(inner.clone(), &["put"], [Fault::Before]).skipping(2);
+        flaky
+            .put("a", b"1", PutMode::Create)
+            .expect("first put passes");
+        assert!(flaky
+            .exists("a")
+            .expect("not a put: does not use up the skip"));
+        flaky
+            .put("b", b"1", PutMode::Create)
+            .expect("second put passes");
+        assert!(
+            flaky.put("c", b"1", PutMode::Create).is_err(),
+            "third put is the fault"
+        );
+        flaky
+            .put("c", b"1", PutMode::Create)
+            .expect("and then it is over");
         assert_eq!(inner.object_names(), ["a", "b", "c"]);
     }
 
@@ -316,7 +331,10 @@ mod tests {
         flaky.put("b", b"1", PutMode::Create).expect("call 2");
         let third = flaky.put("c", b"1", PutMode::Create);
         assert!(third.is_err(), "call 3 loses its answer");
-        assert!(inner.object_names().contains(&"c".to_owned()), "but it was carried out");
+        assert!(
+            inner.object_names().contains(&"c".to_owned()),
+            "but it was carried out"
+        );
         flaky.put("d", b"1", PutMode::Create).expect("call 4");
         flaky.put("e", b"1", PutMode::Create).expect("call 5");
         let sixth = flaky.put("f", b"1", PutMode::Create);

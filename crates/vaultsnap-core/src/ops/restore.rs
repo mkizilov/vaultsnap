@@ -9,7 +9,7 @@ use crate::restore::{self, RestoreOptions, RestoreReport};
 
 impl Repository {
     /// Restores a snapshot, or selected paths of it, into a directory. See the
-    /// [`restore`](crate::restore) module for the guarantees, and [`RestoreOptions`] for the
+    /// [`restore`] module for the guarantees, and [`RestoreOptions`] for the
     /// choices.
     ///
     /// The snapshot is loaded with authenticated decryption and validated, every chunk is
@@ -59,12 +59,20 @@ mod tests {
     }
 
     fn options(reference: &str, target: std::path::PathBuf) -> RestoreOptions {
-        RestoreOptions::new(reference.parse::<SnapshotRef>().expect("valid reference"), target)
+        RestoreOptions::new(
+            reference.parse::<SnapshotRef>().expect("valid reference"),
+            target,
+        )
     }
 
     /// Plants an authentic snapshot, sealed with the repository key, that no correct writer would
     /// produce: it is neither validated nor checked for chunks.
-    async fn plant(repo: &Repository, keys: &RepositoryKeys, source: &[u8], names: &[&[u8]]) -> Manifest {
+    async fn plant(
+        repo: &Repository,
+        keys: &RepositoryKeys,
+        source: &[u8],
+        names: &[&[u8]],
+    ) -> Manifest {
         let config = repo.load_config().await.expect("config");
         let mut manifest = minimal();
         manifest.repository_id = config.repository_id;
@@ -91,7 +99,10 @@ mod tests {
         let keys = RepositoryKeys::generate().expect("generate");
         let repo = Repository::at(dir.path().join("nope"));
         let target = dir.path().join("out");
-        let err = repo.restore(&keys, options("abcd", target.clone())).await.expect_err("must fail");
+        let err = repo
+            .restore(&keys, options("abcd", target.clone()))
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::NotARepository { .. }), "{err}");
         assert!(!target.exists());
     }
@@ -100,10 +111,16 @@ mod tests {
     async fn an_unknown_snapshot_fails_before_the_target_is_touched() {
         let (dir, repo, keys) = repository().await;
         let target = dir.path().join("out");
-        let err = repo.restore(&keys, options("abcd", target.clone())).await.expect_err("must fail");
+        let err = repo
+            .restore(&keys, options("abcd", target.clone()))
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::SnapshotNotFound(_)), "{err}");
         assert!(!target.exists());
-        assert!(repo.store().list("locks").expect("list").is_empty(), "the lock was released");
+        assert!(
+            repo.store().list("locks").expect("list").is_empty(),
+            "the lock was released"
+        );
     }
 
     #[tokio::test]
@@ -114,10 +131,14 @@ mod tests {
             let manifest = plant(&repo, &keys, b"/data", &[name]).await;
             let target = dir.path().join("out");
             let reference = manifest.id.as_str()[..16].to_owned();
-            let err = repo.restore(&keys, options(&reference, target.clone())).await.expect_err("refused");
+            let err = repo
+                .restore(&keys, options(&reference, target.clone()))
+                .await
+                .expect_err("refused");
             assert!(matches!(err, Error::InvalidManifest(_)), "{name:?}: {err}");
             assert!(!target.exists(), "{name:?}");
-            fs::remove_file(repo.layout().snapshot_file(&manifest.id)).expect("remove the planted snapshot");
+            fs::remove_file(repo.layout().snapshot_file(&manifest.id))
+                .expect("remove the planted snapshot");
         }
     }
 
@@ -129,7 +150,10 @@ mod tests {
         let manifest = plant(&repo, &keys, b"/data/../../escape", &[b"file"]).await;
         let target = dir.path().join("out");
         let full = manifest.id.to_string();
-        let err = repo.restore(&keys, options(&full, target.clone())).await.expect_err("refused");
+        let err = repo
+            .restore(&keys, options(&full, target.clone()))
+            .await
+            .expect_err("refused");
         assert!(matches!(err, Error::UnsafePath { .. }), "{err}");
         assert!(!target.exists());
         assert!(!dir.path().join("escape").exists());

@@ -279,7 +279,9 @@ mod progress_tests {
         });
         assert_eq!(progress.text(), "removing chunk objects: 0 of 30");
         for _ in 0..4 {
-            progress.event(&PruneEvent::Step { phase: PrunePhase::RemovingChunks });
+            progress.event(&PruneEvent::Step {
+                phase: PrunePhase::RemovingChunks,
+            });
         }
         assert_eq!(progress.text(), "removing chunk objects: 4 of 30");
         progress.event(&PruneEvent::Started {

@@ -100,7 +100,10 @@ impl Env {
             racy_margin: Duration::ZERO,
             ..BackupOptions::default()
         };
-        self.repo.backup(&self.keys, options).await.expect("backup succeeds")
+        self.repo
+            .backup(&self.keys, options)
+            .await
+            .expect("backup succeeds")
     }
 
     /// Total size of every object file below `data/`.
@@ -133,7 +136,9 @@ impl Env {
     }
 
     fn lock_files(&self) -> usize {
-        fs::read_dir(self.path("repo/locks")).expect("read locks").count()
+        fs::read_dir(self.path("repo/locks"))
+            .expect("read locks")
+            .count()
     }
 }
 
@@ -153,7 +158,11 @@ async fn snapshots_are_listed_oldest_first_whatever_their_random_ids() {
     }
 
     let list = env.repo.snapshots(&env.keys).await.expect("list");
-    let listed: Vec<SnapshotId> = list.snapshots.iter().map(|i| i.summary.id.clone()).collect();
+    let listed: Vec<SnapshotId> = list
+        .snapshots
+        .iter()
+        .map(|i| i.summary.id.clone())
+        .collect();
     assert_eq!(listed, taken, "the order of creation, not of the ids");
     for pair in list.snapshots.windows(2) {
         assert!(pair[0].summary.created < pair[1].summary.created);
@@ -162,7 +171,11 @@ async fn snapshots_are_listed_oldest_first_whatever_their_random_ids() {
     assert_eq!(env.lock_files(), 0, "the lock was released");
 
     let again = env.repo.snapshots(&env.keys).await.expect("list");
-    let relisted: Vec<SnapshotId> = again.snapshots.iter().map(|i| i.summary.id.clone()).collect();
+    let relisted: Vec<SnapshotId> = again
+        .snapshots
+        .iter()
+        .map(|i| i.summary.id.clone())
+        .collect();
     assert_eq!(relisted, taken, "the same order every time");
 }
 
@@ -177,12 +190,20 @@ async fn a_snapshot_is_found_by_the_start_of_its_id() {
         let prefix: SnapshotRef = id[..length].parse().expect("syntax");
         let manifest = env.repo.snapshot(&env.keys, &prefix).await.expect("found");
         assert_eq!(manifest.id, report.snapshot);
-        let details = env.repo.snapshot_details(&env.keys, &prefix).await.expect("found");
+        let details = env
+            .repo
+            .snapshot_details(&env.keys, &prefix)
+            .await
+            .expect("found");
         assert_eq!(details.manifest.id, report.snapshot);
     }
     let other = if id.starts_with('0') { "1111" } else { "0000" };
     let missing: SnapshotRef = other.parse().expect("syntax");
-    let err = env.repo.snapshot(&env.keys, &missing).await.expect_err("no such snapshot");
+    let err = env
+        .repo
+        .snapshot(&env.keys, &missing)
+        .await
+        .expect_err("no such snapshot");
     assert!(matches!(err, Error::SnapshotNotFound(_)), "{err}");
 }
 
@@ -193,7 +214,9 @@ async fn a_snapshot_is_found_by_the_start_of_its_id() {
 /// `path` relative to `root`, as text.
 fn relative(root: &Path, path: &[u8]) -> String {
     let prefix = bytes_of(root);
-    let rest = path.strip_prefix(prefix.as_slice()).expect("below the root");
+    let rest = path
+        .strip_prefix(prefix.as_slice())
+        .expect("below the root");
     let rest = rest.strip_prefix(b"/").unwrap_or(rest);
     String::from_utf8_lossy(rest).into_owned()
 }
@@ -218,24 +241,38 @@ async fn the_changes_between_two_backups_are_added_deleted_and_modified_paths() 
     write(&src, "added.txt", b"brand new");
     write(&src, "newdir/file.txt", b"in a new directory");
     let mut inserted = big.clone();
-    inserted.splice(100_000..100_000, b"<<< inserted into the middle >>>".iter().copied());
+    inserted.splice(
+        100_000..100_000,
+        b"<<< inserted into the middle >>>".iter().copied(),
+    );
     write(&src, "big.bin", &inserted);
     let second = env.backup(&["src"]).await;
 
     let diff = env
         .repo
-        .compare_snapshots(&env.keys, &reference(&first.snapshot), &reference(&second.snapshot))
+        .compare_snapshots(
+            &env.keys,
+            &reference(&first.snapshot),
+            &reference(&second.snapshot),
+        )
         .await
         .expect("compare");
     let root = env.root("src");
     let changes: BTreeMap<String, (Status, Vec<Aspect>)> = diff
         .changes
         .iter()
-        .map(|change| (relative(&root, &change.path), (change.status, change.aspects.clone())))
+        .map(|change| {
+            (
+                relative(&root, &change.path),
+                (change.status, change.aspects.clone()),
+            )
+        })
         .collect();
 
-    let statuses: BTreeMap<&str, Status> =
-        changes.iter().map(|(path, (status, _))| (path.as_str(), *status)).collect();
+    let statuses: BTreeMap<&str, Status> = changes
+        .iter()
+        .map(|(path, (status, _))| (path.as_str(), *status))
+        .collect();
     assert_eq!(
         statuses,
         BTreeMap::from([
@@ -257,14 +294,24 @@ async fn the_changes_between_two_backups_are_added_deleted_and_modified_paths() 
     assert_eq!(diff.count(Status::Modified), 2);
     assert_eq!(diff.added_bytes, 9 + 18, "added.txt and newdir/file.txt");
     assert_eq!(diff.deleted_bytes, 13 + 12, "remove.txt and dir/gone.txt");
-    assert_eq!(diff.unchanged, 4, "the root, keep.txt, dir, and dir/inner.txt");
-    assert_eq!((diff.from.id.clone(), diff.to.id.clone()), (first.snapshot, second.snapshot));
+    assert_eq!(
+        diff.unchanged, 4,
+        "the root, keep.txt, dir, and dir/inner.txt"
+    );
+    assert_eq!(
+        (diff.from.id.clone(), diff.to.id.clone()),
+        (first.snapshot, second.snapshot)
+    );
     assert!(!diff.chunker_differs);
     assert_eq!(diff.missing_chunks, 0);
 
     // Chunking is content-defined, so inserting into the middle of a big file leaves most of its
     // chunks shared between the two snapshots.
-    let manifest = env.repo.snapshot(&env.keys, &reference(&diff.to.id)).await.expect("load");
+    let manifest = env
+        .repo
+        .snapshot(&env.keys, &reference(&diff.to.id))
+        .await
+        .expect("load");
     let big_chunks = entries(&manifest, None)
         .find(|listed| listed.path.ends_with(b"/big.bin"))
         .map(|listed| match &listed.entry.kind {
@@ -296,17 +343,32 @@ async fn comparing_in_the_other_direction_swaps_added_and_deleted() {
 
     let forward = env
         .repo
-        .compare_snapshots(&env.keys, &reference(&first.snapshot), &reference(&second.snapshot))
+        .compare_snapshots(
+            &env.keys,
+            &reference(&first.snapshot),
+            &reference(&second.snapshot),
+        )
         .await
         .expect("compare");
     let backward = env
         .repo
-        .compare_snapshots(&env.keys, &reference(&second.snapshot), &reference(&first.snapshot))
+        .compare_snapshots(
+            &env.keys,
+            &reference(&second.snapshot),
+            &reference(&first.snapshot),
+        )
         .await
         .expect("compare");
-    assert_eq!((forward.count(Status::Added), forward.count(Status::Deleted)), (1, 1));
+    assert_eq!(
+        (forward.count(Status::Added), forward.count(Status::Deleted)),
+        (1, 1)
+    );
     let file_name = |diff: &Diff, status: Status| -> String {
-        let change = diff.changes.iter().find(|c| c.status == status).expect("a change");
+        let change = diff
+            .changes
+            .iter()
+            .find(|c| c.status == status)
+            .expect("a change");
         let text = String::from_utf8_lossy(&change.path).into_owned();
         text.rsplit('/').next().unwrap_or_default().to_owned()
     };
@@ -325,7 +387,11 @@ async fn a_snapshot_compared_with_itself_has_no_changes() {
     let report = env.backup(&["src"]).await;
     let id = reference(&report.snapshot);
 
-    let diff = env.repo.compare_snapshots(&env.keys, &id, &id).await.expect("compare");
+    let diff = env
+        .repo
+        .compare_snapshots(&env.keys, &id, &id)
+        .await
+        .expect("compare");
     assert!(diff.is_empty());
     assert_eq!(diff.unchanged, 2);
     assert_eq!((diff.stored_only_in_from, diff.stored_only_in_to), (0, 0));
@@ -352,7 +418,11 @@ async fn permission_and_link_changes_are_named() {
 
     let diff = env
         .repo
-        .compare_snapshots(&env.keys, &reference(&first.snapshot), &reference(&second.snapshot))
+        .compare_snapshots(
+            &env.keys,
+            &reference(&first.snapshot),
+            &reference(&second.snapshot),
+        )
         .await
         .expect("compare");
     let root = env.root("src");
@@ -420,10 +490,18 @@ async fn unusual_names_come_back_byte_for_byte_and_can_be_selected_by_path() {
             Err(err) => eprintln!("skipped {:?}: {err}", String::from_utf8_lossy(name)),
         }
     }
-    assert!(created.len() >= 10, "most names must be creatable: {}", created.len());
+    assert!(
+        created.len() >= 10,
+        "most names must be creatable: {}",
+        created.len()
+    );
     let report = env.backup(&["src"]).await;
 
-    let manifest = env.repo.snapshot(&env.keys, &reference(&report.snapshot)).await.expect("load");
+    let manifest = env
+        .repo
+        .snapshot(&env.keys, &reference(&report.snapshot))
+        .await
+        .expect("load");
     let root = bytes_of(&env.root("src"));
     let listed: Vec<Vec<u8>> = entries(&manifest, None).map(|listed| listed.path).collect();
     for name in &created {
@@ -448,12 +526,19 @@ async fn unusual_names_come_back_byte_for_byte_and_can_be_selected_by_path() {
 
     // A change to such a file is reported under its exact name.
     pause();
-    let target = created.iter().find(|name| name.contains(&b'\n')).expect("created");
+    let target = created
+        .iter()
+        .find(|name| name.contains(&b'\n'))
+        .expect("created");
     create(&name_path(&src, target), b"changed content").expect("rewrite");
     let second = env.backup(&["src"]).await;
     let diff = env
         .repo
-        .compare_snapshots(&env.keys, &reference(&report.snapshot), &reference(&second.snapshot))
+        .compare_snapshots(
+            &env.keys,
+            &reference(&report.snapshot),
+            &reference(&second.snapshot),
+        )
         .await
         .expect("compare");
     assert_eq!(diff.changes.len(), 1);
@@ -520,8 +605,16 @@ async fn sizes_agree_with_the_files_and_the_objects_on_disk() {
         50_000,
         "the second copy adds nothing after deduplication"
     );
-    assert!(sizes.stored_bytes > 80_000 && sizes.stored_bytes < 100_000, "{}", sizes.stored_bytes);
-    assert_eq!(sizes.stored_bytes, env.data_bytes(), "the only snapshot owns every object");
+    assert!(
+        sizes.stored_bytes > 80_000 && sizes.stored_bytes < 100_000,
+        "{}",
+        sizes.stored_bytes
+    );
+    assert_eq!(
+        sizes.stored_bytes,
+        env.data_bytes(),
+        "the only snapshot owns every object"
+    );
     assert_eq!(sizes.unique_stored_bytes, sizes.stored_bytes);
     assert_eq!(sizes.unique_chunks, sizes.chunks);
     assert_eq!(sizes.missing_chunks, 0);
@@ -565,7 +658,10 @@ async fn data_added_by_a_later_backup_is_unique_to_it() {
 
     let list = env.repo.snapshots(&env.keys).await.expect("list");
     let (older, newer) = (&list.snapshots[0].sizes, &list.snapshots[1].sizes);
-    assert_eq!(older.unique_stored_bytes, 0, "everything the first has, the second has too");
+    assert_eq!(
+        older.unique_stored_bytes, 0,
+        "everything the first has, the second has too"
+    );
     assert_eq!(newer.unique_stored_bytes, env.data_bytes() - before);
     assert_eq!(newer.stored_bytes, env.data_bytes());
     assert_eq!(newer.logical_bytes, 65_000);
@@ -585,17 +681,32 @@ async fn a_tampered_snapshot_is_never_shown() {
     let bad = env.backup(&["src"]).await;
     env.corrupt(&bad.snapshot);
 
-    let err = env.repo.snapshot(&env.keys, &reference(&bad.snapshot)).await.expect_err("tampered");
+    let err = env
+        .repo
+        .snapshot(&env.keys, &reference(&bad.snapshot))
+        .await
+        .expect_err("tampered");
     assert!(matches!(err, Error::CorruptSnapshot { .. }), "{err}");
-    let err = env.repo.snapshot_details(&env.keys, &reference(&bad.snapshot)).await;
+    let err = env
+        .repo
+        .snapshot_details(&env.keys, &reference(&bad.snapshot))
+        .await;
     assert!(matches!(err, Err(Error::CorruptSnapshot { .. })));
     let err = env
         .repo
-        .compare_snapshots(&env.keys, &reference(&good.snapshot), &reference(&bad.snapshot))
+        .compare_snapshots(
+            &env.keys,
+            &reference(&good.snapshot),
+            &reference(&bad.snapshot),
+        )
         .await;
     assert!(matches!(err, Err(Error::CorruptSnapshot { .. })));
 
-    let list = env.repo.snapshots(&env.keys).await.expect("the listing itself succeeds");
+    let list = env
+        .repo
+        .snapshots(&env.keys)
+        .await
+        .expect("the listing itself succeeds");
     assert_eq!(list.snapshots.len(), 1);
     assert_eq!(list.snapshots[0].summary.id, good.snapshot);
     assert_eq!(list.damaged.len(), 1);
@@ -607,7 +718,10 @@ async fn a_tampered_snapshot_is_never_shown() {
         .snapshot_details(&env.keys, &reference(&good.snapshot))
         .await
         .expect("the good snapshot is still readable");
-    assert!(!details.unique_sizes_exact, "a damaged neighbour makes unique sizes uncertain");
+    assert!(
+        !details.unique_sizes_exact,
+        "a damaged neighbour makes unique sizes uncertain"
+    );
 }
 
 #[tokio::test]
@@ -619,9 +733,17 @@ async fn one_snapshot_file_cannot_stand_in_for_another() {
     write(&env.path("src"), "a.txt", b"two");
     let second = env.backup(&["src"]).await;
     // A valid, authentic snapshot file under the wrong name.
-    fs::copy(env.snapshot_file(&second.snapshot), env.snapshot_file(&first.snapshot)).expect("copy");
+    fs::copy(
+        env.snapshot_file(&second.snapshot),
+        env.snapshot_file(&first.snapshot),
+    )
+    .expect("copy");
 
-    let err = env.repo.snapshot(&env.keys, &reference(&first.snapshot)).await.expect_err("swapped");
+    let err = env
+        .repo
+        .snapshot(&env.keys, &reference(&first.snapshot))
+        .await
+        .expect_err("swapped");
     assert!(matches!(err, Error::CorruptSnapshot { .. }), "{err}");
     let list = env.repo.snapshots(&env.keys).await.expect("list");
     assert_eq!(list.damaged.len(), 1);
@@ -635,9 +757,16 @@ async fn the_wrong_keys_open_nothing() {
     let report = env.backup(&["src"]).await;
     let stranger = Env::new().await;
 
-    let err = env.repo.snapshot(&stranger.keys, &reference(&report.snapshot)).await;
+    let err = env
+        .repo
+        .snapshot(&stranger.keys, &reference(&report.snapshot))
+        .await;
     assert!(matches!(err, Err(Error::CorruptSnapshot { .. })), "{err:?}");
-    let list = env.repo.snapshots(&stranger.keys).await.expect("the listing itself succeeds");
+    let list = env
+        .repo
+        .snapshots(&stranger.keys)
+        .await
+        .expect("the listing itself succeeds");
     assert!(list.snapshots.is_empty());
     assert_eq!(list.damaged.len(), 1);
 }
@@ -652,14 +781,29 @@ async fn inspecting_never_changes_the_repository() {
     let second = env.backup(&["src"]).await;
 
     let snapshot = |id: &SnapshotId| fs::read(env.snapshot_file(id)).expect("read");
-    let before = (snapshot(&first.snapshot), snapshot(&second.snapshot), env.data_bytes());
+    let before = (
+        snapshot(&first.snapshot),
+        snapshot(&second.snapshot),
+        env.data_bytes(),
+    );
     env.repo.snapshots(&env.keys).await.expect("list");
-    env.repo.snapshot_details(&env.keys, &reference(&first.snapshot)).await.expect("details");
     env.repo
-        .compare_snapshots(&env.keys, &reference(&first.snapshot), &reference(&second.snapshot))
+        .snapshot_details(&env.keys, &reference(&first.snapshot))
+        .await
+        .expect("details");
+    env.repo
+        .compare_snapshots(
+            &env.keys,
+            &reference(&first.snapshot),
+            &reference(&second.snapshot),
+        )
         .await
         .expect("compare");
-    let after = (snapshot(&first.snapshot), snapshot(&second.snapshot), env.data_bytes());
+    let after = (
+        snapshot(&first.snapshot),
+        snapshot(&second.snapshot),
+        env.data_bytes(),
+    );
     assert_eq!(before, after);
     assert_eq!(env.lock_files(), 0);
 }

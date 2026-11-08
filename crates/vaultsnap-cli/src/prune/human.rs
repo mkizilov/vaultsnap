@@ -109,7 +109,11 @@ pub fn outcome(out: &mut dyn Write, report: &PruneReport) -> io::Result<()> {
             plural(report.chunks_verified, "chunk", "chunks")
         ),
     )?;
-    field(out, "Took", &format!("{:.1}s", report.duration.as_secs_f64()))
+    field(
+        out,
+        "Took",
+        &format!("{:.1}s", report.duration.as_secs_f64()),
+    )
 }
 
 /// The question put to a person before anything is deleted.
@@ -140,7 +144,9 @@ pub fn failures(report: &PruneReport) -> Vec<String> {
             )
         })
         .collect();
-    let unlisted = report.failure_count.saturating_sub(report.failures.len() as u64);
+    let unlisted = report
+        .failure_count
+        .saturating_sub(report.failures.len() as u64);
     if unlisted > 0 {
         lines.push(format!("  and {unlisted} more"));
     }

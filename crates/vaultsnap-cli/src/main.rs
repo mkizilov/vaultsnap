@@ -13,6 +13,7 @@ mod progress;
 mod prune;
 mod remote;
 mod restore;
+mod version;
 
 use std::process::ExitCode;
 

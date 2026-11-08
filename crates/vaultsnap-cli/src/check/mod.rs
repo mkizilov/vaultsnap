@@ -63,7 +63,9 @@ pub async fn run(
     })?;
     match report.errors {
         0 => Ok(()),
-        errors => Err(CliError::CheckFailed(usize::try_from(errors).unwrap_or(usize::MAX))),
+        errors => Err(CliError::CheckFailed(
+            usize::try_from(errors).unwrap_or(usize::MAX),
+        )),
     }
 }
 
@@ -141,21 +143,36 @@ mod progress_tests {
     fn the_status_line_names_the_step_and_how_far_it_is() {
         let progress = Progress::new();
         assert_eq!(progress.text(), "walking the repository");
-        progress.event(&CheckEvent::Started { phase: CheckPhase::Objects, total: 40 });
+        progress.event(&CheckEvent::Started {
+            phase: CheckPhase::Objects,
+            total: 40,
+        });
         assert_eq!(progress.text(), "examining chunk objects: 0 of 40");
         for _ in 0..3 {
-            progress.event(&CheckEvent::Step { phase: CheckPhase::Objects });
+            progress.event(&CheckEvent::Step {
+                phase: CheckPhase::Objects,
+            });
         }
         assert_eq!(progress.text(), "examining chunk objects: 3 of 40");
-        progress.event(&CheckEvent::Started { phase: CheckPhase::Snapshots, total: 2 });
+        progress.event(&CheckEvent::Started {
+            phase: CheckPhase::Snapshots,
+            total: 2,
+        });
         assert_eq!(progress.text(), "authenticating snapshots: 0 of 2");
-        progress.event(&CheckEvent::Started { phase: CheckPhase::Structure, total: 0 });
+        progress.event(&CheckEvent::Started {
+            phase: CheckPhase::Structure,
+            total: 0,
+        });
         assert_eq!(progress.text(), "walking the repository");
     }
 
     #[test]
     fn every_phase_has_a_label() {
-        for phase in [CheckPhase::Structure, CheckPhase::Snapshots, CheckPhase::Objects] {
+        for phase in [
+            CheckPhase::Structure,
+            CheckPhase::Snapshots,
+            CheckPhase::Objects,
+        ] {
             assert_eq!(PHASES[phase_index(phase)].0, phase);
         }
     }

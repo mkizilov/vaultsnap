@@ -245,8 +245,20 @@ mod tests {
 
     #[test]
     fn timestamps_normalize_nanoseconds() {
-        assert_eq!(Timestamp::new(1, 1_500_000_000), Timestamp { secs: 2, nanos: 500_000_000 });
-        assert_eq!(Timestamp::new(0, -1), Timestamp { secs: -1, nanos: 999_999_999 });
+        assert_eq!(
+            Timestamp::new(1, 1_500_000_000),
+            Timestamp {
+                secs: 2,
+                nanos: 500_000_000
+            }
+        );
+        assert_eq!(
+            Timestamp::new(0, -1),
+            Timestamp {
+                secs: -1,
+                nanos: 999_999_999
+            }
+        );
         assert_eq!(Timestamp::new(5, 0), Timestamp { secs: 5, nanos: 0 });
     }
 
@@ -255,11 +267,29 @@ mod tests {
         let at = Timestamp::from_system_time;
         assert_eq!(at(UNIX_EPOCH), Timestamp { secs: 0, nanos: 0 });
         let later = UNIX_EPOCH + Duration::new(1_000, 250);
-        assert_eq!(at(later), Timestamp { secs: 1_000, nanos: 250 });
+        assert_eq!(
+            at(later),
+            Timestamp {
+                secs: 1_000,
+                nanos: 250
+            }
+        );
         let earlier = UNIX_EPOCH - Duration::from_millis(500);
-        assert_eq!(at(earlier), Timestamp { secs: -1, nanos: 500_000_000 });
+        assert_eq!(
+            at(earlier),
+            Timestamp {
+                secs: -1,
+                nanos: 500_000_000
+            }
+        );
         let whole = UNIX_EPOCH - Duration::from_secs(10);
-        assert_eq!(at(whole), Timestamp { secs: -10, nanos: 0 });
+        assert_eq!(
+            at(whole),
+            Timestamp {
+                secs: -10,
+                nanos: 0
+            }
+        );
     }
 
     #[test]

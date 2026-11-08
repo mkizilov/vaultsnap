@@ -34,7 +34,7 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 
 /// Decodes lowercase hex; `None` for odd length or any other character.
 pub(crate) fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return None;
     }
     text.as_bytes()
@@ -82,7 +82,9 @@ mod tests {
     fn random_hex_has_the_requested_length_and_alphabet() {
         let value = random_hex(16).expect("randomness available");
         assert_eq!(value.len(), 32);
-        assert!(value.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+        assert!(value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
     }
 
     #[test]

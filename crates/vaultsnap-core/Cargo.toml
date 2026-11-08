@@ -50,6 +50,11 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 name = "chunking"
 harness = false
 
+# End-to-end throughput and deduplication on real directories (docs/RELIABILITY.md).
+[[bench]]
+name = "throughput"
+harness = false
+
 # Needs a MinIO server (see docs/S3.md); the tests skip themselves when none is configured.
 [[test]]
 name = "s3_minio"

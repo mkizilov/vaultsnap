@@ -7,17 +7,33 @@ use vaultsnap_core::SnapshotRef;
 
 /// Reliable encrypted incremental backups.
 #[derive(Debug, Parser)]
-#[command(name = "vaultsnap", version, propagate_version = true, arg_required_else_help = true)]
+#[command(
+    name = "vaultsnap",
+    version = crate::version::SHORT,
+    propagate_version = true,
+    arg_required_else_help = true
+)]
 pub struct Cli {
     /// Repository location: a directory, or s3://BUCKET[/FOLDER] for an S3-compatible bucket
-    #[arg(short, long, global = true, env = "VAULTSNAP_REPO", value_name = "PATH|s3://URL")]
+    #[arg(
+        short,
+        long,
+        global = true,
+        env = "VAULTSNAP_REPO",
+        value_name = "PATH|s3://URL"
+    )]
     pub repo: Option<PathBuf>,
 
     #[command(flatten)]
     pub s3: S3Args,
 
     /// File containing the repository passphrase (instead of asking on the terminal)
-    #[arg(long, global = true, env = "VAULTSNAP_PASSWORD_FILE", value_name = "FILE")]
+    #[arg(
+        long,
+        global = true,
+        env = "VAULTSNAP_PASSWORD_FILE",
+        value_name = "FILE"
+    )]
     pub password_file: Option<PathBuf>,
 
     /// Increase log detail (-v info, -vv debug, -vvv trace); RUST_LOG overrides
@@ -35,15 +51,30 @@ pub struct Cli {
 #[derive(Debug, Args)]
 pub struct S3Args {
     /// S3 endpoint URL for an S3-compatible service such as MinIO (default: AWS)
-    #[arg(long = "s3-endpoint", global = true, env = "VAULTSNAP_S3_ENDPOINT", value_name = "URL")]
+    #[arg(
+        long = "s3-endpoint",
+        global = true,
+        env = "VAULTSNAP_S3_ENDPOINT",
+        value_name = "URL"
+    )]
     pub endpoint: Option<String>,
 
     /// Region to sign requests for (default: the AWS configuration, or us-east-1)
-    #[arg(long = "s3-region", global = true, env = "VAULTSNAP_S3_REGION", value_name = "REGION")]
+    #[arg(
+        long = "s3-region",
+        global = true,
+        env = "VAULTSNAP_S3_REGION",
+        value_name = "REGION"
+    )]
     pub region: Option<String>,
 
     /// Named profile of the AWS config and credentials files (default: AWS_PROFILE or default)
-    #[arg(long = "s3-profile", global = true, env = "VAULTSNAP_S3_PROFILE", value_name = "NAME")]
+    #[arg(
+        long = "s3-profile",
+        global = true,
+        env = "VAULTSNAP_S3_PROFILE",
+        value_name = "NAME"
+    )]
     pub profile: Option<String>,
 
     /// Address buckets in the path rather than the host name (default: true with --s3-endpoint)
@@ -56,7 +87,12 @@ pub struct S3Args {
     pub path_style: Option<bool>,
 
     /// PEM file of the certificate authorities to trust instead of the system's
-    #[arg(long = "s3-ca-bundle", global = true, env = "AWS_CA_BUNDLE", value_name = "FILE")]
+    #[arg(
+        long = "s3-ca-bundle",
+        global = true,
+        env = "AWS_CA_BUNDLE",
+        value_name = "FILE"
+    )]
     pub ca_bundle: Option<PathBuf>,
 
     /// Accept an http:// endpoint that is not on this machine (traffic is not protected)
@@ -93,6 +129,8 @@ pub enum Command {
     Check(CheckArgs),
     /// Remove snapshots outside the retention policy and reclaim space
     Prune(PruneArgs),
+    /// Show the version, where this binary was built, and the formats it reads and writes
+    Version,
 }
 
 #[derive(Debug, Args)]
@@ -282,18 +320,46 @@ mod tests {
 
     #[test]
     fn parses_every_subcommand() {
-        assert!(matches!(parse(&["init"]).map(|c| c.command), Ok(Command::Init)));
-        assert!(matches!(parse(&["backup", "a"]).map(|c| c.command), Ok(Command::Backup(_))));
+        assert!(matches!(
+            parse(&["init"]).map(|c| c.command),
+            Ok(Command::Init)
+        ));
+        assert!(matches!(
+            parse(&["backup", "a"]).map(|c| c.command),
+            Ok(Command::Backup(_))
+        ));
         let snapshots = parse(&["snapshots"]).map(|c| c.command);
         assert!(matches!(snapshots, Ok(Command::Snapshots(_))));
-        assert!(matches!(parse(&["show", "abcd"]).map(|c| c.command), Ok(Command::Show(_))));
-        assert!(matches!(parse(&["ls", "abcd"]).map(|c| c.command), Ok(Command::Ls(_))));
-        assert!(matches!(parse(&["diff", "abcd", "ef01"]).map(|c| c.command), Ok(Command::Diff(_))));
-        assert!(matches!(parse(&["check"]).map(|c| c.command), Ok(Command::Check(_))));
-        assert!(matches!(parse(&["prune"]).map(|c| c.command), Ok(Command::Prune(_))));
+        assert!(matches!(
+            parse(&["show", "abcd"]).map(|c| c.command),
+            Ok(Command::Show(_))
+        ));
+        assert!(matches!(
+            parse(&["ls", "abcd"]).map(|c| c.command),
+            Ok(Command::Ls(_))
+        ));
+        assert!(matches!(
+            parse(&["diff", "abcd", "ef01"]).map(|c| c.command),
+            Ok(Command::Diff(_))
+        ));
+        assert!(matches!(
+            parse(&["check"]).map(|c| c.command),
+            Ok(Command::Check(_))
+        ));
+        assert!(matches!(
+            parse(&["prune"]).map(|c| c.command),
+            Ok(Command::Prune(_))
+        ));
+        assert!(matches!(
+            parse(&["version"]).map(|c| c.command),
+            Ok(Command::Version)
+        ));
         let id = "a".repeat(64);
         let restore = parse(&["restore", &id, "--target", "out"]);
-        assert!(matches!(restore.map(|c| c.command), Ok(Command::Restore(_))));
+        assert!(matches!(
+            restore.map(|c| c.command),
+            Ok(Command::Restore(_))
+        ));
     }
 
     #[test]
@@ -329,11 +395,22 @@ mod tests {
         assert!(cli.s3.allow_insecure_http);
 
         let cli = parse(&["init"]).expect("valid arguments");
-        assert!(cli.s3.endpoint.is_none() && cli.s3.profile.is_none() && !cli.s3.allow_insecure_http);
+        assert!(
+            cli.s3.endpoint.is_none() && cli.s3.profile.is_none() && !cli.s3.allow_insecure_http
+        );
 
         let command = Cli::command();
-        let names: Vec<&str> = command.get_arguments().filter_map(|arg| arg.get_long()).collect();
-        for forbidden in ["access-key", "secret-key", "s3-access-key", "s3-secret-key", "s3-token"] {
+        let names: Vec<&str> = command
+            .get_arguments()
+            .filter_map(|arg| arg.get_long())
+            .collect();
+        for forbidden in [
+            "access-key",
+            "secret-key",
+            "s3-access-key",
+            "s3-secret-key",
+            "s3-token",
+        ] {
             assert!(!names.contains(&forbidden), "{forbidden} must not exist");
         }
         assert!(parse(&["snapshots", "--s3-path-style", "maybe"]).is_err());
@@ -341,7 +418,8 @@ mod tests {
 
     #[test]
     fn inspection_commands_take_snapshot_references_and_a_json_flag() {
-        let Command::Snapshots(args) = parse(&["snapshots", "--json"]).expect("valid").command else {
+        let Command::Snapshots(args) = parse(&["snapshots", "--json"]).expect("valid").command
+        else {
             panic!("expected snapshots");
         };
         assert!(args.json);
@@ -419,7 +497,10 @@ mod tests {
         };
         assert_eq!(args.on_conflict, ConflictArg::Overwrite);
         assert_eq!(args.symlinks, SymlinkArg::AsRecorded);
-        assert_eq!(args.includes, [PathBuf::from("/home/me/a"), PathBuf::from("/home/me/b")]);
+        assert_eq!(
+            args.includes,
+            [PathBuf::from("/home/me/a"), PathBuf::from("/home/me/b")]
+        );
         let skipping = ["restore", id, "--target", "out", "--on-conflict", "skip"];
         let mut skipping = skipping.to_vec();
         skipping.extend(["--symlinks", "skip"]);
@@ -427,7 +508,10 @@ mod tests {
         let Command::Restore(args) = cli.command else {
             panic!("expected restore");
         };
-        assert_eq!((args.on_conflict, args.symlinks), (ConflictArg::Skip, SymlinkArg::Skip));
+        assert_eq!(
+            (args.on_conflict, args.symlinks),
+            (ConflictArg::Skip, SymlinkArg::Skip)
+        );
     }
 
     #[test]
@@ -473,7 +557,11 @@ mod tests {
         };
         assert!(args.read_data && args.json);
         assert_eq!((args.jobs, args.max_findings), (Some(3), 0));
-        for bad in [["--jobs", "-1"], ["--jobs", "many"], ["--max-findings", "-5"]] {
+        for bad in [
+            ["--jobs", "-1"],
+            ["--jobs", "many"],
+            ["--max-findings", "-5"],
+        ] {
             let mut args = vec!["check"];
             args.extend(bad);
             assert!(parse(&args).is_err(), "{bad:?}");
@@ -482,18 +570,23 @@ mod tests {
 
     #[test]
     fn prune_asks_for_confirmation_unless_told_not_to() {
-        let Command::Prune(args) = parse(&["prune", "--keep-last", "2"]).expect("valid").command
+        let Command::Prune(args) = parse(&["prune", "--keep-last", "2"])
+            .expect("valid")
+            .command
         else {
             panic!("expected prune");
         };
         assert!(!args.yes && !args.dry_run);
-        let cli = parse(&["prune", "--keep-daily", "7", "--keep-weekly", "4", "--yes"])
-            .expect("valid");
+        let cli =
+            parse(&["prune", "--keep-daily", "7", "--keep-weekly", "4", "--yes"]).expect("valid");
         let Command::Prune(args) = cli.command else {
             panic!("expected prune");
         };
         assert!(args.yes && !args.dry_run);
-        assert_eq!((args.keep_daily, args.keep_weekly, args.keep_last), (Some(7), Some(4), None));
+        assert_eq!(
+            (args.keep_daily, args.keep_weekly, args.keep_last),
+            (Some(7), Some(4), None)
+        );
         assert!(parse(&["prune", "--keep-last", "-1"]).is_err());
         assert!(parse(&["prune", "--keep-last", "many"]).is_err());
         assert!(parse(&["prune", "--keep-last", "1", "--yes=maybe"]).is_err());
@@ -563,8 +656,15 @@ mod tests {
 
     #[test]
     fn prune_collects_retention_flags() {
-        let cli = parse(&["prune", "--keep-last", "3", "--keep-yearly", "2", "--dry-run"])
-            .expect("valid arguments");
+        let cli = parse(&[
+            "prune",
+            "--keep-last",
+            "3",
+            "--keep-yearly",
+            "2",
+            "--dry-run",
+        ])
+        .expect("valid arguments");
         let Command::Prune(args) = cli.command else {
             panic!("expected prune");
         };

@@ -138,7 +138,9 @@ mod tests {
     fn store() -> (TempDir, Store) {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let store = Store::local(dir.path());
-        store.create_dir(RepositoryLayout::LOCKS_DIR).expect("mkdir");
+        store
+            .create_dir(RepositoryLayout::LOCKS_DIR)
+            .expect("mkdir");
         (dir, store)
     }
 
@@ -151,14 +153,20 @@ mod tests {
         let written = "kind=exclusive\npid=4242\ncreated_at_unix=1700000000\n";
         let info = describe_lock(written.as_bytes());
         assert_eq!(info.kind, Some(LockKind::Exclusive));
-        assert_eq!((info.pid, info.created_at_unix), (Some(4242), Some(1_700_000_000)));
+        assert_eq!(
+            (info.pid, info.created_at_unix),
+            (Some(4242), Some(1_700_000_000))
+        );
 
         let shared = describe_lock(b"kind=shared\n");
         assert_eq!(shared.kind, Some(LockKind::Shared));
         assert_eq!((shared.pid, shared.created_at_unix), (None, None));
 
         let nonsense = describe_lock(b"\xff\xfe kind=shared pid=x\nkind=other\npid=-3\n=\n");
-        assert_eq!((nonsense.kind, nonsense.pid, nonsense.created_at_unix), (None, None, None));
+        assert_eq!(
+            (nonsense.kind, nonsense.pid, nonsense.created_at_unix),
+            (None, None, None)
+        );
         assert_eq!(describe_lock(b""), nonsense);
     }
 
@@ -214,7 +222,9 @@ mod tests {
     #[test]
     fn unrecognizable_lock_files_block_everyone() {
         let (_dir, store) = store();
-        store.write_new("locks/garbage.lock", b"???").expect("write");
+        store
+            .write_new("locks/garbage.lock", b"???")
+            .expect("write");
         let err = RepositoryLock::acquire(&store, LockKind::Shared).expect_err("must fail");
         assert!(matches!(err, Error::Locked { holder } if holder == "locks/garbage.lock"));
         assert_eq!(lock_files(&store), 1);

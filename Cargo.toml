@@ -49,6 +49,10 @@ unwrap_used = "warn"
 [profile.dev.package."*"]
 opt-level = 3
 
+# Release binaries are what gets distributed (docs/RELEASING.md). Unwinding stays on: a panic in a
+# worker must still run destructors, which release locks and clear key material.
 [profile.release]
 lto = "thin"
+codegen-units = 1
+strip = "symbols"
 overflow-checks = true

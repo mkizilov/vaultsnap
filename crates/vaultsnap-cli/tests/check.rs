@@ -44,7 +44,12 @@ impl Repo {
 
     fn ok(&self, args: &[&str]) -> String {
         let output = self.run(args);
-        assert_eq!(output.status.code(), Some(0), "{args:?}: {}", stderr(&output));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            stderr(&output)
+        );
         stdout(&output)
     }
 
@@ -93,7 +98,10 @@ impl Repo {
         args.extend_from_slice(extra);
         let output = self.run(&args);
         let text = stdout(&output);
-        assert!(text.ends_with('\n') && text.matches('\n').count() == 1, "one line: {text:?}");
+        assert!(
+            text.ends_with('\n') && text.matches('\n').count() == 1,
+            "one line: {text:?}"
+        );
         let value = serde_json::from_str(&text).unwrap_or_else(|err| panic!("{err}: {text}"));
         (output.status.code(), value)
     }
@@ -123,7 +131,11 @@ fn files_below(root: &Path) -> BTreeMap<String, Vec<u8>> {
             if meta.is_dir() {
                 pending.push(path);
             } else if meta.is_file() {
-                let relative = path.strip_prefix(root).expect("inside").to_string_lossy().into_owned();
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("inside")
+                    .to_string_lossy()
+                    .into_owned();
                 found.insert(relative, fs::read(&path).expect("read"));
             }
         }
@@ -163,22 +175,40 @@ fn a_healthy_repository_passes_both_modes_quietly() {
     let output = repo.run(&["check"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains(&field("Mode", "quick: snapshots authenticated")), "{text}");
-    assert!(text.contains(&field("Snapshots", "1 readable, 0 damaged")), "{text}");
+    assert!(
+        text.contains(&field("Mode", "quick: snapshots authenticated")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&field("Snapshots", "1 readable, 0 damaged")),
+        "{text}"
+    );
     assert!(text.contains("Result: no problems found.\n"), "{text}");
-    assert!(text.contains("Quick mode does not read chunk contents"), "{text}");
-    assert!(stderr(&output).is_empty(), "nothing on standard error: {}", stderr(&output));
+    assert!(
+        text.contains("Quick mode does not read chunk contents"),
+        "{text}"
+    );
+    assert!(
+        stderr(&output).is_empty(),
+        "nothing on standard error: {}",
+        stderr(&output)
+    );
 
     let output = repo.run(&["check", "--read-data"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let text = stdout(&output);
-    let mode = field("Mode", "full: snapshots authenticated, every chunk object read");
+    let mode = field(
+        "Mode",
+        "full: snapshots authenticated, every chunk object read",
+    );
     assert!(text.contains(&mode), "{text}");
     assert!(text.contains(&field("Verified", "")), "{text}");
     assert!(text.contains("Result: no problems found.\n"), "{text}");
     assert!(!text.contains("Quick mode does not read"), "{text}");
 
-    let locks = fs::read_dir(repo.repo("locks")).expect("read locks").count();
+    let locks = fs::read_dir(repo.repo("locks"))
+        .expect("read locks")
+        .count();
     assert_eq!(locks, 0, "no lock is left behind");
 }
 
@@ -186,8 +216,13 @@ fn a_healthy_repository_passes_both_modes_quietly() {
 fn an_empty_repository_passes() {
     let repo = Repo::new();
     let text = repo.ok(&["check"]);
-    assert!(text.contains(&field("Snapshots", "0 readable, 0 damaged")), "{text}");
-    assert!(repo.ok(&["check", "--read-data"]).contains("Result: no problems found."));
+    assert!(
+        text.contains(&field("Snapshots", "0 readable, 0 damaged")),
+        "{text}"
+    );
+    assert!(repo
+        .ok(&["check", "--read-data"])
+        .contains("Result: no problems found."));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -211,11 +246,31 @@ fn a_flipped_bit_in_a_chunk_passes_the_quick_check_and_fails_the_full_one() {
     assert!(text.contains("chunk_corrupt  data/"), "{text}");
     assert!(text.contains("authentication failed"), "{text}");
     assert!(text.contains("AFFECTED SNAPSHOTS"), "{text}");
-    assert!(text.contains(&format!("{}  1 file affected (1 damaged or missing chunk)", &id[..8])), "{text}");
-    assert!(text.contains("WHAT TO DO (the check changed nothing; see docs/CHECK.md)"), "{text}");
-    assert!(text.contains("Result: 1 error found, 0 warnings. The repository was not changed."), "{text}");
-    assert!(stderr(&full).contains("the check found 1 error(s)"), "{}", stderr(&full));
-    assert!(stderr(&full).contains("nothing in the repository was changed"), "{}", stderr(&full));
+    assert!(
+        text.contains(&format!(
+            "{}  1 file affected (1 damaged or missing chunk)",
+            &id[..8]
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains("WHAT TO DO (the check changed nothing; see docs/CHECK.md)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Result: 1 error found, 0 warnings. The repository was not changed."),
+        "{text}"
+    );
+    assert!(
+        stderr(&full).contains("the check found 1 error(s)"),
+        "{}",
+        stderr(&full)
+    );
+    assert!(
+        stderr(&full).contains("nothing in the repository was changed"),
+        "{}",
+        stderr(&full)
+    );
 }
 
 #[test]
@@ -228,7 +283,11 @@ fn a_truncated_chunk_fails_both_modes() {
     for args in [vec!["check"], vec!["check", "--read-data"]] {
         let output = repo.run(&args);
         assert_eq!(output.status.code(), Some(3), "{args:?}");
-        assert!(stdout(&output).contains("truncated or extended"), "{args:?}: {}", stdout(&output));
+        assert!(
+            stdout(&output).contains("truncated or extended"),
+            "{args:?}: {}",
+            stdout(&output)
+        );
     }
 }
 
@@ -243,10 +302,16 @@ fn a_missing_chunk_fails_both_modes_and_names_the_snapshot() {
         assert_eq!(output.status.code(), Some(3), "{args:?}");
         let text = stdout(&output);
         assert!(text.contains("chunk_missing  data/"), "{text}");
-        assert!(text.contains("no object exists for a chunk that snapshots refer to"), "{text}");
+        assert!(
+            text.contains("no object exists for a chunk that snapshots refer to"),
+            "{text}"
+        );
         assert!(text.contains(&id[..8]), "{text}");
     }
-    assert!(!object.exists(), "a missing object is not created again by the check");
+    assert!(
+        !object.exists(),
+        "a missing object is not created again by the check"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -261,9 +326,18 @@ fn a_tampered_snapshot_is_reported_as_damaged() {
     let output = repo.run(&["check"]);
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains(&format!("snapshot_damaged  snapshots/{id}")), "{text}");
-    assert!(text.contains(&field("Snapshots", "0 readable, 1 damaged")), "{text}");
-    assert!(text.contains("Unreferenced") && text.contains("may include objects of snapshots"), "{text}");
+    assert!(
+        text.contains(&format!("snapshot_damaged  snapshots/{id}")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&field("Snapshots", "0 readable, 1 damaged")),
+        "{text}"
+    );
+    assert!(
+        text.contains("Unreferenced") && text.contains("may include objects of snapshots"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -274,8 +348,14 @@ fn a_missing_directory_is_an_error_with_a_clear_description() {
         let output = repo.run(&["check"]);
         assert_eq!(output.status.code(), Some(3), "{name}: {}", stderr(&output));
         let text = stdout(&output);
-        assert!(text.contains(&format!("missing_directory  {name}")), "{name}: {text}");
-        assert!(text.contains("the directory does not exist"), "{name}: {text}");
+        assert!(
+            text.contains(&format!("missing_directory  {name}")),
+            "{name}: {text}"
+        );
+        assert!(
+            text.contains("the directory does not exist"),
+            "{name}: {text}"
+        );
     }
 }
 
@@ -309,12 +389,26 @@ fn strays_leftovers_and_stale_locks_are_warnings_that_leave_the_exit_status_alon
     let text = stdout(&output);
     assert!(text.contains("WARNINGS (3)"), "{text}");
     assert!(text.contains("unexpected_file  notes.txt"), "{text}");
-    assert!(text.contains("leftover_temp_file  snapshots/.tmp-0011223344556677"), "{text}");
-    assert!(text.contains("lock_present  locks/0123456789abcdef0123456789abcdef.lock"), "{text}");
-    assert!(text.contains("a shared lock held by process 424242"), "{text}");
-    assert!(text.contains("Result: no errors found, 3 warnings."), "{text}");
+    assert!(
+        text.contains("leftover_temp_file  snapshots/.tmp-0011223344556677"),
+        "{text}"
+    );
+    assert!(
+        text.contains("lock_present  locks/0123456789abcdef0123456789abcdef.lock"),
+        "{text}"
+    );
+    assert!(
+        text.contains("a shared lock held by process 424242"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Result: no errors found, 3 warnings."),
+        "{text}"
+    );
     assert!(text.contains("WHAT TO DO"), "{text}");
-    assert!(repo.repo("notes.txt").exists() && repo.repo("snapshots/.tmp-0011223344556677").exists());
+    assert!(
+        repo.repo("notes.txt").exists() && repo.repo("snapshots/.tmp-0011223344556677").exists()
+    );
 }
 
 #[test]
@@ -334,7 +428,10 @@ fn objects_no_snapshot_refers_to_are_reported_as_orphans() {
     assert_eq!(report["stats"]["orphans"], 1);
     assert_eq!(report["stats"]["orphans_exact"], true);
     assert_eq!(report["findings"][0]["severity"], "warning");
-    assert_eq!(report["findings"][0]["detail"], "no snapshot refers to this object");
+    assert_eq!(
+        report["findings"][0]["detail"],
+        "no snapshot refers to this object"
+    );
 }
 
 #[test]
@@ -348,7 +445,10 @@ fn the_limit_on_listed_findings_is_stated_and_the_counts_stay_exact() {
     assert_eq!(output.status.code(), Some(0));
     let text = stdout(&output);
     assert!(text.contains("WARNINGS (4)"), "{text}");
-    assert!(text.contains("and 3 more not listed (--max-findings sets the limit, 0 lists all)"), "{text}");
+    assert!(
+        text.contains("and 3 more not listed (--max-findings sets the limit, 0 lists all)"),
+        "{text}"
+    );
     assert_eq!(text.matches("unexpected_file  ").count(), 1, "{text}");
 
     let (_, report) = repo.json(&["--max-findings", "0"]);
@@ -367,13 +467,22 @@ fn a_stray_file_cannot_inject_terminal_control_sequences() {
     assert_eq!(output.status.code(), Some(0));
     let text = stdout(&output);
     for forbidden in ['\x1b', '\x07'] {
-        assert!(!text.contains(forbidden), "{forbidden:?} reached standard output:\n{text:?}");
+        assert!(
+            !text.contains(forbidden),
+            "{forbidden:?} reached standard output:\n{text:?}"
+        );
     }
     assert!(text.contains(r"evil\x1b[2J\x07name\nforged line"), "{text}");
-    assert!(!text.lines().any(|line| line.starts_with("forged line")), "a name started a new line");
+    assert!(
+        !text.lines().any(|line| line.starts_with("forged line")),
+        "a name started a new line"
+    );
 
     let (_, report) = repo.json(&[]);
-    assert_eq!(report["findings"][0]["subject"], name, "JSON keeps the name exact");
+    assert_eq!(
+        report["findings"][0]["subject"], name,
+        "JSON keeps the name exact"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -384,14 +493,25 @@ fn a_stray_file_cannot_inject_terminal_control_sequences() {
 fn the_json_report_of_a_damaged_repository_is_complete_and_stable() {
     let (repo, id) = Repo::with_backup();
     let object = repo.big_object();
-    let relative = object.strip_prefix(repo.repo("")).expect("inside").to_string_lossy().into_owned();
+    let relative = object
+        .strip_prefix(repo.repo(""))
+        .expect("inside")
+        .to_string_lossy()
+        .into_owned();
     fs::remove_file(&object).expect("remove");
 
     let (code, report) = repo.json(&["--read-data"]);
     assert_eq!(code, Some(3));
     assert_eq!(report["mode"], "full");
     assert_eq!(report["ok"], false);
-    assert_eq!((&report["errors"], &report["warnings"], &report["suppressed"]), (&Value::from(1), &Value::from(0), &Value::from(0)));
+    assert_eq!(
+        (
+            &report["errors"],
+            &report["warnings"],
+            &report["suppressed"]
+        ),
+        (&Value::from(1), &Value::from(0), &Value::from(0))
+    );
     assert_eq!(report["repository_id"].as_str().map(str::len), Some(32));
     assert_eq!(report["format_version"], 1);
     assert_eq!(report["counts"]["chunk_missing"], 1);
@@ -418,7 +538,10 @@ fn the_json_report_of_a_healthy_repository_says_ok() {
     assert_eq!(report["ok"], true);
     assert_eq!(report["mode"], "quick");
     assert_eq!(report["findings"].as_array().map(Vec::len), Some(0));
-    assert_eq!(report["affected_snapshots"].as_array().map(Vec::len), Some(0));
+    assert_eq!(
+        report["affected_snapshots"].as_array().map(Vec::len),
+        Some(0)
+    );
     assert_eq!(report["stats"]["snapshots"], 1);
     assert_eq!(report["stats"]["bytes_authenticated"], 0);
 }
@@ -436,11 +559,19 @@ fn a_check_changes_nothing_in_a_damaged_repository_in_either_mode() {
     flip_middle(&repo.repo(&format!("snapshots/{id}")));
 
     let before = files_below(&repo.repo(""));
-    for args in [vec!["check"], vec!["check", "--read-data"], vec!["check", "--read-data", "--json"]] {
+    for args in [
+        vec!["check"],
+        vec!["check", "--read-data"],
+        vec!["check", "--read-data", "--json"],
+    ] {
         let output = repo.run(&args);
         assert_eq!(output.status.code(), Some(3), "{args:?}");
     }
-    assert_eq!(files_below(&repo.repo("")), before, "not a byte of the repository changed");
+    assert_eq!(
+        files_below(&repo.repo("")),
+        before,
+        "not a byte of the repository changed"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -450,11 +581,17 @@ fn a_check_changes_nothing_in_a_damaged_repository_in_either_mode() {
 #[test]
 fn a_wrong_passphrase_prints_nothing_and_fails() {
     let (repo, _id) = Repo::with_backup();
-    let wrong = repo.env.write_password_file("wrong", b"not the passphrase\n");
+    let wrong = repo
+        .env
+        .write_password_file("wrong", b"not the passphrase\n");
     let output = repo.env.run_with_password_file(&wrong, &["check"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout(&output).is_empty());
-    assert!(stderr(&output).contains("incorrect passphrase"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("incorrect passphrase"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -462,7 +599,11 @@ fn a_location_that_is_not_a_repository_fails_clearly() {
     let env = TestEnv::default();
     let output = env.run_with_password_file(&env.password_file(), &["check"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("is not a VaultSnap repository"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("is not a VaultSnap repository"),
+        "{}",
+        stderr(&output)
+    );
     assert!(!env.repo_path().exists(), "nothing was created");
 }
 
@@ -476,17 +617,33 @@ fn a_damaged_or_missing_config_stops_the_check_with_a_message_and_changes_nothin
     let output = repo.run(&["check"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout(&output).is_empty());
-    assert!(stderr(&output).contains("invalid repository config"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("invalid repository config"),
+        "{}",
+        stderr(&output)
+    );
 
-    fs::write(&config, String::from_utf8_lossy(&original).replace("format_version=1", "format_version=2")).expect("write");
+    fs::write(
+        &config,
+        String::from_utf8_lossy(&original).replace("format_version=1", "format_version=2"),
+    )
+    .expect("write");
     let output = repo.run(&["check"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("format version 2 is not supported"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("format version 2 is not supported"),
+        "{}",
+        stderr(&output)
+    );
 
     fs::remove_file(&config).expect("remove");
     let output = repo.run(&["check"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("is not a VaultSnap repository"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("is not a VaultSnap repository"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -498,7 +655,8 @@ fn an_exclusive_lock_stops_the_check_and_stays() {
     let output = repo.run(&["check"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout(&output).is_empty());
-    assert!(stderr(&output).contains("repository is locked by locks/0123456789abcdef0123456789abcdef.lock"));
+    assert!(stderr(&output)
+        .contains("repository is locked by locks/0123456789abcdef0123456789abcdef.lock"));
     assert!(lock.exists());
 }
 
@@ -529,5 +687,8 @@ fn the_number_of_threads_does_not_change_the_report() {
             stdout(&output)
         })
         .collect();
-    assert!(outputs.windows(2).all(|pair| pair[0] == pair[1]), "{outputs:?}");
+    assert!(
+        outputs.windows(2).all(|pair| pair[0] == pair[1]),
+        "{outputs:?}"
+    );
 }

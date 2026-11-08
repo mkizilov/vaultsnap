@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs one scheduled VaultSnap backup every night at 02:30 on macOS (docs/GUIDE.md).
+
+    install -m 0755 contrib/vaultsnap-scheduled.sh /usr/local/bin/vaultsnap-scheduled
+    cp contrib/launchd/org.vaultsnap.backup.plist ~/Library/LaunchAgents/
+    # edit the paths below, then:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.vaultsnap.backup.plist
+
+  The passphrase is in a file only you can read (mode 0600) and the plist names that file; the
+  passphrase itself never appears here. A run that was missed because the Mac was asleep starts
+  when it wakes. To stop it: launchctl bootout gui/$(id -u)/org.vaultsnap.backup
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>org.vaultsnap.backup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/vaultsnap-scheduled</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <key>VAULTSNAP_REPO</key>
+        <string>/Volumes/Backup/vaultsnap</string>
+        <key>VAULTSNAP_PASSWORD_FILE</key>
+        <string>/Users/you/.config/vaultsnap/passphrase</string>
+        <key>VAULTSNAP_PATHS</key>
+        <string>/Users/you/Documents:/Users/you/Pictures</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/Library/Logs/vaultsnap.log</string>
+    <key>StandardOutPath</key>
+    <string>/Users/you/Library/Logs/vaultsnap.log</string>
+</dict>
+</plist>

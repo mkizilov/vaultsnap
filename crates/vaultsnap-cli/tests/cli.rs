@@ -3,8 +3,17 @@ mod common;
 use common::{run_without_repo, stderr, stdout, TestEnv, PASSPHRASE};
 use vaultsnap_core::{Error, Passphrase, Repository};
 
-const COMMANDS: [&str; 9] =
-    ["init", "backup", "snapshots", "show", "ls", "diff", "restore", "check", "prune"];
+const COMMANDS: [&str; 9] = [
+    "init",
+    "backup",
+    "snapshots",
+    "show",
+    "ls",
+    "diff",
+    "restore",
+    "check",
+    "prune",
+];
 
 fn passphrase(text: &str) -> Passphrase {
     Passphrase::new(text.as_bytes().to_vec()).expect("valid passphrase")
@@ -17,7 +26,8 @@ fn help_lists_every_command() {
     let text = stdout(&output);
     for command in COMMANDS {
         assert!(
-            text.lines().any(|line| line.trim_start().starts_with(command)),
+            text.lines()
+                .any(|line| line.trim_start().starts_with(command)),
             "help is missing `{command}`:\n{text}"
         );
     }
@@ -43,7 +53,11 @@ fn malformed_snapshot_id_is_a_usage_error() {
     let env = TestEnv::default();
     let output = env.run(&["restore", "latest", "--target", "out"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(stderr(&output).contains("invalid snapshot reference"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("invalid snapshot reference"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -66,7 +80,10 @@ fn commands_on_a_missing_repository_fail_without_creating_it() {
     ] {
         let output = env.run_with_password_file(&password_file, &args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");
-        assert!(stderr(&output).contains("is not a VaultSnap repository"), "{args:?}");
+        assert!(
+            stderr(&output).contains("is not a VaultSnap repository"),
+            "{args:?}"
+        );
     }
     assert!(!env.repo_path().exists());
 }
@@ -93,7 +110,10 @@ fn init_creates_a_repository_with_an_encrypted_master_key() {
     assert_eq!(key_files.len(), 1, "{key_files:?}");
     let key_file = std::fs::read_to_string(&key_files[0]).expect("read key file");
     for line in ["key_version=1", "kdf=argon2id", "cipher=xchacha20poly1305"] {
-        assert!(key_file.lines().any(|l| l == line), "missing {line}:\n{key_file}");
+        assert!(
+            key_file.lines().any(|l| l == line),
+            "missing {line}:\n{key_file}"
+        );
     }
     assert!(!key_file.contains(PASSPHRASE));
 }
@@ -104,10 +124,19 @@ async fn the_initialized_repository_unlocks_only_with_the_passphrase() {
     assert!(env.init().status.success());
     let repo = Repository::at(env.repo_path());
 
-    repo.unlock(&passphrase(PASSPHRASE)).await.expect("file newline is not part of it");
+    repo.unlock(&passphrase(PASSPHRASE))
+        .await
+        .expect("file newline is not part of it");
     let with_newline = format!("{PASSPHRASE}\n");
-    for wrong in [with_newline.as_str(), "wrong", "Correct horse battery staple"] {
-        let err = repo.unlock(&passphrase(wrong)).await.expect_err("must fail");
+    for wrong in [
+        with_newline.as_str(),
+        "wrong",
+        "Correct horse battery staple",
+    ] {
+        let err = repo
+            .unlock(&passphrase(wrong))
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::WrongPassphrase), "{wrong:?}: {err}");
     }
 }
@@ -132,7 +161,11 @@ fn init_without_a_password_source_fails_when_there_is_no_terminal() {
     let env = TestEnv::default();
     let output = env.run(&["init"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("--password-file"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("--password-file"),
+        "{}",
+        stderr(&output)
+    );
     assert!(!env.repo_path().exists());
 }
 
@@ -152,7 +185,11 @@ fn bad_password_files_are_rejected_before_anything_is_created() {
     ] {
         let output = env.run_with_password_file(file, &["init"]);
         assert_eq!(output.status.code(), Some(1), "{file:?}");
-        assert!(stderr(&output).contains(expected), "{file:?}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains(expected),
+            "{file:?}: {}",
+            stderr(&output)
+        );
         assert!(!env.repo_path().exists(), "{file:?}");
     }
 }
@@ -181,9 +218,18 @@ fn repeated_init_fails_and_keeps_the_repository() {
 
     let output = env.init();
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("already exists"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("already exists"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(std::fs::read(&config_path).expect("read config"), before);
-    assert_eq!(std::fs::read_dir(env.repo_path().join("keys")).expect("read keys").count(), 1);
+    assert_eq!(
+        std::fs::read_dir(env.repo_path().join("keys"))
+            .expect("read keys")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -193,7 +239,11 @@ fn init_refuses_a_file_and_an_unrelated_directory() {
     std::fs::write(&repo, b"a file").expect("write file");
     let output = env.init();
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("not a directory"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("not a directory"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(std::fs::read(&repo).expect("read file"), b"a file");
 
     std::fs::remove_file(&repo).expect("remove file");
@@ -216,8 +266,15 @@ fn init_reports_incompatible_versions_without_changing_them() {
 
     let output = env.init();
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("version 2 is not supported"), "{}", stderr(&output));
-    assert_eq!(std::fs::read_to_string(&config_path).expect("read config"), newer);
+    assert!(
+        stderr(&output).contains("version 2 is not supported"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&config_path).expect("read config"),
+        newer
+    );
 }
 
 #[test]

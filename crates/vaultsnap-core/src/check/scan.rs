@@ -139,7 +139,12 @@ pub(super) fn scan(
             || entry.name == RepositoryLayout::INDEX_DIR
             || REQUIRED.contains(&entry.name.as_str());
         if !known {
-            unexpected(findings, "", entry, "that is not part of a VaultSnap repository");
+            unexpected(
+                findings,
+                "",
+                entry,
+                "that is not part of a VaultSnap repository",
+            );
         }
     }
 
@@ -294,7 +299,10 @@ mod tests {
     }
 
     fn summary(findings: &[Finding]) -> Vec<(FindingKind, String)> {
-        findings.iter().map(|f| (f.kind, f.subject.clone())).collect()
+        findings
+            .iter()
+            .map(|f| (f.kind, f.subject.clone()))
+            .collect()
     }
 
     #[test]
@@ -323,9 +331,21 @@ mod tests {
         assert_eq!(
             described,
             [
-                (FindingKind::MissingDirectory, "data", "the directory does not exist"),
-                (FindingKind::MissingDirectory, "snapshots", "a file where a directory is required"),
-                (FindingKind::MissingDirectory, "locks", "a file where a directory is required"),
+                (
+                    FindingKind::MissingDirectory,
+                    "data",
+                    "the directory does not exist"
+                ),
+                (
+                    FindingKind::MissingDirectory,
+                    "snapshots",
+                    "a file where a directory is required"
+                ),
+                (
+                    FindingKind::MissingDirectory,
+                    "locks",
+                    "a file where a directory is required"
+                ),
             ]
         );
     }
@@ -333,9 +353,13 @@ mod tests {
     #[test]
     fn snapshot_files_and_chunk_objects_are_inventoried_by_name() {
         let (dir, store) = skeleton();
-        store.write_new(&format!("snapshots/{SNAPSHOT}"), b"x").expect("write");
+        store
+            .write_new(&format!("snapshots/{SNAPSHOT}"), b"x")
+            .expect("write");
         store.create_dir("data/ab").expect("mkdir");
-        store.write_new(&format!("data/ab/{CHUNK}"), b"12345").expect("write");
+        store
+            .write_new(&format!("data/ab/{CHUNK}"), b"12345")
+            .expect("write");
 
         let (inventory, findings) = scanned(&store, None);
         assert!(findings.is_empty(), "{findings:?}");
@@ -368,14 +392,20 @@ mod tests {
         fs::write(root.join(format!("data/cd/{CHUNK}")), b"x").expect("write");
 
         let (inventory, findings) = scanned(&store, None);
-        assert!(inventory.objects.is_empty(), "a misplaced object is not an object");
+        assert!(
+            inventory.objects.is_empty(),
+            "a misplaced object is not an object"
+        );
         let kinds: Vec<(FindingKind, String)> = summary(&findings);
         let expected = |kind, subject: &str| (kind, subject.to_owned());
         for item in [
             expected(FindingKind::UnexpectedFile, "notes.txt"),
             expected(FindingKind::LeftoverTempFile, ".tmp-0011223344556677"),
             expected(FindingKind::UnexpectedFile, "snapshots/not-a-snapshot"),
-            expected(FindingKind::LeftoverTempFile, "snapshots/.tmp-0011223344556677"),
+            expected(
+                FindingKind::LeftoverTempFile,
+                "snapshots/.tmp-0011223344556677",
+            ),
             expected(FindingKind::UnexpectedFile, "snapshots/a-directory"),
             expected(FindingKind::UnexpectedFile, "keys/readme"),
             expected(FindingKind::UnexpectedFile, "locks/readme"),
@@ -383,16 +413,32 @@ mod tests {
             expected(FindingKind::UnexpectedFile, "data/loose-file"),
             expected(FindingKind::UnexpectedFile, "data/ab/short"),
             expected(FindingKind::UnexpectedFile, "data/ab/subdirectory"),
-            expected(FindingKind::LeftoverTempFile, "data/ab/.tmp-0011223344556677"),
+            expected(
+                FindingKind::LeftoverTempFile,
+                "data/ab/.tmp-0011223344556677",
+            ),
             expected(FindingKind::UnexpectedFile, &format!("data/cd/{CHUNK}")),
         ] {
             assert!(kinds.contains(&item), "{item:?} is missing from {kinds:?}");
         }
         assert_eq!(findings.len(), 13, "{kinds:?}");
-        let misplaced = findings.iter().find(|f| f.subject.starts_with("data/cd/")).expect("found");
-        assert!(misplaced.detail.contains("data/ab/"), "{}", misplaced.detail);
-        let directory = findings.iter().find(|f| f.subject == "data/zz").expect("found");
-        assert_eq!(directory.detail, "a directory that is not a chunk directory");
+        let misplaced = findings
+            .iter()
+            .find(|f| f.subject.starts_with("data/cd/"))
+            .expect("found");
+        assert!(
+            misplaced.detail.contains("data/ab/"),
+            "{}",
+            misplaced.detail
+        );
+        let directory = findings
+            .iter()
+            .find(|f| f.subject == "data/zz")
+            .expect("found");
+        assert_eq!(
+            directory.detail,
+            "a directory that is not a chunk directory"
+        );
     }
 
     #[cfg(unix)]
@@ -401,8 +447,11 @@ mod tests {
         let (dir, store) = skeleton();
         let outside = tempfile::tempdir().expect("create temporary directory");
         fs::write(outside.path().join("target"), b"x").expect("write");
-        std::os::unix::fs::symlink(outside.path().join("target"), dir.path().join(format!("snapshots/{SNAPSHOT}")))
-            .expect("symlink");
+        std::os::unix::fs::symlink(
+            outside.path().join("target"),
+            dir.path().join(format!("snapshots/{SNAPSHOT}")),
+        )
+        .expect("symlink");
         std::os::unix::fs::symlink(outside.path(), dir.path().join("data/ab")).expect("symlink");
 
         let (inventory, findings) = scanned(&store, None);
@@ -425,7 +474,10 @@ mod tests {
 
         let (inventory, findings) = scanned(&store, None);
         assert_eq!(inventory.key_files, 0);
-        assert_eq!(summary(&findings), [(FindingKind::KeyFileInvalid, format!("keys/{bad}"))]);
+        assert_eq!(
+            summary(&findings),
+            [(FindingKind::KeyFileInvalid, format!("keys/{bad}"))]
+        );
         assert!(!findings[0].detail.is_empty());
     }
 
@@ -440,7 +492,12 @@ mod tests {
         )
         .expect("write");
         fs::write(dir.path().join(format!("locks/{own}")), b"kind=shared\n").expect("write");
-        fs::write(dir.path().join("locks/ffffffffffffffffffffffffffffffff.lock"), b"???").expect("write");
+        fs::write(
+            dir.path()
+                .join("locks/ffffffffffffffffffffffffffffffff.lock"),
+            b"???",
+        )
+        .expect("write");
 
         let (_, findings) = scanned(&store, Some(&format!("locks/{own}")));
         assert_eq!(findings.len(), 2, "{findings:?}");
@@ -459,7 +516,10 @@ mod tests {
         let (dir, store) = skeleton();
         fs::write(dir.path().join("locks/0123.lock"), b"kind=shared\n").expect("write");
         let (_, findings) = scanned(&store, None);
-        assert_eq!(summary(&findings), [(FindingKind::UnexpectedFile, "locks/0123.lock".to_owned())]);
+        assert_eq!(
+            summary(&findings),
+            [(FindingKind::UnexpectedFile, "locks/0123.lock".to_owned())]
+        );
     }
 
     #[test]
@@ -474,6 +534,9 @@ mod tests {
     fn hex_names_are_exactly_lowercase_hex_of_the_right_length() {
         assert!(is_hex_name("ab", 2) && is_hex_name("0f9", 3));
         assert!(!is_hex_name("AB", 2) && !is_hex_name("abc", 2) && !is_hex_name("g1", 2));
-        assert!(!is_hex_name("é", 2), "two bytes of a non-ASCII character are not two digits");
+        assert!(
+            !is_hex_name("é", 2),
+            "two bytes of a non-ASCII character are not two digits"
+        );
     }
 }

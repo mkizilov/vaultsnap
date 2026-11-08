@@ -104,13 +104,19 @@ async fn backup_creates_a_snapshot_that_loads_and_reports_what_it_did() {
     assert!(text.contains("no earlier snapshot"), "{text}");
     assert!(text.contains("3 total, 3 read, 0 unchanged"), "{text}");
     assert!(text.contains("chunks"), "{text}");
-    assert!(!stderr(&output).contains('\x1b'), "no terminal control codes when piped");
+    assert!(
+        !stderr(&output).contains('\x1b'),
+        "no terminal control codes when piped"
+    );
     assert_eq!(snapshot_files(&env), 1);
 
     let manifest = load(&env, &id).await;
     let names = names(&manifest);
     for expected in ["a.txt", "docs", "b.txt", "debug.log"] {
-        assert!(names.iter().any(|name| name == expected), "missing {expected}: {names:?}");
+        assert!(
+            names.iter().any(|name| name == expected),
+            "missing {expected}: {names:?}"
+        );
     }
     assert_eq!(manifest.stats.files, 3);
     assert_eq!(manifest.roots.len(), 1);
@@ -124,7 +130,16 @@ async fn exclusions_tags_and_host_are_recorded_in_the_snapshot() {
     let output = backup(
         &env,
         &password_file,
-        &["--exclude", "*.log", "--tag", "nightly", "--tag", "weekly", "--host", "testbox"],
+        &[
+            "--exclude",
+            "*.log",
+            "--tag",
+            "nightly",
+            "--tag",
+            "weekly",
+            "--host",
+            "testbox",
+        ],
         &source,
     );
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
@@ -150,17 +165,28 @@ fn repeating_a_backup_adds_a_snapshot_but_no_chunks_and_changes_add_only_new_one
     let second = backup(&env, &password_file, &[], &source);
     assert_eq!(second.status.code(), Some(0), "{}", stderr(&second));
     let text = stdout(&second);
-    assert!(text.contains("compared with"), "the earlier snapshot is the parent:\n{text}");
+    assert!(
+        text.contains("compared with"),
+        "the earlier snapshot is the parent:\n{text}"
+    );
     assert!(text.contains(" 0 new "), "nothing new to store:\n{text}");
     assert_ne!(created_snapshot(&first), created_snapshot(&second));
     assert_eq!(snapshot_files(&env), 2);
     assert_eq!(chunk_files(&env), chunks_after_first);
 
-    fs::write(source.join("a.txt"), b"changed contents that were never stored").expect("modify");
+    fs::write(
+        source.join("a.txt"),
+        b"changed contents that were never stored",
+    )
+    .expect("modify");
     let third = backup(&env, &password_file, &[], &source);
     assert_eq!(third.status.code(), Some(0), "{}", stderr(&third));
     assert_eq!(snapshot_files(&env), 3);
-    assert_eq!(chunk_files(&env), chunks_after_first + 1, "only the changed file's chunk is new");
+    assert_eq!(
+        chunk_files(&env),
+        chunks_after_first + 1,
+        "only the changed file's chunk is new"
+    );
 }
 
 #[test]
@@ -171,7 +197,11 @@ fn a_wrong_passphrase_stores_nothing() {
 
     let output = backup(&env, &wrong, &[], &source);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("incorrect passphrase"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("incorrect passphrase"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(snapshot_files(&env), 0);
     assert_eq!(chunk_files(&env), 0);
 }
@@ -183,7 +213,11 @@ fn backup_without_a_passphrase_source_fails_when_there_is_no_terminal() {
 
     let output = env.run(&["backup", source.to_str().expect("UTF-8 path")]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("no terminal available"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("no terminal available"),
+        "{}",
+        stderr(&output)
+    );
     assert_eq!(snapshot_files(&env), 0);
 }
 
@@ -195,7 +229,11 @@ fn backup_into_something_that_is_not_a_repository_fails_without_creating_it() {
 
     let output = backup(&env, &password_file, &[], &source);
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("is not a VaultSnap repository"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("is not a VaultSnap repository"),
+        "{}",
+        stderr(&output)
+    );
     assert!(!env.repo_path().exists());
 }
 
@@ -209,10 +247,19 @@ fn bad_sources_fail_before_anything_is_stored() {
 
     let inside = backup(&env, &password_file, &[], &env.repo_path().join("data"));
     assert_eq!(inside.status.code(), Some(1));
-    assert!(stderr(&inside).contains("inside the repository"), "{}", stderr(&inside));
+    assert!(
+        stderr(&inside).contains("inside the repository"),
+        "{}",
+        stderr(&inside)
+    );
 
     let bad_pattern = backup(&env, &password_file, &["--exclude", "a["], &source);
-    assert_eq!(bad_pattern.status.code(), Some(1), "{}", stderr(&bad_pattern));
+    assert_eq!(
+        bad_pattern.status.code(),
+        Some(1),
+        "{}",
+        stderr(&bad_pattern)
+    );
 
     assert_eq!(snapshot_files(&env), 0);
     assert_eq!(chunk_files(&env), 0);
@@ -229,7 +276,10 @@ async fn a_directory_that_contains_the_repository_is_backed_up_without_it() {
     let names = names(&manifest);
     assert!(names.iter().any(|name| name == "a.txt"), "{names:?}");
     for repository_part in ["config", "keys", "locks", "data"] {
-        assert!(!names.iter().any(|name| name == repository_part), "{names:?}");
+        assert!(
+            !names.iter().any(|name| name == repository_part),
+            "{names:?}"
+        );
     }
 }
 
@@ -258,9 +308,17 @@ fn unreadable_files_leave_a_snapshot_but_exit_with_code_3_and_name_the_file() {
 
     let output = backup(&env, &password_file, &[], &source);
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
-    assert!(stdout(&output).contains("created snapshot "), "{}", stdout(&output));
+    assert!(
+        stdout(&output).contains("created snapshot "),
+        "{}",
+        stdout(&output)
+    );
     let errors = stderr(&output);
     assert!(errors.contains("secret.txt"), "{errors}");
     assert!(errors.contains("incomplete"), "{errors}");
-    assert_eq!(snapshot_files(&env), 1, "the partial snapshot exists and is marked as partial");
+    assert_eq!(
+        snapshot_files(&env),
+        1,
+        "the partial snapshot exists and is marked as partial"
+    );
 }

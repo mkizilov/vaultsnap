@@ -132,7 +132,9 @@ pub(super) fn open(key: &SecretKey, id: &SnapshotId, object: &[u8]) -> Result<Ze
 
     let largest_body = NONCE_LEN + manifest_len + TAG_LEN;
     if compression == COMPRESSION_NONE && body.len() != largest_body {
-        return Err(corrupt("length does not match the header (truncated or extended)"));
+        return Err(corrupt(
+            "length does not match the header (truncated or extended)",
+        ));
     }
     if compression == COMPRESSION_ZSTD && body.len() > largest_body {
         return Err(corrupt("compressed payload is larger than the original"));
@@ -207,7 +209,10 @@ mod tests {
         let (key, id) = (key(1), id('a'));
         for body in [Vec::new(), vec![1], noise(5000), compressible(50_000)] {
             let object = seal(&key, &id, &body).expect("seal");
-            assert_eq!(open(&key, &id, &object).expect("open").as_slice(), body.as_slice());
+            assert_eq!(
+                open(&key, &id, &object).expect("open").as_slice(),
+                body.as_slice()
+            );
         }
     }
 
@@ -234,7 +239,9 @@ mod tests {
             body.extend_from_slice(marker);
         }
         let object = seal(&key(1), &id('a'), &body).expect("seal");
-        let leaked = object.windows(12).any(|w| marker.windows(12).any(|m| m == w));
+        let leaked = object
+            .windows(12)
+            .any(|w| marker.windows(12).any(|m| m == w));
         assert!(!leaked);
     }
 
@@ -250,7 +257,10 @@ mod tests {
     fn a_wrong_key_or_a_wrong_id_is_rejected() {
         let object = seal(&key(1), &id('a'), &noise(200)).expect("seal");
         rejected(open(&key(2), &id('a'), &object), "wrong key");
-        rejected(open(&key(1), &id('b'), &object), "snapshot filed under another id");
+        rejected(
+            open(&key(1), &id('b'), &object),
+            "snapshot filed under another id",
+        );
     }
 
     #[test]
@@ -262,7 +272,10 @@ mod tests {
                 for bit in 0..8 {
                     let mut damaged = object.clone();
                     damaged[index] ^= 1 << bit;
-                    rejected(open(&key, &id, &damaged), &format!("byte {index} bit {bit}"));
+                    rejected(
+                        open(&key, &id, &damaged),
+                        &format!("byte {index} bit {bit}"),
+                    );
                 }
             }
         }
@@ -275,7 +288,10 @@ mod tests {
             let object = seal(&key, &id, &body).expect("seal");
             for len in 0..object.len() {
                 let result = open(&key, &id, &object[..len]);
-                assert!(matches!(result, Err(Error::CorruptSnapshot { .. })), "len {len}");
+                assert!(
+                    matches!(result, Err(Error::CorruptSnapshot { .. })),
+                    "len {len}"
+                );
             }
             let mut extended = object.clone();
             extended.extend_from_slice(b"extra");
@@ -310,7 +326,8 @@ mod tests {
     #[test]
     fn decompression_bombs_are_rejected_without_expanding() {
         let (key, id) = (key(1), id('a'));
-        let bomb = zstd::bulk::compress(&vec![0_u8; 8 * 1024 * 1024], ZSTD_LEVEL).expect("compress");
+        let bomb =
+            zstd::bulk::compress(&vec![0_u8; 8 * 1024 * 1024], ZSTD_LEVEL).expect("compress");
         let header = header(COMPRESSION_ZSTD, 1000);
         let sealed = crypto::seal(&key, &aad(&header, &id), &bomb).expect("seal");
         let mut object = header.to_vec();

@@ -3,7 +3,7 @@
 use vaultsnap_core::Error;
 
 use crate::cli::{Cli, Command};
-use crate::{backup, check, inspect, passphrase, prune, remote, restore};
+use crate::{backup, check, inspect, passphrase, prune, remote, restore, version};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -25,9 +25,7 @@ pub enum CliError {
     PassphraseMismatch,
     #[error("cannot read the passphrase from the terminal: {0}")]
     Terminal(std::io::Error),
-    #[error(
-        "the check found {0} error(s) (listed above); nothing in the repository was changed"
-    )]
+    #[error("the check found {0} error(s) (listed above); nothing in the repository was changed")]
     CheckFailed(usize),
     #[error(
         "the snapshot was created but is incomplete: {failed} path(s) could not be read and are \
@@ -92,6 +90,9 @@ impl CliError {
 }
 
 pub async fn run(cli: Cli) -> Result<(), CliError> {
+    if matches!(cli.command, Command::Version) {
+        return version::print().map_err(CliError::Output);
+    }
     let repo = remote::open(&cli).await?;
     tracing::debug!(repo = %repo.layout().root().display(), "using repository");
 
@@ -129,6 +130,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Prune(args) => {
             prune::run(&repo, cli.password_file.as_deref(), args).await?;
         }
+        Command::Version => {}
     }
     Ok(())
 }
@@ -140,7 +142,10 @@ mod tests {
     #[test]
     fn exit_codes_tell_failures_incomplete_backups_and_cancellation_apart() {
         assert_eq!(CliError::MissingRepository.exit_code(), 1);
-        assert_eq!(CliError::Core(vaultsnap_core::Error::WrongPassphrase).exit_code(), 1);
+        assert_eq!(
+            CliError::Core(vaultsnap_core::Error::WrongPassphrase).exit_code(),
+            1
+        );
         assert_eq!(CliError::BackupIncomplete { failed: 2 }.exit_code(), 3);
         assert_eq!(CliError::DamagedSnapshots { count: 1 }.exit_code(), 3);
         assert_eq!(CliError::RestoreIncomplete { failed: 4 }.exit_code(), 3);
@@ -148,16 +153,34 @@ mod tests {
         assert_eq!(CliError::PruneIncomplete { failed: 1 }.exit_code(), 3);
         assert_eq!(CliError::PruneNeedsConfirmation.exit_code(), 1);
         assert_eq!(CliError::PruneDeclined.exit_code(), 1);
-        assert_eq!(CliError::Core(vaultsnap_core::Error::PruneCancelled).exit_code(), 130);
-        assert_eq!(CliError::Core(vaultsnap_core::Error::PlanChanged).exit_code(), 1);
-        assert_eq!(CliError::Core(vaultsnap_core::Error::CheckCancelled).exit_code(), 130);
-        assert_eq!(CliError::Core(vaultsnap_core::Error::RestoreCancelled).exit_code(), 130);
+        assert_eq!(
+            CliError::Core(vaultsnap_core::Error::PruneCancelled).exit_code(),
+            130
+        );
+        assert_eq!(
+            CliError::Core(vaultsnap_core::Error::PlanChanged).exit_code(),
+            1
+        );
+        assert_eq!(
+            CliError::Core(vaultsnap_core::Error::CheckCancelled).exit_code(),
+            130
+        );
+        assert_eq!(
+            CliError::Core(vaultsnap_core::Error::RestoreCancelled).exit_code(),
+            130
+        );
         let conflict = vaultsnap_core::Error::RestoreConflict {
             count: 1,
             first: std::path::PathBuf::from("x"),
         };
         assert_eq!(CliError::Core(conflict).exit_code(), 1);
-        assert_eq!(CliError::Output(std::io::Error::other("disk full")).exit_code(), 1);
-        assert_eq!(CliError::Core(vaultsnap_core::Error::Cancelled).exit_code(), 130);
+        assert_eq!(
+            CliError::Output(std::io::Error::other("disk full")).exit_code(),
+            1
+        );
+        assert_eq!(
+            CliError::Core(vaultsnap_core::Error::Cancelled).exit_code(),
+            130
+        );
     }
 }

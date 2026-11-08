@@ -106,10 +106,14 @@ impl RetentionPolicy {
             self.keep_yearly,
         ];
         if rules.iter().all(Option::is_none) {
-            return Err(Error::InvalidRetention("at least one keep rule is required"));
+            return Err(Error::InvalidRetention(
+                "at least one keep rule is required",
+            ));
         }
         if rules.contains(&Some(0)) {
-            return Err(Error::InvalidRetention("keep counts must be greater than zero"));
+            return Err(Error::InvalidRetention(
+                "keep counts must be greater than zero",
+            ));
         }
         Ok(())
     }
@@ -121,11 +125,7 @@ impl RetentionPolicy {
     pub fn select(&self, snapshots: &[Candidate]) -> Result<Vec<Decision>> {
         self.validate()?;
         let mut newest_first: Vec<&Candidate> = snapshots.iter().collect();
-        newest_first.sort_by(|a, b| {
-            b.created
-                .cmp(&a.created)
-                .then_with(|| b.id.cmp(&a.id))
-        });
+        newest_first.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| b.id.cmp(&a.id)));
         let mut reasons: Vec<Vec<KeepReason>> = vec![Vec::new(); newest_first.len()];
 
         if let Some(count) = self.keep_last {
@@ -134,10 +134,34 @@ impl RetentionPolicy {
                 slot.push(KeepReason::Last);
             }
         }
-        mark_periods(&newest_first, &mut reasons, self.keep_daily, KeepReason::Daily, day_of);
-        mark_periods(&newest_first, &mut reasons, self.keep_weekly, KeepReason::Weekly, week_of);
-        mark_periods(&newest_first, &mut reasons, self.keep_monthly, KeepReason::Monthly, month_of);
-        mark_periods(&newest_first, &mut reasons, self.keep_yearly, KeepReason::Yearly, year_of);
+        mark_periods(
+            &newest_first,
+            &mut reasons,
+            self.keep_daily,
+            KeepReason::Daily,
+            day_of,
+        );
+        mark_periods(
+            &newest_first,
+            &mut reasons,
+            self.keep_weekly,
+            KeepReason::Weekly,
+            week_of,
+        );
+        mark_periods(
+            &newest_first,
+            &mut reasons,
+            self.keep_monthly,
+            KeepReason::Monthly,
+            month_of,
+        );
+        mark_periods(
+            &newest_first,
+            &mut reasons,
+            self.keep_yearly,
+            KeepReason::Yearly,
+            year_of,
+        );
 
         Ok(newest_first
             .into_iter()
@@ -212,7 +236,11 @@ fn civil_from_days(days: i64) -> (i64, u32) {
         (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_index = (5 * day_of_year + 2) / 153;
-    let month = if month_index < 10 { month_index + 3 } else { month_index - 9 };
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     (year, u32::try_from(month).unwrap_or(1))
 }
@@ -296,9 +324,16 @@ mod tests {
         for days in -60_000..80_000_i64 {
             let (year, month) = civil_from_days(days);
             let month = i64::from(month);
-            let (next_year, next_month) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+            let (next_year, next_month) = if month == 12 {
+                (year + 1, 1)
+            } else {
+                (year, month + 1)
+            };
             assert!(days_from_civil(year, month, 1) <= days, "day {days}");
-            assert!(days < days_from_civil(next_year, next_month, 1), "day {days}");
+            assert!(
+                days < days_from_civil(next_year, next_month, 1),
+                "day {days}"
+            );
         }
     }
 
@@ -314,40 +349,89 @@ mod tests {
         assert_ne!(week_of(previous_sunday), week_of(monday));
         assert_eq!(week_of(next_monday), week_of(monday) + 1);
         // The epoch is a Thursday: the week of 1969-12-29 (a Monday) to 1970-01-04 is one week.
-        assert_eq!(week_of(at(1969, 12, 29, 0, 0)), week_of(at(1970, 1, 4, 23, 59)));
-        assert_ne!(week_of(at(1969, 12, 28, 23, 59)), week_of(at(1969, 12, 29, 0, 0)));
+        assert_eq!(
+            week_of(at(1969, 12, 29, 0, 0)),
+            week_of(at(1970, 1, 4, 23, 59))
+        );
+        assert_ne!(
+            week_of(at(1969, 12, 28, 23, 59)),
+            week_of(at(1969, 12, 29, 0, 0))
+        );
     }
 
     #[test]
     fn iso_weeks_straddle_the_new_year_like_the_calendar_says() {
         // 2020-12-31 (Thursday) and 2021-01-03 (Sunday) are both in ISO week 53 of 2020.
-        assert_eq!(week_of(at(2020, 12, 31, 12, 0)), week_of(at(2021, 1, 3, 12, 0)));
+        assert_eq!(
+            week_of(at(2020, 12, 31, 12, 0)),
+            week_of(at(2021, 1, 3, 12, 0))
+        );
         // 2021-01-04 is the Monday of ISO week 1 of 2021.
-        assert_ne!(week_of(at(2021, 1, 3, 23, 59)), week_of(at(2021, 1, 4, 0, 0)));
+        assert_ne!(
+            week_of(at(2021, 1, 3, 23, 59)),
+            week_of(at(2021, 1, 4, 0, 0))
+        );
         // ... while months and years split at midnight.
-        assert_ne!(month_of(at(2020, 12, 31, 23, 59)), month_of(at(2021, 1, 1, 0, 0)));
-        assert_ne!(year_of(at(2020, 12, 31, 23, 59)), year_of(at(2021, 1, 1, 0, 0)));
-        assert_eq!(year_of(at(2020, 1, 1, 0, 0)), year_of(at(2020, 12, 31, 23, 59)));
+        assert_ne!(
+            month_of(at(2020, 12, 31, 23, 59)),
+            month_of(at(2021, 1, 1, 0, 0))
+        );
+        assert_ne!(
+            year_of(at(2020, 12, 31, 23, 59)),
+            year_of(at(2021, 1, 1, 0, 0))
+        );
+        assert_eq!(
+            year_of(at(2020, 1, 1, 0, 0)),
+            year_of(at(2020, 12, 31, 23, 59))
+        );
     }
 
     #[test]
     fn leap_days_and_month_ends_belong_to_their_months() {
-        assert_eq!(month_of(at(2024, 2, 29, 23, 59)), month_of(at(2024, 2, 1, 0, 0)));
-        assert_ne!(month_of(at(2024, 2, 29, 23, 59)), month_of(at(2024, 3, 1, 0, 0)));
-        assert_ne!(month_of(at(2023, 2, 28, 23, 59)), month_of(at(2023, 3, 1, 0, 0)));
-        assert_ne!(month_of(at(2024, 1, 31, 23, 59)), month_of(at(2024, 2, 1, 0, 0)));
+        assert_eq!(
+            month_of(at(2024, 2, 29, 23, 59)),
+            month_of(at(2024, 2, 1, 0, 0))
+        );
+        assert_ne!(
+            month_of(at(2024, 2, 29, 23, 59)),
+            month_of(at(2024, 3, 1, 0, 0))
+        );
+        assert_ne!(
+            month_of(at(2023, 2, 28, 23, 59)),
+            month_of(at(2023, 3, 1, 0, 0))
+        );
+        assert_ne!(
+            month_of(at(2024, 1, 31, 23, 59)),
+            month_of(at(2024, 2, 1, 0, 0))
+        );
         // The same month number in different years is a different month.
-        assert_ne!(month_of(at(2023, 5, 10, 0, 0)), month_of(at(2024, 5, 10, 0, 0)));
+        assert_ne!(
+            month_of(at(2023, 5, 10, 0, 0)),
+            month_of(at(2024, 5, 10, 0, 0))
+        );
     }
 
     #[test]
     fn times_before_the_epoch_fall_in_the_right_periods() {
-        let late = Timestamp { secs: -1, nanos: 999_999_999 };
+        let late = Timestamp {
+            secs: -1,
+            nanos: 999_999_999,
+        };
         let early = Timestamp { secs: 0, nanos: 0 };
-        assert_ne!(day_of(late), day_of(early), "the last second of 1969 is not 1970-01-01");
+        assert_ne!(
+            day_of(late),
+            day_of(early),
+            "the last second of 1969 is not 1970-01-01"
+        );
         assert_eq!(day_of(late), -1);
         assert_ne!(year_of(late), year_of(early));
-        assert_eq!(year_of(Timestamp { secs: -SECONDS_PER_DAY * 366, nanos: 0 }), 1968);
+        assert_eq!(
+            year_of(Timestamp {
+                secs: -SECONDS_PER_DAY * 366,
+                nanos: 0
+            }),
+            1968
+        );
     }
 
     // --- keep_last ---------------------------------------------------------------------------
@@ -377,7 +461,13 @@ mod tests {
     fn an_empty_history_and_a_single_snapshot_are_handled() {
         assert!(policy(3, 0, 0, 0, 0).select(&[]).expect("valid").is_empty());
         let one = [candidate(7, at(2024, 1, 1, 0, 0))];
-        for rule in [policy(1, 0, 0, 0, 0), policy(0, 1, 0, 0, 0), policy(0, 0, 1, 0, 0), policy(0, 0, 0, 1, 0), policy(0, 0, 0, 0, 1)] {
+        for rule in [
+            policy(1, 0, 0, 0, 0),
+            policy(0, 1, 0, 0, 0),
+            policy(0, 0, 1, 0, 0),
+            policy(0, 0, 0, 1, 0),
+            policy(0, 0, 0, 0, 1),
+        ] {
             assert_eq!(kept(&rule, &one), [7]);
         }
     }
@@ -397,7 +487,11 @@ mod tests {
         ];
         assert_eq!(kept(&policy(0, 1, 0, 0, 0), &snapshots), [6]);
         assert_eq!(kept(&policy(0, 2, 0, 0, 0), &snapshots), [4, 6]);
-        assert_eq!(kept(&policy(0, 3, 0, 0, 0), &snapshots), [3, 4, 6], "the empty 11th does not count");
+        assert_eq!(
+            kept(&policy(0, 3, 0, 0, 0), &snapshots),
+            [3, 4, 6],
+            "the empty 11th does not count"
+        );
         assert_eq!(kept(&policy(0, 4, 0, 0, 0), &snapshots), [3, 4, 6]);
     }
 
@@ -475,7 +569,12 @@ mod tests {
         let decisions = rule.select(&snapshots).expect("valid");
         let described: Vec<(u8, Vec<KeepReason>)> = decisions
             .iter()
-            .map(|d| (u8::from_str_radix(&d.id.as_str()[..2], 16).expect("hex"), d.keep.clone()))
+            .map(|d| {
+                (
+                    u8::from_str_radix(&d.id.as_str()[..2], 16).expect("hex"),
+                    d.keep.clone(),
+                )
+            })
             .collect();
         assert_eq!(
             described,
@@ -484,7 +583,10 @@ mod tests {
                 (2, vec![KeepReason::Monthly]),
                 // Not the newest of March, and no other rule selects it: removed.
                 (3, vec![]),
-                (4, vec![KeepReason::Last, KeepReason::Daily, KeepReason::Monthly]),
+                (
+                    4,
+                    vec![KeepReason::Last, KeepReason::Daily, KeepReason::Monthly]
+                ),
             ]
         );
     }
@@ -495,9 +597,19 @@ mod tests {
         let decisions = policy(1, 1, 1, 1, 1).select(&snapshots).expect("valid");
         assert_eq!(
             decisions[0].keep,
-            [KeepReason::Last, KeepReason::Daily, KeepReason::Weekly, KeepReason::Monthly, KeepReason::Yearly]
+            [
+                KeepReason::Last,
+                KeepReason::Daily,
+                KeepReason::Weekly,
+                KeepReason::Monthly,
+                KeepReason::Yearly
+            ]
         );
-        let names: Vec<&str> = decisions[0].keep.iter().map(|reason| reason.name()).collect();
+        let names: Vec<&str> = decisions[0]
+            .keep
+            .iter()
+            .map(|reason| reason.name())
+            .collect();
         assert_eq!(names, ["last", "daily", "weekly", "monthly", "yearly"]);
     }
 
@@ -519,7 +631,11 @@ mod tests {
     fn snapshots_with_the_same_time_are_ordered_by_id() {
         let time = at(2024, 3, 10, 12, 0);
         let snapshots = [candidate(5, time), candidate(9, time), candidate(2, time)];
-        assert_eq!(kept(&policy(1, 0, 0, 0, 0), &snapshots), [9], "the greatest id counts as newest");
+        assert_eq!(
+            kept(&policy(1, 0, 0, 0, 0), &snapshots),
+            [9],
+            "the greatest id counts as newest"
+        );
         assert_eq!(kept(&policy(0, 1, 0, 0, 0), &snapshots), [9]);
         let all = policy(3, 0, 0, 0, 0).select(&snapshots).expect("valid");
         let order: Vec<&str> = all.iter().map(|d| &d.id.as_str()[..2]).collect();
@@ -540,10 +656,18 @@ mod tests {
         let expected = rule.select(&snapshots).expect("valid");
         for rotation in 1..snapshots.len() {
             snapshots.rotate_left(rotation);
-            assert_eq!(rule.select(&snapshots).expect("valid"), expected, "rotation {rotation}");
+            assert_eq!(
+                rule.select(&snapshots).expect("valid"),
+                expected,
+                "rotation {rotation}"
+            );
         }
         snapshots.reverse();
-        assert_eq!(rule.select(&snapshots).expect("valid"), expected, "reversed");
+        assert_eq!(
+            rule.select(&snapshots).expect("valid"),
+            expected,
+            "reversed"
+        );
     }
 
     #[test]
@@ -573,7 +697,11 @@ mod tests {
             .collect();
         for count in 1..=6_u32 {
             let by_rule = |rule: RetentionPolicy| {
-                rule.select(&snapshots).expect("valid").iter().filter(|d| d.is_kept()).count()
+                rule.select(&snapshots)
+                    .expect("valid")
+                    .iter()
+                    .filter(|d| d.is_kept())
+                    .count()
             };
             assert_eq!(by_rule(policy(count, 0, 0, 0, 0)), count as usize);
             assert!(by_rule(policy(0, count, 0, 0, 0)) <= count as usize);
@@ -594,7 +722,9 @@ mod tests {
 
     #[test]
     fn empty_policy_is_rejected() {
-        let err = RetentionPolicy::default().validate().expect_err("must fail");
+        let err = RetentionPolicy::default()
+            .validate()
+            .expect_err("must fail");
         assert!(matches!(err, Error::InvalidRetention(_)));
     }
 
@@ -629,6 +759,9 @@ mod tests {
             ..Default::default()
         };
         assert!(zero.select(&snapshots).is_err());
-        assert!(RetentionPolicy::default().select(&[]).is_err(), "even an empty history is not selected from");
+        assert!(
+            RetentionPolicy::default().select(&[]).is_err(),
+            "even an empty history is not selected from"
+        );
     }
 }

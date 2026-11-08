@@ -4,7 +4,11 @@ A reliable encrypted incremental backup utility written in Rust.
 
 ## Status
 
-**Early development.**
+**Pre-release (0.1.0, not yet published).** Every command is implemented and the test suite passes
+on macOS (Apple silicon) with Rust 1.94.1; Linux and Windows have not been run. Read
+[`docs/RELIABILITY.md`](docs/RELIABILITY.md) for exactly what has and has not been verified before
+relying on it for data you cannot lose, and keep a second copy of anything important until you have
+restored from VaultSnap yourself ([`docs/DISASTER_RECOVERY.md`](docs/DISASTER_RECOVERY.md)).
 
 | Command     | State                                                                  |
 |-------------|------------------------------------------------------------------------|
@@ -20,8 +24,18 @@ A reliable encrypted incremental backup utility written in Rust.
 
 Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
 filesystem scanner, encrypted snapshot manifests, the `backup` command that connects them, the
-commands that inspect snapshot history, `restore`, `check`, and `prune` are in place. **None of this code
-has been compiled or run** (see "Known gaps"). Do not rely on it for real data.
+commands that inspect snapshot history, `restore`, `check`, `prune`, local and S3-compatible
+storage, release packaging, and scheduler files are in place. `vaultsnap version` shows the build
+and the repository formats it reads and writes.
+
+### Documentation
+
+To use it: [`INSTALL.md`](docs/INSTALL.md) (installing and upgrading),
+[`GUIDE.md`](docs/GUIDE.md) (initialization, backup schedules, restores, retention, remote
+repositories), [`DISASTER_RECOVERY.md`](docs/DISASTER_RECOVERY.md), and
+[`LIMITATIONS.md`](docs/LIMITATIONS.md). To maintain it: [`RELIABILITY.md`](docs/RELIABILITY.md)
+(what is tested and how, review findings, measurements) and [`RELEASING.md`](docs/RELEASING.md).
+The reference documents are listed further down.
 
 ### Chunking
 
@@ -325,14 +339,19 @@ stderr, or `RUST_LOG` for fine control; secrets are never logged (see `docs/SECU
 
 ## Development
 
-The toolchain is pinned in `rust-toolchain.toml` (Rust 1.85.0 with `rustfmt` and `clippy`).
+The toolchain is pinned in `rust-toolchain.toml` (Rust 1.94.1 with `rustfmt` and `clippy`; the
+AWS SDK needs it). `Cargo.lock` is committed.
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+sh contrib/test-scheduled.sh && sh scripts/test-package.sh
 ```
+
+`AGENTS.md` explains how the toolchain is installed inside the repository, and the two environment
+variables the macOS sandbox needs for C dependencies.
 
 Tests:
 
@@ -393,79 +412,80 @@ Tests:
   checks the refusals that need no network. `crates/vaultsnap-core/tests/s3_minio.rs` runs a
   repository against a real MinIO server (round trip and restore from a fresh connection,
   nothing readable uploaded, duplicate uploads, a cancelled backup, a network outage in the middle
-  of a backup, connection failures). It needs Docker and `VAULTSNAP_S3_TEST_ENDPOINT` (see
-  `docs/S3.md`); without them each test prints `SKIPPED (unverified)`.
+  of a backup, connection failures, and the whole storage contract). It needs a MinIO server and
+  `VAULTSNAP_S3_TEST_ENDPOINT`; `scripts/minio-local.sh` builds and runs one without Docker (see
+  `docs/S3.md`). Without a server each test prints `SKIPPED (unverified)` and passes.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
+- Reliability tests, described in [`docs/RELIABILITY.md`](docs/RELIABILITY.md): property tests of
+  the invariants (`tests/properties.rs`), randomized filesystem round trips (`tests/roundtrip.rs`,
+  seeded and replayable), a backup and a prune killed at every storage call (`tests/crash.rs`), and
+  end-to-end runs of the binary (`crates/vaultsnap-cli/tests/e2e.rs`).
 
-Benchmarks (in-memory, nothing written to disk; see the header of the file for what they cover):
+Benchmarks (see the header of each file for what it covers; results and how to read them are in
+[`docs/RELIABILITY.md`](docs/RELIABILITY.md)):
 
 ```sh
-cargo bench -p vaultsnap-core --bench chunking              # 4 KiB .. 64 MiB inputs
+cargo bench -p vaultsnap-core --bench chunking              # chunker alone, in memory, 4 KiB .. 64 MiB
 cargo bench -p vaultsnap-core --bench chunking -- --quick   # 4 KiB .. 1 MiB
-cargo bench -p vaultsnap-core --bench chunking -- --large   # adds a 256 MiB input
+cargo bench -p vaultsnap-core --bench throughput            # end to end on real directories, 64 MiB
+cargo bench -p vaultsnap-core --bench throughput -- --quick # 8 MiB
 ```
 
-CI (`.github/workflows/ci.yml`) runs the four commands above on Linux and macOS (the benchmark
-is compiled by `clippy --all-targets` but not run).
+CI (`.github/workflows/ci.yml`) runs the checks above on Linux (x86-64 and arm64) and macOS, a
+build check on Windows that may fail, a smoke run of the benchmarks, and the MinIO tests. Releases
+are built by `.github/workflows/release.yml` for four targets ([`docs/RELEASING.md`](docs/RELEASING.md)).
+None of these workflows has run on GitHub yet.
 
 ## Known gaps
 
-- `Cargo.lock` has not been generated or committed yet; it must be produced by the first build
-  with network access and committed. Until then CI does not use `--locked`.
-- Formatting, linting, and tests were written without a Rust toolchain being available in the
-  authoring environment (no network, no preinstalled `cargo`); nothing has been compiled or run
-  yet, and the first CI run is the first verification.
-- The local store publishes new files with hard links, so the repository must live on a
-  filesystem that supports them.
-- The chunking benchmark has never been run, so there are no throughput numbers yet.
-- `backup` has no CLI test for Ctrl-C/SIGTERM (a race-free test needs a controllable slow
-  source); cancellation is tested in the library through the cancel token only, and the signal
-  handler itself is unverified.
-- The expected text and JSON of the inspection commands (`inspect/tests.rs`, and the same
-  examples in `docs/CLI.md`) were derived by hand, not by running the program, so a mismatch on
-  the first real run is possible. Likewise the `jq` recipes in `docs/CLI.md` were never run.
-- Tests that create files with newlines, escape characters, or non-UTF-8 names depend on the
-  file system accepting them (macOS refuses non-UTF-8 names); the non-UTF-8 case is skipped
-  there and counts as unverified on such systems.
-- `restore` is unverified like everything else. Specifically unexercised: its behavior on file
-  systems that are case-insensitive, lack hard links, or cannot represent a recorded time; on
-  Windows (not built); and under a racing attacker, which it does not defend against (it is
-  `unsafe`-free and cannot use `openat`; see `docs/RESTORE.md`). The tests that need Unix
-  permissions or links are skipped on other platforms. There is no `fsync` on restored files, no
-  restoration of owners, and no way yet to strip the leading source path.
-- `restore` has no CLI test for Ctrl-C/SIGTERM either; cancellation is tested in the library
-  through the cancel token only. The same holds for `check`.
-- `check` is unverified like everything else. Specifically: its behavior next to a *running*
-  backup is by design (snapshot files are listed before objects) but has no test with real
-  concurrency; the premises of some tests (that a given chunk is stored compressed or not, that
-  a file has at least N chunks) rest on the chunker's behavior on generated data, which was
-  reasoned about but not observed; on non-Unix platforms the link-related tests are skipped. A
-  quick check cannot see damage inside a chunk's payload, and nothing can see a deleted snapshot
-  (`docs/CHECK.md`).
-- The storage refactor is unverified like everything else, and touched most of the core. The
-  concurrency cases of the contract (racing creators and updaters, readers against a replacement)
-  and the retry-over-faults runs are the least certain.
-- The S3 backend is unverified like everything else, and more so: its adapter to the AWS SDK has
-  never been compiled, the MinIO tests have never met a server (this environment has no Docker
-  access), and the fake service it is otherwise tested against was written by the same hand. The
-  toolchain pin was raised to 1.94.1 for the SDK; with no `Cargo.lock` a first networked build may
-  need a newer one. A backup checks each chunk with its own request, one after the other, so a
-  backup of a very large tree to a distant bucket is slow; listing instead is future work. The
-  lock file of a killed process stays in the bucket until removed by hand. Details in
-  `docs/S3.md`.
-- `prune` is unverified like everything else. Specifically: the interactive question (`Type
-  "yes"`) needs a terminal, so only its logic is unit tested and the flow around it is not tested
-  end to end; Ctrl-C and SIGTERM through the binary are not tested; the race tests (a prune
-  against a backup, two prunes) assert only that every outcome is a success or a lock conflict and
-  that nothing is damaged, because which one wins is not deterministic; and calendar retention
-  (days, weeks, months, years) is tested on hand-made times only, since a real backup cannot be
-  given a time. The test that makes objects undeletable skips itself as root. There is no
-  append-only mode and no way to forget one named snapshot (`docs/PRUNE.md`, `docs/SECURITY.md`).
-- Several lines are longer than rustfmt's limit because nothing could be formatted; the first
-  toolchain run needs `cargo fmt --all`, and `clippy` may report lints that were not seen.
-- Scanner behavior on real mount points, on Windows, and on network filesystems is unverified;
-  see `docs/SCANNING.md`.
+What the tests do not cover, and what is slow or missing by design. [`docs/RELIABILITY.md`](docs/RELIABILITY.md)
+has the evidence behind what *is* verified; [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) is the list for
+users.
+
+- **Only macOS (Apple silicon) has been built and tested.** Linux and Windows are untested here; the
+  GitHub workflows (CI, release) are written and syntax-checked but have never run on GitHub.
+  Windows is not supported.
+- **S3** is verified against a MinIO server (the April 2025 release, built from source, on loopback)
+  through the real AWS SDK adapter, including the whole storage contract. It is not verified against
+  AWS S3 itself, nor TLS with a private CA, named profiles, SSO, or role credentials. That server
+  creates an object on `If-Match` of a missing one, unlike S3, so it is given no conditional-replace
+  guarantee (nothing in a repository uses one). A backup checks each chunk with its own request, one
+  after the other, so a very large backup to a distant bucket is slow (`docs/S3.md`).
+- **Many small files back up slowly** because every chunk object is committed durably (a file sync
+  and a directory sync each; on macOS a full flush to the disk, about 3.6 ms): about 7.7 ms per file,
+  1.3 MiB/s, whatever the number of workers. Large files reach 100 MiB/s or more
+  (`docs/RELIABILITY.md`). Packing chunks into larger files would fix this and is a format change.
+- **Signals through the binary are not tested.** Ctrl-C and SIGTERM handling of `backup`, `restore`,
+  `check`, and `prune` is exercised only through the library's cancel token. The interactive `yes`
+  question of `prune` needs a terminal, so only its logic is unit tested.
+- **Crash tests model a storage that stops answering**, at every call and in both ways a call can
+  fail to report back. They do not model a power cut that loses data a file system had acknowledged,
+  or torn writes inside one file; the design leans on `fsync` and no-overwrite publication for those
+  (`docs/FORMAT.md`).
+- **Stale locks** left by a killed process are never removed automatically: a killed backup blocks
+  `prune`, and a killed `prune` blocks everything, until a person deletes the lock file
+  (`docs/DISASTER_RECOVERY.md`).
+- The local backend publishes new files with hard links, so the repository must live on a file
+  system that supports them.
+- **Restore** is unexercised on case-insensitive file systems beyond what macOS gives by default, on
+  file systems without hard links, and under a racing attacker, which it does not defend against (it
+  is `unsafe`-free and cannot use `openat`; `docs/RESTORE.md`). There is no `fsync` on restored files,
+  no restoration of owners, extended attributes, or ACLs, and no way to strip the leading source path.
+- **`check`** next to a *running* backup is safe by design (snapshot files are listed before objects)
+  but has no test with real concurrency. A quick check cannot see damage inside a chunk's payload,
+  and nothing can see a deleted snapshot or a rollback (`docs/CHECK.md`).
+- **`prune`**: the race tests (a prune against a backup, two prunes) assert only that every outcome
+  is a success or a lock conflict and that nothing is damaged, since which one wins is not
+  deterministic; calendar retention is tested on hand-made times, since a real backup cannot be
+  given a time; the test that makes objects undeletable skips itself as root. There is no
+  append-only mode and no way to forget one named snapshot (`docs/PRUNE.md`).
+- Tests that need files with newlines, escape characters, or non-UTF-8 names, FIFOs, sockets, or
+  privileges skip themselves where the platform cannot provide them; a skipped case is unverified.
+- Scanner behavior on real mount points, on Windows, and on network file systems is unverified
+  (`docs/SCANNING.md`).
+- The benchmarks have run only on one machine and only at the default sizes (chunker up to 64 MiB,
+  end to end 64 MiB per dataset); the `--large` variants were not run.
 
 ## License
 

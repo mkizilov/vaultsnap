@@ -219,12 +219,18 @@ fn validate_prefix(prefix: &str) -> Result<()> {
 /// The scheme, whether it is `https`, and the host of an endpoint URL, or why it is unusable.
 fn endpoint_parts(endpoint: &str) -> Result<(bool, String)> {
     let Some((scheme, rest)) = endpoint.split_once("://") else {
-        return Err(invalid("the endpoint must be a URL such as https://s3.example.com".to_owned()));
+        return Err(invalid(
+            "the endpoint must be a URL such as https://s3.example.com".to_owned(),
+        ));
     };
     let secure = match scheme.to_ascii_lowercase().as_str() {
         "https" => true,
         "http" => false,
-        _ => return Err(invalid("the endpoint must start with https:// or http://".to_owned())),
+        _ => {
+            return Err(invalid(
+                "the endpoint must start with https:// or http://".to_owned(),
+            ))
+        }
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     if authority.contains('@') {
@@ -275,7 +281,9 @@ pub fn redact_endpoint(endpoint: &str) -> String {
     };
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(end);
-    let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
     format!("{scheme}://{host}{tail}")
 }
 
@@ -290,8 +298,14 @@ pub fn redact(message: &str) -> String {
     let flush = |word: &mut String, out: &mut String| {
         let key_like = word.len() == 20
             && KEY_PREFIXES.iter().any(|prefix| word.starts_with(prefix))
-            && word.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
-        out.push_str(if key_like { "<access-key-id>" } else { word.as_str() });
+            && word
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+        out.push_str(if key_like {
+            "<access-key-id>"
+        } else {
+            word.as_str()
+        });
         word.clear();
     };
     let mut cut = false;
@@ -471,9 +485,12 @@ impl S3Backend {
     fn failure(&self, operation: &'static str, name: &str, error: &ApiError) -> Error {
         let text = redact(&error.to_string());
         match error.kind {
-            ApiErrorKind::NotFound => {
-                Error::backend(operation, name, BackendErrorKind::NotFound, "no such object")
-            }
+            ApiErrorKind::NotFound => Error::backend(
+                operation,
+                name,
+                BackendErrorKind::NotFound,
+                "no such object",
+            ),
             ApiErrorKind::NoSuchBucket => Error::backend(
                 operation,
                 &self.bucket,
@@ -701,8 +718,13 @@ impl Backend for S3Backend {
     }
 }
 
-/// Finds out whether the service honors `If-None-Match` and `If-Match`, by trying them on an
-/// object of its own that is removed again. Returns the guarantees for `Create` and `Update`.
+/// Finds out whether the service honors `If-None-Match` and `If-Match`, by trying them on objects
+/// of its own that are removed again. Returns the guarantees for `Create` and `Update`.
+///
+/// `Update` is only declared if a stale version is refused, the current one is accepted, **and** a
+/// version of an object that does not exist is refused (S3 answers `404`). The MinIO release of
+/// April 2025 creates the object instead, which the storage contract found by running against it;
+/// a service that does so is not given a guarantee it has just been seen to break.
 ///
 /// Credentials that cannot write cannot break exclusivity either, so if the first write is
 /// refused as forbidden the guarantees of S3 are assumed (a read-only user can still list,
@@ -736,14 +758,31 @@ fn probe_conditions(backend: &dyn Backend, name: &str) -> Result<(Guarantee, Gua
     };
 
     let stale = Version::new("\"00000000000000000000000000000000\"");
-    let refused_stale = match backend.put(name, b"third", PutMode::Update(stale)) {
+    let refused_stale = match backend.put(name, b"third", PutMode::Update(stale.clone())) {
         Err(Error::PreconditionFailed { .. }) => true,
         Err(err) if err.is_transient() => return Err(err),
         Ok(_) | Err(_) => false,
     };
     let current = backend.stat(name)?.version;
-    let accepted_current = backend.put(name, b"fourth", PutMode::Update(current)).is_ok();
-    let replace = if refused_stale && accepted_current {
+    let accepted_current = backend
+        .put(name, b"fourth", PutMode::Update(current))
+        .is_ok();
+
+    let absent = format!("{name}-absent");
+    let refused_absent = match backend.put(&absent, b"fifth", PutMode::Update(stale)) {
+        Err(Error::PreconditionFailed { .. }) => true,
+        Err(err) if err.is_transient() => return Err(err),
+        Ok(_) => {
+            // It was created: put it back the way it was.
+            if let Err(err) = backend.delete(&absent) {
+                tracing::warn!(error = %err, "failed to remove the probe object {absent}");
+            }
+            false
+        }
+        Err(_) => false,
+    };
+
+    let replace = if refused_stale && accepted_current && refused_absent {
         Guarantee::Global
     } else {
         Guarantee::None

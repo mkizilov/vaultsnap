@@ -32,17 +32,28 @@ fn run(env: &TestEnv, args: &[&str]) -> (Output, PathBuf) {
 }
 
 fn assert_nothing_created(cwd: &Path) {
-    let entries: Vec<_> = fs::read_dir(cwd).expect("read the working directory").collect();
+    let entries: Vec<_> = fs::read_dir(cwd)
+        .expect("read the working directory")
+        .collect();
     assert!(entries.is_empty(), "the command created {entries:?}");
 }
 
 #[test]
 fn a_bad_bucket_name_is_refused_before_any_connection() {
     let env = TestEnv::default();
-    for repo in ["s3://UPPER/case", "s3://ab", "s3://my-bucket/../up", "s3://"] {
+    for repo in [
+        "s3://UPPER/case",
+        "s3://ab",
+        "s3://my-bucket/../up",
+        "s3://",
+    ] {
         let (output, cwd) = run(&env, &["--repo", repo, "snapshots"]);
         assert_eq!(output.status.code(), Some(1), "{repo}: {}", stderr(&output));
-        assert!(stderr(&output).contains("invalid S3 repository"), "{repo}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains("invalid S3 repository"),
+            "{repo}: {}",
+            stderr(&output)
+        );
         assert!(stdout(&output).is_empty(), "{repo}");
         assert_nothing_created(&cwd);
     }
@@ -60,7 +71,11 @@ fn plain_http_to_another_machine_is_refused_unless_allowed() {
     ];
     let (output, cwd) = run(&env, &args);
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
-    assert!(stderr(&output).contains("plain HTTP"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("plain HTTP"),
+        "{}",
+        stderr(&output)
+    );
     assert_nothing_created(&cwd);
 }
 
@@ -77,9 +92,16 @@ fn credentials_in_the_endpoint_are_refused_and_not_repeated() {
     ];
     let (output, cwd) = run(&env, &args);
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
-    assert!(stderr(&output).contains("user name or password"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("user name or password"),
+        "{}",
+        stderr(&output)
+    );
     for text in [stderr(&output), stdout(&output)] {
-        assert!(!text.contains("topsecret"), "the password was repeated: {text}");
+        assert!(
+            !text.contains("topsecret"),
+            "the password was repeated: {text}"
+        );
     }
     assert_nothing_created(&cwd);
 }
@@ -95,8 +117,16 @@ fn there_is_no_way_to_pass_credentials_on_the_command_line() {
         "--secret-key",
     ];
     for option in options {
-        let (output, cwd) = run(&env, &["--repo", "s3://my-bucket", option, "value", "snapshots"]);
-        assert_eq!(output.status.code(), Some(2), "{option}: {}", stderr(&output));
+        let (output, cwd) = run(
+            &env,
+            &["--repo", "s3://my-bucket", option, "value", "snapshots"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{option}: {}",
+            stderr(&output)
+        );
         assert_nothing_created(&cwd);
     }
 }
@@ -115,6 +145,9 @@ fn the_help_describes_the_bucket_location_and_options() {
         "--s3-max-requests",
     ];
     for expected in expected {
-        assert!(help.contains(expected), "{expected} is missing from the help:\n{help}");
+        assert!(
+            help.contains(expected),
+            "{expected} is missing from the help:\n{help}"
+        );
     }
 }

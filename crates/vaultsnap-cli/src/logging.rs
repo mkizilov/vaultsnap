@@ -33,16 +33,28 @@ mod tests {
     #[test]
     fn verbosity_raises_only_vaultsnaps_own_messages() {
         assert_eq!(default_directives(0), "warn");
-        assert_eq!(default_directives(1), "warn,vaultsnap=info,vaultsnap_core=info");
-        assert_eq!(default_directives(2), "warn,vaultsnap=debug,vaultsnap_core=debug");
-        assert_eq!(default_directives(3), "warn,vaultsnap=trace,vaultsnap_core=trace");
+        assert_eq!(
+            default_directives(1),
+            "warn,vaultsnap=info,vaultsnap_core=info"
+        );
+        assert_eq!(
+            default_directives(2),
+            "warn,vaultsnap=debug,vaultsnap_core=debug"
+        );
+        assert_eq!(
+            default_directives(3),
+            "warn,vaultsnap=trace,vaultsnap_core=trace"
+        );
         assert_eq!(default_directives(9), default_directives(3));
     }
 
     #[test]
     fn the_directives_are_valid_filters() {
         for verbose in 0..=4 {
-            assert!(EnvFilter::try_new(default_directives(verbose)).is_ok(), "{verbose}");
+            assert!(
+                EnvFilter::try_new(default_directives(verbose)).is_ok(),
+                "{verbose}"
+            );
         }
     }
 }

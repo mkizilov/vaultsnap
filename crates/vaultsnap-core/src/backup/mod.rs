@@ -301,7 +301,10 @@ mod tests {
         assert!(token.is_cancelled());
         other.cancel();
         assert!(token.is_cancelled(), "cancelling twice is harmless");
-        assert!(!CancelToken::new().is_cancelled(), "fresh tokens are independent");
+        assert!(
+            !CancelToken::new().is_cancelled(),
+            "fresh tokens are independent"
+        );
     }
 
     #[test]
@@ -350,7 +353,10 @@ mod tests {
             failure,
         };
         report.skipped.push(skip(false));
-        assert!(!report.is_partial(), "policy skips and vanished files are not failures");
+        assert!(
+            !report.is_partial(),
+            "policy skips and vanished files are not failures"
+        );
         report.skipped.push(skip(true));
         assert!(report.is_partial());
     }

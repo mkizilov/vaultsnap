@@ -14,9 +14,8 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 use vaultsnap_core::snapshot::NodeKind;
 use vaultsnap_core::{
-    BackupOptions, BackupReport, ChunkId, ChunkerConfig, CheckOptions, CheckReport, Compression,
-    Error, FindingKind, KdfParams, Passphrase, Repository, RepositoryKeys, SnapshotId,
-    SnapshotRef,
+    BackupOptions, BackupReport, CheckOptions, CheckReport, ChunkId, ChunkerConfig, Compression,
+    Error, FindingKind, KdfParams, Passphrase, Repository, RepositoryKeys, SnapshotId, SnapshotRef,
 };
 
 fn passphrase() -> Passphrase {
@@ -89,7 +88,10 @@ impl Env {
             racy_margin: Duration::ZERO,
             ..BackupOptions::default()
         };
-        self.repo.backup(&self.keys, options).await.expect("backup succeeds")
+        self.repo
+            .backup(&self.keys, options)
+            .await
+            .expect("backup succeeds")
     }
 
     async fn check(&self, read_data: bool) -> CheckReport {
@@ -101,7 +103,10 @@ impl Env {
     }
 
     async fn check_with(&self, options: CheckOptions) -> CheckReport {
-        self.repo.check(&self.keys, options).await.expect("the check runs")
+        self.repo
+            .check(&self.keys, options)
+            .await
+            .expect("the check runs")
     }
 
     /// The object file of a chunk, from the documented layout.
@@ -195,7 +200,11 @@ fn kinds(report: &CheckReport) -> Vec<FindingKind> {
 fn first_tree(root: &Path) {
     write(root, "small.txt", b"hello check");
     write(root, "random.bin", &pseudo_random(120_000, 1));
-    write(root, "notes.txt", &b"all work and no play makes a dull backup\n".repeat(12_000));
+    write(
+        root,
+        "notes.txt",
+        &b"all work and no play makes a dull backup\n".repeat(12_000),
+    );
 }
 
 /// A repository with two snapshots: the second adds `extra.bin`, whose chunks only it needs.
@@ -220,13 +229,29 @@ async fn a_healthy_repository_is_clean_in_both_modes_and_full_reads_all_of_it() 
     let quick = env.check(false).await;
     assert!(quick.is_clean(), "{:?}", quick.findings);
     assert_eq!(quick.mode.name(), "quick");
-    assert_eq!((quick.stats.snapshots, quick.stats.snapshots_damaged), (2, 0));
+    assert_eq!(
+        (quick.stats.snapshots, quick.stats.snapshots_damaged),
+        (2, 0)
+    );
     assert_eq!(quick.stats.key_files, 1);
-    assert_eq!(quick.stats.chunks_referenced, quick.stats.objects, "every object is used");
-    assert_eq!((quick.stats.chunks_missing, quick.stats.objects_damaged, quick.stats.orphans), (0, 0, 0));
+    assert_eq!(
+        quick.stats.chunks_referenced, quick.stats.objects,
+        "every object is used"
+    );
+    assert_eq!(
+        (
+            quick.stats.chunks_missing,
+            quick.stats.objects_damaged,
+            quick.stats.orphans
+        ),
+        (0, 0, 0)
+    );
     assert_eq!(quick.stats.objects_checked, quick.stats.objects);
     assert!(quick.stats.orphans_exact);
-    assert_eq!(quick.stats.bytes_authenticated, 0, "the quick mode reads no payload");
+    assert_eq!(
+        quick.stats.bytes_authenticated, 0,
+        "the quick mode reads no payload"
+    );
     assert!(quick.stats.object_bytes > 0 && quick.affected.is_empty());
     assert_eq!(quick.repository_id.len(), 32);
 
@@ -235,7 +260,12 @@ async fn a_healthy_repository_is_clean_in_both_modes_and_full_reads_all_of_it() 
     assert_eq!(full.mode.name(), "full");
     assert_eq!(full.stats.bytes_authenticated, full.stats.object_bytes);
     assert_eq!(full.stats.objects, quick.stats.objects);
-    assert_eq!(fs::read_dir(env.repo_path("locks")).expect("read_dir").count(), 0);
+    assert_eq!(
+        fs::read_dir(env.repo_path("locks"))
+            .expect("read_dir")
+            .count(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -261,15 +291,31 @@ async fn a_check_changes_nothing_not_a_byte_and_not_a_time_even_in_a_badly_damag
     fs::remove_file(env.chunk_file(&random[7].0)).expect("remove");
     flip_a_byte(&env.snapshot_file(&second.snapshot), 100);
     write(&env.repo_path(""), "notes.txt", b"a stray file");
-    write(&env.repo_path("snapshots"), ".tmp-0011223344556677", b"leftover");
-    write(&env.repo_path("locks"), "0123456789abcdef0123456789abcdef.lock", b"kind=shared\npid=1\n");
+    write(
+        &env.repo_path("snapshots"),
+        ".tmp-0011223344556677",
+        b"leftover",
+    );
+    write(
+        &env.repo_path("locks"),
+        "0123456789abcdef0123456789abcdef.lock",
+        b"kind=shared\npid=1\n",
+    );
 
     let before = dump(&env.path("repo"));
     for read_data in [false, true] {
         let report = env.check(read_data).await;
-        assert!(!report.is_ok() && report.warnings >= 3, "{:?}", report.findings);
+        assert!(
+            !report.is_ok() && report.warnings >= 3,
+            "{:?}",
+            report.findings
+        );
     }
-    assert_eq!(dump(&env.path("repo")), before, "the repository was not touched");
+    assert_eq!(
+        dump(&env.path("repo")),
+        before,
+        "the repository was not touched"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -286,12 +332,21 @@ async fn a_missing_chunk_is_an_error_in_both_modes_and_names_the_snapshot_it_bre
     for read_data in [false, true] {
         let report = env.check(read_data).await;
         assert!(!report.is_ok());
-        assert_eq!((report.errors, report.warnings), (1, 0), "{:?}", report.findings);
+        assert_eq!(
+            (report.errors, report.warnings),
+            (1, 0),
+            "{:?}",
+            report.findings
+        );
         assert_eq!(kinds(&report), [FindingKind::ChunkMissing]);
         assert_eq!(report.findings[0].subject, object_subject(&gone));
         assert_eq!(report.stats.chunks_missing, 1);
         assert_eq!(report.stats.objects, report.stats.chunks_referenced - 1);
-        assert_eq!(report.affected.len(), 1, "only the second snapshot needs it");
+        assert_eq!(
+            report.affected.len(),
+            1,
+            "only the second snapshot needs it"
+        );
         let affected = &report.affected[0];
         assert_eq!(affected.snapshot, second.snapshot);
         assert_eq!((affected.files, affected.damaged_chunks), (1, 1));
@@ -309,7 +364,10 @@ async fn a_chunk_shared_by_several_snapshots_breaks_all_of_them() {
     let report = env.check(false).await;
     assert_eq!(report.count(FindingKind::ChunkMissing), 2);
     let affected: BTreeSet<&SnapshotId> = report.affected.iter().map(|a| &a.snapshot).collect();
-    assert_eq!(affected, BTreeSet::from([&first.snapshot, &second.snapshot]));
+    assert_eq!(
+        affected,
+        BTreeSet::from([&first.snapshot, &second.snapshot])
+    );
     for entry in &report.affected {
         assert_eq!((entry.files, entry.damaged_chunks), (1, 2));
     }
@@ -342,10 +400,21 @@ async fn a_truncated_chunk_is_found_by_both_modes() {
 
     for read_data in [false, true] {
         let report = env.check(read_data).await;
-        assert_eq!(kinds(&report), [FindingKind::ChunkCorrupt], "read_data={read_data}");
+        assert_eq!(
+            kinds(&report),
+            [FindingKind::ChunkCorrupt],
+            "read_data={read_data}"
+        );
         assert_eq!(report.findings[0].subject, object_subject(&victim));
-        assert!(report.findings[0].detail.contains("truncated or extended"), "{}", report.findings[0].detail);
-        assert_eq!((report.stats.objects_damaged, report.affected.len()), (1, 2));
+        assert!(
+            report.findings[0].detail.contains("truncated or extended"),
+            "{}",
+            report.findings[0].detail
+        );
+        assert_eq!(
+            (report.stats.objects_damaged, report.affected.len()),
+            (1, 2)
+        );
     }
 }
 
@@ -366,11 +435,24 @@ async fn an_extended_chunk_and_a_damaged_header_are_found_by_both_modes() {
 
     for read_data in [false, true] {
         let report = env.check(read_data).await;
-        assert_eq!(report.count(FindingKind::ChunkCorrupt), 3, "read_data={read_data}");
+        assert_eq!(
+            report.count(FindingKind::ChunkCorrupt),
+            3,
+            "read_data={read_data}"
+        );
         let details: Vec<&str> = report.findings.iter().map(|f| f.detail.as_str()).collect();
-        assert!(details.iter().any(|d| d.contains("truncated or extended")), "{details:?}");
-        assert!(details.iter().any(|d| d.contains("bad magic")), "{details:?}");
-        assert!(details.iter().any(|d| d.contains("unknown flags")), "{details:?}");
+        assert!(
+            details.iter().any(|d| d.contains("truncated or extended")),
+            "{details:?}"
+        );
+        assert!(
+            details.iter().any(|d| d.contains("bad magic")),
+            "{details:?}"
+        );
+        assert!(
+            details.iter().any(|d| d.contains("unknown flags")),
+            "{details:?}"
+        );
     }
 }
 
@@ -384,8 +466,16 @@ async fn a_chunk_from_a_newer_version_is_reported_as_unsupported_not_corrupt() {
 
     for read_data in [false, true] {
         let report = env.check(read_data).await;
-        assert_eq!(kinds(&report), [FindingKind::UnsupportedVersion], "read_data={read_data}");
-        assert!(report.findings[0].detail.contains("version 9"), "{}", report.findings[0].detail);
+        assert_eq!(
+            kinds(&report),
+            [FindingKind::UnsupportedVersion],
+            "read_data={read_data}"
+        );
+        assert!(
+            report.findings[0].detail.contains("version 9"),
+            "{}",
+            report.findings[0].detail
+        );
     }
 }
 
@@ -400,12 +490,20 @@ async fn a_flipped_bit_inside_a_chunk_is_found_only_by_the_full_check() {
 
     // The documented limit of the quick mode: it never reads the payload.
     let quick = env.check(false).await;
-    assert!(quick.is_clean(), "the quick mode cannot see this: {:?}", quick.findings);
+    assert!(
+        quick.is_clean(),
+        "the quick mode cannot see this: {:?}",
+        quick.findings
+    );
 
     let full = env.check(true).await;
     assert_eq!(kinds(&full), [FindingKind::ChunkCorrupt]);
     assert_eq!(full.findings[0].subject, object_subject(&victim));
-    assert!(full.findings[0].detail.contains("authentication failed"), "{}", full.findings[0].detail);
+    assert!(
+        full.findings[0].detail.contains("authentication failed"),
+        "{}",
+        full.findings[0].detail
+    );
     assert_eq!(full.stats.objects_damaged, 1);
     assert_eq!(
         full.stats.bytes_authenticated,
@@ -420,11 +518,19 @@ async fn a_truncated_compressed_chunk_is_also_only_found_by_the_full_check() {
     let (env, first, _second) = two_snapshots().await;
     let notes = env.chunks_of(&first.snapshot, "notes.txt").await;
     let (victim, _) = notes[0];
-    assert_eq!(env.compression_of(&victim).await, Compression::Zstd, "the test needs a compressed chunk");
+    assert_eq!(
+        env.compression_of(&victim).await,
+        Compression::Zstd,
+        "the test needs a compressed chunk"
+    );
     truncate_by(&env.chunk_file(&victim), 1);
 
     let quick = env.check(false).await;
-    assert!(quick.is_clean(), "a shorter compressed object is still possible: {:?}", quick.findings);
+    assert!(
+        quick.is_clean(),
+        "a shorter compressed object is still possible: {:?}",
+        quick.findings
+    );
     let full = env.check(true).await;
     assert_eq!(kinds(&full), [FindingKind::ChunkCorrupt]);
 }
@@ -434,21 +540,36 @@ async fn a_valid_object_stored_under_the_wrong_id_is_caught_by_both_modes_in_the
     let (env, first, _second) = two_snapshots().await;
     let random = env.chunks_of(&first.snapshot, "random.bin").await;
     let ((target, target_len), (other, other_len)) = (random[8], random[9]);
-    assert_ne!(target_len, other_len, "the test needs two chunks of different sizes");
+    assert_ne!(
+        target_len, other_len,
+        "the test needs two chunks of different sizes"
+    );
     // A perfectly authentic object, in every byte, under another chunk's name.
     fs::copy(env.chunk_file(&other), env.chunk_file(&target)).expect("copy");
 
     let quick = env.check(false).await;
-    assert_eq!(kinds(&quick), [FindingKind::ChunkLengthMismatch], "{:?}", quick.findings);
+    assert_eq!(
+        kinds(&quick),
+        [FindingKind::ChunkLengthMismatch],
+        "{:?}",
+        quick.findings
+    );
     assert_eq!(quick.findings[0].subject, object_subject(&target));
     assert!(
-        quick.findings[0].detail.contains(&format!("{other_len} bytes but snapshots record {target_len}")),
+        quick.findings[0].detail.contains(&format!(
+            "{other_len} bytes but snapshots record {target_len}"
+        )),
         "{}",
         quick.findings[0].detail
     );
 
     let full = env.check(true).await;
-    assert_eq!(kinds(&full), [FindingKind::ChunkCorrupt], "{:?}", full.findings);
+    assert_eq!(
+        kinds(&full),
+        [FindingKind::ChunkCorrupt],
+        "{:?}",
+        full.findings
+    );
     assert!(full.findings[0].detail.contains("authentication failed"));
 }
 
@@ -476,7 +597,13 @@ async fn a_chunk_replaced_by_a_link_is_reported_and_the_link_is_never_followed()
         assert!(report.findings[1].detail.starts_with("a symbolic link"));
     }
     assert_eq!(fs::read(&target).expect("read"), b"precious");
-    assert!(fs::symlink_metadata(&path).expect("stat").file_type().is_symlink(), "left as it was");
+    assert!(
+        fs::symlink_metadata(&path)
+            .expect("stat")
+            .file_type()
+            .is_symlink(),
+        "left as it was"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -485,11 +612,16 @@ async fn a_chunk_replaced_by_a_link_is_reported_and_the_link_is_never_followed()
 
 #[tokio::test]
 async fn every_way_of_damaging_a_snapshot_file_is_detected_in_both_modes() {
-    let damages: [(&str, fn(&Path)); 5] = [
+    type Damage = fn(&Path);
+    let damages: [(&str, Damage); 5] = [
         ("a flipped bit", |path| flip_a_byte(path, 200)),
         ("a truncated file", |path| truncate_by(path, 30)),
-        ("an emptied file", |path| fs::write(path, b"").expect("write")),
-        ("garbage", |path| fs::write(path, b"this is not a snapshot").expect("write")),
+        ("an emptied file", |path| {
+            fs::write(path, b"").expect("write")
+        }),
+        ("garbage", |path| {
+            fs::write(path, b"this is not a snapshot").expect("write")
+        }),
         ("an extended file", |path| {
             let mut bytes = fs::read(path).expect("read");
             bytes.extend_from_slice(b"more");
@@ -502,11 +634,24 @@ async fn every_way_of_damaging_a_snapshot_file_is_detected_in_both_modes() {
 
         for read_data in [false, true] {
             let report = env.check(read_data).await;
-            assert_eq!(report.count(FindingKind::SnapshotDamaged), 1, "{what}: {:?}", report.findings);
+            assert_eq!(
+                report.count(FindingKind::SnapshotDamaged),
+                1,
+                "{what}: {:?}",
+                report.findings
+            );
             assert_eq!(report.errors, 1, "{what}");
-            assert_eq!((report.stats.snapshots, report.stats.snapshots_damaged), (1, 1), "{what}");
+            assert_eq!(
+                (report.stats.snapshots, report.stats.snapshots_damaged),
+                (1, 1),
+                "{what}"
+            );
             let finding = &report.findings[0];
-            assert_eq!(finding.subject, format!("snapshots/{}", second.snapshot), "{what}");
+            assert_eq!(
+                finding.subject,
+                format!("snapshots/{}", second.snapshot),
+                "{what}"
+            );
             assert!(!finding.detail.is_empty(), "{what}");
             assert_ne!(first.snapshot, second.snapshot);
         }
@@ -522,11 +667,28 @@ async fn the_chunks_of_an_unreadable_snapshot_look_like_orphans_and_the_report_s
     let report = env.check(true).await;
     assert_eq!(report.errors, 1);
     assert!(!report.stats.orphans_exact);
-    assert_eq!(report.stats.orphans, extra.len() as u64, "only the damaged snapshot needed these");
+    assert_eq!(
+        report.stats.orphans,
+        extra.len() as u64,
+        "only the damaged snapshot needed these"
+    );
     assert_eq!(report.count(FindingKind::OrphanObject), extra.len() as u64);
-    let orphan = report.findings.iter().find(|f| f.kind == FindingKind::OrphanObject).expect("an orphan");
-    assert!(orphan.detail.contains("may belong to a snapshot that could not be read"), "{}", orphan.detail);
-    assert_eq!(report.stats.chunks_missing, 0, "nothing is missing, only unreferenced");
+    let orphan = report
+        .findings
+        .iter()
+        .find(|f| f.kind == FindingKind::OrphanObject)
+        .expect("an orphan");
+    assert!(
+        orphan
+            .detail
+            .contains("may belong to a snapshot that could not be read"),
+        "{}",
+        orphan.detail
+    );
+    assert_eq!(
+        report.stats.chunks_missing, 0,
+        "nothing is missing, only unreferenced"
+    );
     assert_eq!(report.stats.objects_damaged, 0);
 }
 
@@ -534,19 +696,40 @@ async fn the_chunks_of_an_unreadable_snapshot_look_like_orphans_and_the_report_s
 async fn a_snapshot_from_another_repository_or_swapped_under_another_name_is_damaged() {
     let (env, first, second) = two_snapshots().await;
     // The second snapshot's file, authentic in itself, under the first one's name.
-    fs::copy(env.snapshot_file(&second.snapshot), env.snapshot_file(&first.snapshot)).expect("copy");
+    fs::copy(
+        env.snapshot_file(&second.snapshot),
+        env.snapshot_file(&first.snapshot),
+    )
+    .expect("copy");
     let report = env.check(false).await;
-    assert_eq!(report.count(FindingKind::SnapshotDamaged), 1, "{:?}", report.findings);
-    assert_eq!(report.findings[0].subject, format!("snapshots/{}", first.snapshot));
+    assert_eq!(
+        report.count(FindingKind::SnapshotDamaged),
+        1,
+        "{:?}",
+        report.findings
+    );
+    assert_eq!(
+        report.findings[0].subject,
+        format!("snapshots/{}", first.snapshot)
+    );
 
     // A snapshot of a different repository, with a different key.
     let (env, _first, second) = two_snapshots().await;
     let stranger = Env::new().await;
     first_tree(&stranger.path("src"));
     let foreign = stranger.backup().await;
-    fs::copy(stranger.snapshot_file(&foreign.snapshot), env.snapshot_file(&second.snapshot)).expect("copy");
+    fs::copy(
+        stranger.snapshot_file(&foreign.snapshot),
+        env.snapshot_file(&second.snapshot),
+    )
+    .expect("copy");
     let report = env.check(false).await;
-    assert_eq!(report.count(FindingKind::SnapshotDamaged), 1, "{:?}", report.findings);
+    assert_eq!(
+        report.count(FindingKind::SnapshotDamaged),
+        1,
+        "{:?}",
+        report.findings
+    );
 }
 
 #[tokio::test]
@@ -573,7 +756,12 @@ async fn missing_directories_are_errors_and_the_check_goes_on() {
         let (env, _first, _second) = two_snapshots().await;
         fs::remove_dir_all(env.repo_path(name)).expect("remove");
         let report = env.check(false).await;
-        assert_eq!(report.count(FindingKind::MissingDirectory), 1, "{name}: {:?}", report.findings);
+        assert_eq!(
+            report.count(FindingKind::MissingDirectory),
+            1,
+            "{name}: {:?}",
+            report.findings
+        );
         assert_eq!(report.findings[0].subject, name);
         assert_eq!(report.findings[0].detail, "the directory does not exist");
         assert!(!report.is_ok(), "{name}");
@@ -582,7 +770,10 @@ async fn missing_directories_are_errors_and_the_check_goes_on() {
     fs::remove_dir_all(env.repo_path("snapshots")).expect("remove");
     fs::write(env.repo_path("snapshots"), b"not a directory").expect("write");
     let report = env.check(false).await;
-    assert_eq!(report.findings[0].detail, "a file where a directory is required");
+    assert_eq!(
+        report.findings[0].detail,
+        "a file where a directory is required"
+    );
     assert_eq!(report.stats.snapshots, 0);
 }
 
@@ -598,19 +789,31 @@ async fn strays_leftovers_stale_locks_and_bad_key_files_are_warnings_and_are_lef
     fs::write(&stray, b"not ours").expect("write");
     fs::write(&temp_a, b"half a snapshot").expect("write");
     fs::write(&temp_b, b"half a chunk").expect("write");
-    fs::write(&lock, b"kind=shared\npid=424242\ncreated_at_unix=1700000000\n").expect("write");
+    fs::write(
+        &lock,
+        b"kind=shared\npid=424242\ncreated_at_unix=1700000000\n",
+    )
+    .expect("write");
     fs::write(&key, b"garbage").expect("write");
 
     for read_data in [false, true] {
         let report = env.check(read_data).await;
-        assert!(report.is_ok(), "warnings are not errors: {:?}", report.findings);
+        assert!(
+            report.is_ok(),
+            "warnings are not errors: {:?}",
+            report.findings
+        );
         assert_eq!(report.errors, 0);
         assert_eq!(report.warnings, 5, "{:?}", report.findings);
         assert_eq!(report.count(FindingKind::UnexpectedFile), 1);
         assert_eq!(report.count(FindingKind::LeftoverTempFile), 2);
         assert_eq!(report.count(FindingKind::LockPresent), 1);
         assert_eq!(report.count(FindingKind::KeyFileInvalid), 1);
-        let held = report.findings.iter().find(|f| f.kind == FindingKind::LockPresent).expect("lock");
+        let held = report
+            .findings
+            .iter()
+            .find(|f| f.kind == FindingKind::LockPresent)
+            .expect("lock");
         assert_eq!(
             held.detail,
             "a shared lock held by process 424242, created at unix time 1700000000"
@@ -627,9 +830,17 @@ async fn a_stale_exclusive_lock_stops_the_check_and_is_not_removed() {
     let lock = env.repo_path("locks/0123456789abcdef0123456789abcdef.lock");
     fs::write(&lock, b"kind=exclusive\npid=1\n").expect("write");
 
-    let err = env.repo.check(&env.keys, CheckOptions::default()).await.expect_err("must refuse");
+    let err = env
+        .repo
+        .check(&env.keys, CheckOptions::default())
+        .await
+        .expect_err("must refuse");
     assert!(matches!(err, Error::Locked { .. }), "{err}");
-    assert!(err.to_string().contains("locks/0123456789abcdef0123456789abcdef.lock"), "{err}");
+    assert!(
+        err.to_string()
+            .contains("locks/0123456789abcdef0123456789abcdef.lock"),
+        "{err}"
+    );
     assert!(lock.exists());
 }
 
@@ -640,7 +851,9 @@ async fn unreferenced_objects_are_orphans_and_only_warnings() {
     let mut stored = 0;
     let mut ids = Vec::new();
     for seed in 0..3_u64 {
-        let put = chunks.put(&pseudo_random(2000 + seed as usize, 50 + seed)).expect("put");
+        let put = chunks
+            .put(&pseudo_random(2000 + seed as usize, 50 + seed))
+            .expect("put");
         stored += chunks.stored_len(&put.id).expect("length");
         ids.push(put.id);
     }
@@ -648,13 +861,22 @@ async fn unreferenced_objects_are_orphans_and_only_warnings() {
     for read_data in [false, true] {
         let report = env.check(read_data).await;
         assert!(report.is_ok());
-        assert_eq!((report.stats.orphans, report.stats.orphan_bytes), (3, stored));
+        assert_eq!(
+            (report.stats.orphans, report.stats.orphan_bytes),
+            (3, stored)
+        );
         assert_eq!(report.count(FindingKind::OrphanObject), 3);
         assert!(report.stats.orphans_exact);
         let subjects: BTreeSet<&str> = report.findings.iter().map(|f| f.subject.as_str()).collect();
         let expected: Vec<String> = ids.iter().map(object_subject).collect();
-        assert_eq!(subjects, expected.iter().map(String::as_str).collect::<BTreeSet<_>>());
-        assert!(report.findings.iter().all(|f| f.detail == "no snapshot refers to this object"));
+        assert_eq!(
+            subjects,
+            expected.iter().map(String::as_str).collect::<BTreeSet<_>>()
+        );
+        assert!(report
+            .findings
+            .iter()
+            .all(|f| f.detail == "no snapshot refers to this object"));
     }
 }
 
@@ -667,7 +889,13 @@ async fn a_damaged_orphan_is_an_error_because_a_later_backup_would_reuse_it() {
 
     let report = env.check(true).await;
     assert_eq!(kinds(&report), [FindingKind::ChunkCorrupt]);
-    assert!(report.findings[0].detail.contains("a later backup would reuse it"), "{}", report.findings[0].detail);
+    assert!(
+        report.findings[0]
+            .detail
+            .contains("a later backup would reuse it"),
+        "{}",
+        report.findings[0].detail
+    );
     assert_eq!(report.stats.orphans, 1);
     assert!(report.affected.is_empty(), "no snapshot is affected");
 }
@@ -681,7 +909,9 @@ async fn the_number_of_listed_findings_is_limited_but_the_counts_are_exact_and_e
     let (env, first, _second) = two_snapshots().await;
     let chunks = env.repo.chunk_store(&env.keys).expect("chunk store");
     for seed in 0..20_u64 {
-        chunks.put(&pseudo_random(1500 + seed as usize, 200 + seed)).expect("put");
+        chunks
+            .put(&pseudo_random(1500 + seed as usize, 200 + seed))
+            .expect("put");
     }
     let random = env.chunks_of(&first.snapshot, "random.bin").await;
     fs::remove_file(env.chunk_file(&random[0].0)).expect("remove");
@@ -692,8 +922,15 @@ async fn the_number_of_listed_findings_is_limited_but_the_counts_are_exact_and_e
     };
     let report = env.check_with(options).await;
     assert_eq!(report.findings.len(), 4);
-    assert_eq!(kinds(&report)[0], FindingKind::ChunkMissing, "the error comes first");
-    assert_eq!((report.errors, report.warnings, report.suppressed), (1, 20, 17));
+    assert_eq!(
+        kinds(&report)[0],
+        FindingKind::ChunkMissing,
+        "the error comes first"
+    );
+    assert_eq!(
+        (report.errors, report.warnings, report.suppressed),
+        (1, 20, 17)
+    );
     assert_eq!(report.count(FindingKind::OrphanObject), 20);
     assert_eq!(report.stats.orphans, 20);
 
@@ -735,7 +972,10 @@ async fn the_report_does_not_depend_on_the_number_of_threads() {
         assert!(single.errors >= 8, "{} errors", single.errors);
         for jobs in [2, 4, 7] {
             let other = run(jobs, read_data).await;
-            assert_eq!(other.findings, single.findings, "{jobs} threads, read_data={read_data}");
+            assert_eq!(
+                other.findings, single.findings,
+                "{jobs} threads, read_data={read_data}"
+            );
             assert_eq!(other.stats, single.stats, "{jobs} threads");
             assert_eq!(other.affected, single.affected, "{jobs} threads");
             assert_eq!(other.counts, single.counts, "{jobs} threads");
@@ -751,9 +991,18 @@ async fn a_cancelled_check_produces_no_report_and_releases_its_lock() {
         ..CheckOptions::default()
     };
     options.cancel.cancel();
-    let err = env.repo.check(&env.keys, options).await.expect_err("cancelled");
+    let err = env
+        .repo
+        .check(&env.keys, options)
+        .await
+        .expect_err("cancelled");
     assert!(matches!(err, Error::CheckCancelled), "{err}");
-    assert_eq!(fs::read_dir(env.repo_path("locks")).expect("read_dir").count(), 0);
+    assert_eq!(
+        fs::read_dir(env.repo_path("locks"))
+            .expect("read_dir")
+            .count(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -761,9 +1010,16 @@ async fn the_wrong_keys_make_every_snapshot_unreadable_rather_than_the_check_fai
     let (env, _first, _second) = two_snapshots().await;
     let stranger = Env::new().await;
 
-    let report = env.repo.check(&stranger.keys, CheckOptions::default()).await.expect("check");
+    let report = env
+        .repo
+        .check(&stranger.keys, CheckOptions::default())
+        .await
+        .expect("check");
     assert_eq!(report.count(FindingKind::SnapshotDamaged), 2);
     assert_eq!(report.stats.snapshots, 0);
     assert!(!report.stats.orphans_exact);
-    assert_eq!(report.stats.orphans, report.stats.objects, "with no readable snapshot, all look unused");
+    assert_eq!(
+        report.stats.orphans, report.stats.objects,
+        "with no readable snapshot, all look unused"
+    );
 }

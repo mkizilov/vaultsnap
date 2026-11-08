@@ -5,8 +5,9 @@ it, under a directory chosen by the caller. This document is the specification o
 does and does not guarantee. The command line is in [`CLI.md`](CLI.md#restore); the threat model
 is in [`SECURITY.md`](SECURITY.md#restore-safety).
 
-Everything described here is **implemented but has not been compiled or run** (no Rust toolchain
-was available where it was written; see the README's known gaps).
+Everything described here is implemented and its tests pass on macOS with Rust 1.94.1;
+[`RELIABILITY.md`](RELIABILITY.md) says exactly what has been run and what has not (Linux, Windows,
+and the Ctrl-C and SIGTERM handlers of the binary have not).
 
 ## What a restore does
 

@@ -1,0 +1,119 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the binaries, packs them with the documentation
+# (scripts/package.sh), and publishes a GitHub release with checksums. Running the workflow by hand
+# builds and uploads the packages as workflow artifacts without publishing anything.
+# The process is described in docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "2"
+
+jobs:
+  verify:
+    name: verify the tag and the lock file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag, the version, and the lock file agree
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          echo "version in Cargo.toml: $version"
+          if [ ! -f Cargo.lock ]; then
+            echo "Cargo.lock is not committed: a release builds from locked dependencies" >&2
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version $version in Cargo.toml" >&2
+            exit 1
+          fi
+          grep -q "^## \[$version\]" CHANGELOG.md || {
+            echo "CHANGELOG.md has no section for $version" >&2
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then exit 1; fi
+          }
+
+  test:
+    name: tests
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read the pinned toolchain
+        shell: bash
+        run: echo "TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  build:
+    name: ${{ matrix.target }}
+    needs: [verify, test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read the pinned toolchain
+        shell: bash
+        run: echo "TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Package
+        run: scripts/package.sh ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vaultsnap-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: One checksum file for everything
+        run: |
+          cd artifacts
+          cat *.sha256 > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" artifacts/*.tar.gz artifacts/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" --title "VaultSnap ${GITHUB_REF_NAME}" --generate-notes

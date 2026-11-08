@@ -62,8 +62,7 @@ impl FileReader {
             ChangePolicy::Accept => Ok(()),
             ChangePolicy::Fail => Err(io::Error::other(Error::FileChanged {
                 path: self.path.clone(),
-                reason: "its size or modification time changed while it was being read"
-                    .to_owned(),
+                reason: "its size or modification time changed while it was being read".to_owned(),
             })),
         }
     }
@@ -93,7 +92,9 @@ impl fmt::Debug for FileReader {
 
 pub(super) fn open(scanner: &Scanner, entry: &Entry) -> Result<FileReader> {
     if entry.kind != EntryKind::File {
-        return Err(Error::InvalidArgument("only regular file entries can be opened"));
+        return Err(Error::InvalidArgument(
+            "only regular file entries can be opened",
+        ));
     }
     let path = if entry.path.as_os_str().is_empty() {
         scanner.root().to_path_buf()

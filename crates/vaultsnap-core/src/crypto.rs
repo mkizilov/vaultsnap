@@ -112,7 +112,11 @@ pub enum KeyPurpose {
 
 impl KeyPurpose {
     /// Every purpose.
-    pub const ALL: [Self; 3] = [Self::ContentId, Self::DataEncryption, Self::MetadataEncryption];
+    pub const ALL: [Self; 3] = [
+        Self::ContentId,
+        Self::DataEncryption,
+        Self::MetadataEncryption,
+    ];
 
     /// The HKDF `info` string. These labels are part of the on-disk format and must never change
     /// or be reused for another purpose.
@@ -138,8 +142,8 @@ pub fn derive_key(master: &[u8; KEY_LEN], purpose: KeyPurpose) -> Result<SecretK
 /// (data that is authenticated but not encrypted). Returns `nonce || ciphertext || tag`; the
 /// 192-bit nonce is random per call, which is safe at any realistic volume.
 pub fn seal(key: &[u8; KEY_LEN], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = XChaCha20Poly1305::new_from_slice(key)
-        .map_err(|_| Error::Crypto("invalid key length"))?;
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(key).map_err(|_| Error::Crypto("invalid key length"))?;
     let nonce = random_bytes::<NONCE_LEN>()?;
     let ciphertext = cipher
         .encrypt(
@@ -162,8 +166,8 @@ pub fn open(key: &[u8; KEY_LEN], aad: &[u8], sealed: &[u8]) -> Result<Zeroizing<
     if sealed.len() < NONCE_LEN + TAG_LEN {
         return Err(Error::Decryption);
     }
-    let cipher = XChaCha20Poly1305::new_from_slice(key)
-        .map_err(|_| Error::Crypto("invalid key length"))?;
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(key).map_err(|_| Error::Crypto("invalid key length"))?;
     let (nonce, ciphertext) = sealed.split_at(NONCE_LEN);
     let plaintext = cipher
         .decrypt(
@@ -225,11 +229,20 @@ mod tests {
     fn a_wrong_key_wrong_aad_or_truncation_is_rejected() {
         let sealed = seal(&KEY, b"aad", b"secret").expect("seal");
         let other = [8_u8; KEY_LEN];
-        assert!(matches!(open(&other, b"aad", &sealed), Err(Error::Decryption)));
-        assert!(matches!(open(&KEY, b"AAD", &sealed), Err(Error::Decryption)));
+        assert!(matches!(
+            open(&other, b"aad", &sealed),
+            Err(Error::Decryption)
+        ));
+        assert!(matches!(
+            open(&KEY, b"AAD", &sealed),
+            Err(Error::Decryption)
+        ));
         assert!(matches!(open(&KEY, b"", &sealed), Err(Error::Decryption)));
         for len in [0, 1, NONCE_LEN, NONCE_LEN + TAG_LEN - 1, sealed.len() - 1] {
-            assert!(matches!(open(&KEY, b"aad", &sealed[..len]), Err(Error::Decryption)), "{len}");
+            assert!(
+                matches!(open(&KEY, b"aad", &sealed[..len]), Err(Error::Decryption)),
+                "{len}"
+            );
         }
     }
 
@@ -241,7 +254,10 @@ mod tests {
                 let mut tampered = sealed.clone();
                 tampered[index] ^= 1 << bit;
                 let result = open(&KEY, b"aad", &tampered);
-                assert!(matches!(result, Err(Error::Decryption)), "byte {index} bit {bit}");
+                assert!(
+                    matches!(result, Err(Error::Decryption)),
+                    "byte {index} bit {bit}"
+                );
             }
         }
     }
@@ -276,21 +292,36 @@ mod tests {
         let data_key = derive_key(&master, KeyPurpose::DataEncryption).expect("derive");
         let meta_key = derive_key(&master, KeyPurpose::MetadataEncryption).expect("derive");
         let sealed = seal(&data_key, b"", b"chunk").expect("seal");
-        assert!(matches!(open(&meta_key, b"", &sealed), Err(Error::Decryption)));
+        assert!(matches!(
+            open(&meta_key, b"", &sealed),
+            Err(Error::Decryption)
+        ));
     }
 
     #[test]
     fn wrapping_key_depends_on_passphrase_salt_and_parameters() {
         let salt = [9_u8; SALT_LEN];
         let base = derive_wrapping_key(b"pass", &salt, &fast()).expect("derive");
-        assert_eq!(*base, *derive_wrapping_key(b"pass", &salt, &fast()).expect("derive"));
-        assert_ne!(*base, *derive_wrapping_key(b"Pass", &salt, &fast()).expect("derive"));
-        assert_ne!(*base, *derive_wrapping_key(b"pass", &[8; SALT_LEN], &fast()).expect("derive"));
+        assert_eq!(
+            *base,
+            *derive_wrapping_key(b"pass", &salt, &fast()).expect("derive")
+        );
+        assert_ne!(
+            *base,
+            *derive_wrapping_key(b"Pass", &salt, &fast()).expect("derive")
+        );
+        assert_ne!(
+            *base,
+            *derive_wrapping_key(b"pass", &[8; SALT_LEN], &fast()).expect("derive")
+        );
         let slower = KdfParams {
             t_cost: 2,
             ..fast()
         };
-        assert_ne!(*base, *derive_wrapping_key(b"pass", &salt, &slower).expect("derive"));
+        assert_ne!(
+            *base,
+            *derive_wrapping_key(b"pass", &salt, &slower).expect("derive")
+        );
     }
 
     #[test]
@@ -324,7 +355,10 @@ mod tests {
             },
         ];
         for params in bad {
-            assert!(matches!(params.validate(), Err(Error::InvalidKdfParams(_))), "{params:?}");
+            assert!(
+                matches!(params.validate(), Err(Error::InvalidKdfParams(_))),
+                "{params:?}"
+            );
         }
     }
 }

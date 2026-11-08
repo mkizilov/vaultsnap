@@ -4,10 +4,10 @@
 what it examines, what it can and cannot find, how to read its report, and **what to do about each
 kind of failure**.
 
-> Everything here is implemented but has not been compiled or run (no Rust toolchain was available
-> where it was written; see the README's known gaps). The tests that deliberately damage
-> repositories and check the reports are in `crates/vaultsnap-core/tests/check.rs` and
-> `crates/vaultsnap-cli/tests/check.rs`.
+> The tests that deliberately damage repositories and check the reports are in
+> `crates/vaultsnap-core/tests/check.rs` and `crates/vaultsnap-cli/tests/check.rs`; they pass on
+> macOS with Rust 1.94.1. [`RELIABILITY.md`](RELIABILITY.md) says exactly what has been run and what
+> has not (Linux, Windows, and non-local storage have not).
 
 ## The promise: a check never changes anything
 

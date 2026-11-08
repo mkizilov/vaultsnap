@@ -294,7 +294,10 @@ mod tests {
     #[test]
     fn chunks_of_every_size_round_trip() {
         let fx = Fixture::new();
-        for (seed, len) in [0, 1, 2, 63, 64, 1000, 65_536, 1 << 20].into_iter().enumerate() {
+        for (seed, len) in [0, 1, 2, 63, 64, 1000, 65_536, 1 << 20]
+            .into_iter()
+            .enumerate()
+        {
             let data = pseudo_random(len, seed as u64 + 1);
             let put = fx.chunks.put(&data).expect("put");
             assert!(put.is_new(), "len {len}");
@@ -319,9 +322,14 @@ mod tests {
 
     #[test]
     fn objects_are_listed_by_name_in_id_order_and_everything_else_is_ignored() {
-        let fx = Fx::new();
+        let fx = Fixture::new();
         let mut ids: Vec<ChunkId> = (0..6_u64)
-            .map(|seed| fx.chunks.put(&pseudo_random(300 + seed as usize, seed)).expect("put").id)
+            .map(|seed| {
+                fx.chunks
+                    .put(&pseudo_random(300 + seed as usize, seed))
+                    .expect("put")
+                    .id
+            })
             .collect();
         ids.sort();
         let data = fx.dir.path().join("data");
@@ -331,7 +339,11 @@ mod tests {
         let shard = data.join(&ids[0].to_hex()[..2]);
         fs::write(shard.join(".tmp-0011223344556677"), b"x").expect("write");
         fs::write(shard.join("short"), b"x").expect("write");
-        let misplaced = if ids[0].to_hex().starts_with("ff") { "00" } else { "ff" };
+        let misplaced = if ids[0].to_hex().starts_with("ff") {
+            "00"
+        } else {
+            "ff"
+        };
         fs::create_dir_all(data.join(misplaced)).expect("mkdir");
         fs::write(data.join(misplaced).join(ids[0].to_hex()), b"x").expect("write");
 
@@ -345,21 +357,28 @@ mod tests {
 
     #[test]
     fn an_empty_store_has_no_objects_and_a_missing_data_directory_is_an_error() {
-        let fx = Fx::new();
+        let fx = Fixture::new();
         assert!(fx.chunks.objects().expect("list").is_empty());
         fs::remove_dir(fx.dir.path().join("data")).expect("remove");
-        assert!(fx.chunks.objects().is_err(), "a listing that cannot be complete is not given");
+        assert!(
+            fx.chunks.objects().is_err(),
+            "a listing that cannot be complete is not given"
+        );
     }
 
     #[test]
     fn removing_an_object_removes_exactly_that_object() {
-        let fx = Fx::new();
+        let fx = Fixture::new();
         let first = fx.chunks.put(&pseudo_random(500, 1)).expect("put").id;
         let second = fx.chunks.put(&pseudo_random(500, 2)).expect("put").id;
         fx.chunks.remove(&first).expect("remove");
         assert!(!fx.chunks.contains(&first).expect("contains"));
         assert!(fx.chunks.contains(&second).expect("contains"));
-        assert!(fx.chunks.remove(&first).expect_err("already gone").is_not_found());
+        assert!(fx
+            .chunks
+            .remove(&first)
+            .expect_err("already gone")
+            .is_not_found());
     }
 
     #[test]
@@ -369,7 +388,10 @@ mod tests {
         let put = fx.chunks.put(&data).expect("put");
         let info = fx.chunks.peek(&put.id).expect("peek");
         assert_eq!(info.plaintext_len, 5000);
-        assert_eq!(info.stored_len, fx.chunks.stored_len(&put.id).expect("length"));
+        assert_eq!(
+            info.stored_len,
+            fx.chunks.stored_len(&put.id).expect("length")
+        );
         assert_eq!(info.compression, Compression::Uncompressed);
     }
 
@@ -386,11 +408,20 @@ mod tests {
         let mut flipped = original.clone();
         flipped[original.len() / 2] ^= 1;
         fs::write(&path, flipped).expect("write");
-        assert!(fx.chunks.peek(&put.id).is_ok(), "a flipped payload bit needs the full read");
-        assert!(matches!(fx.chunks.get(&put.id), Err(Error::CorruptObject { .. })));
+        assert!(
+            fx.chunks.peek(&put.id).is_ok(),
+            "a flipped payload bit needs the full read"
+        );
+        assert!(matches!(
+            fx.chunks.get(&put.id),
+            Err(Error::CorruptObject { .. })
+        ));
 
         fs::write(&path, &original[..original.len() - 1]).expect("write");
-        assert!(matches!(fx.chunks.peek(&put.id), Err(Error::CorruptObject { .. })));
+        assert!(matches!(
+            fx.chunks.peek(&put.id),
+            Err(Error::CorruptObject { .. })
+        ));
 
         let mut newer = original;
         newer[4] = 9;
@@ -459,8 +490,16 @@ mod tests {
         let data = pseudo_random(4000, 5);
         let id = fx.chunks.chunk_id(&data);
         assert_eq!(fx.reopen().chunk_id(&data), id, "stable for one repository");
-        assert_ne!(other.chunks.chunk_id(&data), id, "differs between repositories");
-        assert_ne!(*id.as_bytes(), *blake3::hash(&data).as_bytes(), "not a plain hash");
+        assert_ne!(
+            other.chunks.chunk_id(&data),
+            id,
+            "differs between repositories"
+        );
+        assert_ne!(
+            *id.as_bytes(),
+            *blake3::hash(&data).as_bytes(),
+            "not a plain hash"
+        );
     }
 
     #[test]
@@ -468,7 +507,10 @@ mod tests {
         let fx = Fixture::new();
         let text = fx.chunks.put(&compressible(200_000)).expect("put");
         match text.outcome {
-            PutOutcome::Stored { object_len, compression } => {
+            PutOutcome::Stored {
+                object_len,
+                compression,
+            } => {
                 assert_eq!(compression, Compression::Zstd);
                 assert!(object_len < 10_000, "{object_len}");
             }
@@ -477,7 +519,10 @@ mod tests {
         let noise = pseudo_random(50_000, 6);
         let put = fx.chunks.put(&noise).expect("put");
         match put.outcome {
-            PutOutcome::Stored { object_len, compression } => {
+            PutOutcome::Stored {
+                object_len,
+                compression,
+            } => {
                 assert_eq!(compression, Compression::Uncompressed);
                 assert_eq!(object_len, 12 + 24 + 50_000 + 16);
             }
@@ -568,7 +613,11 @@ mod tests {
         for case in cases {
             fs::write(&path, &case).expect("write");
             let result = fx.chunks.get(&put.id);
-            assert!(matches!(result, Err(Error::CorruptObject { .. })), "{} bytes: {result:?}", case.len());
+            assert!(
+                matches!(result, Err(Error::CorruptObject { .. })),
+                "{} bytes: {result:?}",
+                case.len()
+            );
         }
     }
 
@@ -577,11 +626,17 @@ mod tests {
         let fx = Fixture::new();
         let missing = fx.chunks.chunk_id(b"never stored");
         assert!(!fx.chunks.contains(&missing).expect("contains"));
-        assert!(matches!(fx.chunks.get(&missing), Err(Error::ChunkNotFound(_))));
+        assert!(matches!(
+            fx.chunks.get(&missing),
+            Err(Error::ChunkNotFound(_))
+        ));
 
         let put = fx.chunks.put(b"stored then removed").expect("put");
         fs::remove_file(fx.path_of(&put.id)).expect("remove");
-        assert!(matches!(fx.chunks.get(&put.id), Err(Error::ChunkNotFound(_))));
+        assert!(matches!(
+            fx.chunks.get(&put.id),
+            Err(Error::ChunkNotFound(_))
+        ));
     }
 
     #[test]
@@ -590,7 +645,10 @@ mod tests {
         let a = fx.chunks.put(&pseudo_random(1000, 11)).expect("put");
         let b = fx.chunks.put(&pseudo_random(1000, 12)).expect("put");
         fs::copy(fx.path_of(&a.id), fx.path_of(&b.id)).expect("copy");
-        assert!(matches!(fx.chunks.get(&b.id), Err(Error::CorruptObject { .. })));
+        assert!(matches!(
+            fx.chunks.get(&b.id),
+            Err(Error::CorruptObject { .. })
+        ));
         assert!(fx.chunks.get(&a.id).is_ok());
     }
 
@@ -600,7 +658,10 @@ mod tests {
         let put = fx.chunks.put(&pseudo_random(1000, 13)).expect("put");
         let intruder_keys = RepositoryKeys::generate().expect("generate");
         let intruder = ChunkStore::new(Store::local(fx.dir.path()), &intruder_keys).expect("store");
-        assert!(matches!(intruder.get(&put.id), Err(Error::CorruptObject { .. })));
+        assert!(matches!(
+            intruder.get(&put.id),
+            Err(Error::CorruptObject { .. })
+        ));
     }
 
     #[test]
@@ -613,8 +674,14 @@ mod tests {
         damaged[40] ^= 0xff;
         fs::write(&path, &damaged).expect("write");
 
-        assert_eq!(fx.chunks.put(&data).expect("put").outcome, PutOutcome::Duplicate);
-        assert!(matches!(fx.chunks.get(&put.id), Err(Error::CorruptObject { .. })));
+        assert_eq!(
+            fx.chunks.put(&data).expect("put").outcome,
+            PutOutcome::Duplicate
+        );
+        assert!(matches!(
+            fx.chunks.get(&put.id),
+            Err(Error::CorruptObject { .. })
+        ));
     }
 
     #[test]
@@ -641,7 +708,9 @@ mod tests {
 
         let fx = Fixture::new();
         let put = fx.chunks.put(&pseudo_random(100, 15)).expect("put");
-        let mode = |path: &std::path::Path| fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+        let mode = |path: &std::path::Path| {
+            fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+        };
         let file = fx.path_of(&put.id);
         assert_eq!(mode(&file), 0o600);
         assert_eq!(mode(file.parent().expect("shard")), 0o700);
@@ -655,19 +724,28 @@ mod tests {
             let handles: Vec<_> = (0..16)
                 .map(|_| scope.spawn(|| fx.reopen().put(&data).expect("put")))
                 .collect();
-            handles.into_iter().map(|h| h.join().expect("thread panicked")).collect()
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("thread panicked"))
+                .collect()
         });
         let stored = results.iter().filter(|r| r.is_new()).count();
         assert_eq!(stored, 1, "{results:?}");
         assert!(results.iter().all(|r| r.id == results[0].id));
-        assert_eq!(fx.files(), [results[0].id.object_name()], "no stray temporary files");
+        assert_eq!(
+            fx.files(),
+            [results[0].id.object_name()],
+            "no stray temporary files"
+        );
         assert_eq!(fx.chunks.get(&results[0].id).expect("get"), data);
     }
 
     #[test]
     fn concurrent_puts_of_overlapping_sets_store_each_chunk_once() {
         let fx = Fixture::new();
-        let chunks: Vec<Vec<u8>> = (0..24).map(|i| pseudo_random(3000 + i, 100 + i as u64)).collect();
+        let chunks: Vec<Vec<u8>> = (0..24)
+            .map(|i| pseudo_random(3000 + i, 100 + i as u64))
+            .collect();
         let stored_total: usize = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..8)
                 .map(|worker| {
@@ -681,13 +759,18 @@ mod tests {
                     })
                 })
                 .collect();
-            let counts = handles.into_iter().map(|h| h.join().expect("thread panicked"));
+            let counts = handles
+                .into_iter()
+                .map(|h| h.join().expect("thread panicked"));
             counts.sum::<usize>()
         });
         assert_eq!(stored_total, chunks.len());
         assert_eq!(fx.files().len(), chunks.len());
         for chunk in &chunks {
-            assert_eq!(&fx.chunks.get(&fx.chunks.chunk_id(chunk)).expect("get"), chunk);
+            assert_eq!(
+                &fx.chunks.get(&fx.chunks.chunk_id(chunk)).expect("get"),
+                chunk
+            );
         }
     }
 

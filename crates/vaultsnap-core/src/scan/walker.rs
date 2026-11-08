@@ -8,9 +8,7 @@ use std::path::{Path, PathBuf};
 
 use super::entry::{Entry, EntryKind, Metadata, ScanItem, ScanStats, SkipReason, Skipped};
 use super::filter::Filter;
-use super::options::{
-    ErrorPolicy, HardLinkPolicy, ScanOptions, SpecialFilePolicy, SymlinkPolicy,
-};
+use super::options::{ErrorPolicy, HardLinkPolicy, ScanOptions, SpecialFilePolicy, SymlinkPolicy};
 use super::reader::{self, FileReader};
 use crate::error::{Error, Result};
 
@@ -33,8 +31,8 @@ impl Scanner {
     /// pattern is invalid. Does not walk anything yet.
     pub fn new(root: impl AsRef<Path>, options: ScanOptions) -> Result<Self> {
         let given = root.as_ref();
-        let root =
-            fs::canonicalize(given).map_err(|err| Error::io("resolve the scan root", given, err))?;
+        let root = fs::canonicalize(given)
+            .map_err(|err| Error::io("resolve the scan root", given, err))?;
         let meta = fs::symlink_metadata(&root)
             .map_err(|err| Error::io("inspect the scan root", &root, err))?;
         let filter = Filter::new(&options.includes, &options.excludes)?;
@@ -220,7 +218,10 @@ impl Scan<'_> {
             if let Some((target_meta, target_canonical)) = resolve_symlink(scanner, &abs) {
                 let target_node = Node::of(&target_meta.file_type());
                 let loops = target_node == Node::Directory
-                    && self.frames.iter().any(|frame| frame.canonical == target_canonical);
+                    && self
+                        .frames
+                        .iter()
+                        .any(|frame| frame.canonical == target_canonical);
                 if !loops {
                     meta = target_meta;
                     node = target_node;

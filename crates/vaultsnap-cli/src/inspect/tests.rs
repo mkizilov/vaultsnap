@@ -58,7 +58,12 @@ fn attributes(size: u64, mode: u32) -> Attributes {
     }
 }
 
-fn entry(parent: Option<u32>, name: &[u8], kind: NodeKind, attributes: Attributes) -> ManifestEntry {
+fn entry(
+    parent: Option<u32>,
+    name: &[u8],
+    kind: NodeKind,
+    attributes: Attributes,
+) -> ManifestEntry {
     ManifestEntry {
         parent,
         name: name.to_vec(),
@@ -82,22 +87,33 @@ fn sample_manifest() -> Manifest {
         entry(
             Some(0),
             b"a b.txt",
-            NodeKind::File { chunks: vec![chunk(1, 5)] },
+            NodeKind::File {
+                chunks: vec![chunk(1, 5)],
+            },
             attributes(5, 0o644),
         ),
         entry(
             Some(0),
             b"new\nline",
-            NodeKind::File { chunks: vec![chunk(2, 3)] },
+            NodeKind::File {
+                chunks: vec![chunk(2, 3)],
+            },
             attributes(3, 0o600),
         ),
         entry(
             Some(0),
             b"link",
-            NodeKind::Symlink { target: b"a b.txt".to_vec() },
+            NodeKind::Symlink {
+                target: b"a b.txt".to_vec(),
+            },
             attributes(7, 0o777),
         ),
-        entry(Some(0), b"alias", NodeKind::HardLink { target: 1 }, attributes(5, 0o644)),
+        entry(
+            Some(0),
+            b"alias",
+            NodeKind::HardLink { target: 1 },
+            attributes(5, 0o644),
+        ),
         entry(
             Some(0),
             b"bad-\xff",
@@ -260,7 +276,14 @@ fn sample_diff() -> Diff {
         from: end("aa", 1_700_000_000, 1_048_576),
         to: end("bb", 1_700_086_400, 1_572_864),
         changes: vec![
-            change(Status::Added, b"/data/added.txt", file, (Some(9), None), vec![], None),
+            change(
+                Status::Added,
+                b"/data/added.txt",
+                file,
+                (Some(9), None),
+                vec![],
+                None,
+            ),
             change(
                 Status::Modified,
                 b"/data/edit.txt",
@@ -285,7 +308,14 @@ fn sample_diff() -> Diff {
                 vec![Aspect::Type],
                 Some(file),
             ),
-            change(Status::Added, b"/data/new\nline", file, (Some(3), None), vec![], None),
+            change(
+                Status::Added,
+                b"/data/new\nline",
+                file,
+                (Some(3), None),
+                vec![],
+                None,
+            ),
         ],
         unchanged: 10,
         added_bytes: 9,
@@ -313,7 +343,15 @@ fn the_snapshot_table_has_aligned_columns_and_a_footer() {
     let row = |cells: [&str; 9]| {
         format!(
             "{:<9}  {:<20}  {:<11}  {:<6}  {:>5}  {:>7}  {:>7}  {:>9}  {}",
-            cells[0], cells[1], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7], cells[8]
+            cells[0],
+            cells[1],
+            cells[2],
+            cells[3],
+            cells[4],
+            cells[5],
+            cells[6],
+            cells[7],
+            cells[8]
         )
     };
     let expected = vec![
@@ -347,7 +385,10 @@ fn the_snapshot_table_has_aligned_columns_and_a_footer() {
         "! incomplete: some paths could not be backed up (see `vaultsnap show`)".to_owned(),
     ];
     assert_eq!(lines(&text), expected);
-    assert!(text.ends_with('\n') && !text.contains("  \n"), "no trailing spaces");
+    assert!(
+        text.ends_with('\n') && !text.contains("  \n"),
+        "no trailing spaces"
+    );
 }
 
 #[test]
@@ -367,7 +408,10 @@ fn an_empty_repository_and_damaged_neighbours_are_described() {
         error: "snapshot is corrupt".to_owned(),
     });
     let text = render(|out| human::list(out, &list));
-    assert!(text.ends_with("UNIQUE may be too large: 1 snapshot could not be read\n"), "{text}");
+    assert!(
+        text.ends_with("UNIQUE may be too large: 1 snapshot could not be read\n"),
+        "{text}"
+    );
     assert!(!text.contains('!'), "a complete snapshot is not marked");
 }
 
@@ -460,8 +504,14 @@ fn show_flags_trouble_and_stays_quiet_otherwise() {
     details.sizes.missing_chunks = 2;
     details.unique_sizes_exact = false;
     let text = render(|out| human::show(out, &details));
-    assert!(text.contains("WARNING: 2 chunks this snapshot refers to are missing"), "{text}");
-    assert!(text.contains("note: another snapshot could not be read"), "{text}");
+    assert!(
+        text.contains("WARNING: 2 chunks this snapshot refers to are missing"),
+        "{text}"
+    );
+    assert!(
+        text.contains("note: another snapshot could not be read"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -511,7 +561,10 @@ fn ls_as_text() {
 fn ls_below_a_path_lists_only_what_is_there() {
     let manifest = sample_manifest();
     let text = render(|out| human::entries(out, &manifest, Some(Path::new("/data/link"))));
-    assert_eq!(text, "lrwxrwxrwx  1000:1000  -  2023-11-14T22:13:20Z  /data/link -> a b.txt\n");
+    assert_eq!(
+        text,
+        "lrwxrwxrwx  1000:1000  -  2023-11-14T22:13:20Z  /data/link -> a b.txt\n"
+    );
     let text = render(|out| human::entries(out, &manifest, Some(Path::new("/nowhere"))));
     assert_eq!(text, "");
 }
@@ -526,8 +579,14 @@ fn columns_widen_for_big_sizes_and_other_owners() {
     let time = "2023-11-14T22:13:20Z";
     let expected = [
         format!("drwxr-xr-x  {:<9}  {:>7}  {time}  /data/", "1000:1000", "-"),
-        format!("-rw-r--r--  {:<9}  {:>7}  {time}  /data/a b.txt", "1000:1000", "1234567"),
-        format!("-rw-------  {:<9}  {:>7}  {time}  /data/new\\nline", "0:?", "3"),
+        format!(
+            "-rw-r--r--  {:<9}  {:>7}  {time}  /data/a b.txt",
+            "1000:1000", "1234567"
+        ),
+        format!(
+            "-rw-------  {:<9}  {:>7}  {time}  /data/new\\nline",
+            "0:?", "3"
+        ),
     ];
     assert_eq!(lines(&text)[..3], expected);
 }
@@ -544,9 +603,13 @@ fn ls_as_json() {
         r#"{"path":"/data/bad-@R@","path_hex":"2f646174612f6261642dff","type":"file","size":0,"mode":"0644","uid":1000,"gid":1000,"modified":"@T@","target":null,"link_to":null,"chunks":0}"#,
     ];
     let document = |selected: &[&str]| {
-        format!(r#"{{"snapshot":"{}","entries":[{}]}}"#, "ab".repeat(32), selected.join(","))
-            .replace("@T@", "2023-11-14T22:13:20.123456789Z")
-            .replace("@R@", "\u{fffd}")
+        format!(
+            r#"{{"snapshot":"{}","entries":[{}]}}"#,
+            "ab".repeat(32),
+            selected.join(",")
+        )
+        .replace("@T@", "2023-11-14T22:13:20.123456789Z")
+        .replace("@R@", "\u{fffd}")
             + "\n"
     };
 
@@ -605,9 +668,18 @@ fn diff_notes_what_could_mislead() {
     diff.missing_chunks = 3;
     diff.to.stats.bytes = 0;
     let text = render(|out| human::diff(out, &diff));
-    assert!(text.contains("logical size:  1.0 MiB -> 0 B (-1.0 MiB)"), "{text}");
-    assert!(text.contains("note: the snapshots used different chunk sizes"), "{text}");
-    assert!(text.contains("WARNING: 3 chunks are missing from the repository"), "{text}");
+    assert!(
+        text.contains("logical size:  1.0 MiB -> 0 B (-1.0 MiB)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("note: the snapshots used different chunk sizes"),
+        "{text}"
+    );
+    assert!(
+        text.contains("WARNING: 3 chunks are missing from the repository"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -655,7 +727,10 @@ fn all_json() -> Vec<String> {
 #[test]
 fn every_json_document_is_one_valid_line() {
     for text in all_json() {
-        assert!(text.ends_with('\n') && !text[..text.len() - 1].contains('\n'), "{text}");
+        assert!(
+            text.ends_with('\n') && !text[..text.len() - 1].contains('\n'),
+            "{text}"
+        );
         let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
         assert!(parsed.is_object());
     }
@@ -670,9 +745,15 @@ fn the_json_of_a_path_that_is_not_text_carries_its_exact_bytes() {
     assert_eq!(odd["path_hex"], "2f646174612f6261642dff");
     assert!(odd["path"].as_str().expect("a string").contains('\u{fffd}'));
     for exact in &entries[..5] {
-        assert!(exact.get("path_hex").is_none(), "only altered paths have the hex field");
+        assert!(
+            exact.get("path_hex").is_none(),
+            "only altered paths have the hex field"
+        );
     }
-    assert_eq!(entries[2]["path"], "/data/new\nline", "a newline survives JSON exactly");
+    assert_eq!(
+        entries[2]["path"], "/data/new\nline",
+        "a newline survives JSON exactly"
+    );
 }
 
 /// Everything a hostile machine could control: names, link targets, host, tags, patterns, and
@@ -689,7 +770,9 @@ fn hostile_details() -> SnapshotDetails {
     manifest.roots[0].entries.push(entry(
         Some(0),
         b"esc\x1b[2Jname\r\nforged",
-        NodeKind::Symlink { target: b"to\x1b[31m\nred\xff".to_vec() },
+        NodeKind::Symlink {
+            target: b"to\x1b[31m\nred\xff".to_vec(),
+        },
         attributes(1, 0o777),
     ));
     details
@@ -697,10 +780,17 @@ fn hostile_details() -> SnapshotDetails {
 
 fn assert_safe(text: &str, expected_lines: Option<usize>) {
     for forbidden in ['\x1b', '\x07', '\r', '\u{202e}'] {
-        assert!(!text.contains(forbidden), "{forbidden:?} reached the output:\n{text:?}");
+        assert!(
+            !text.contains(forbidden),
+            "{forbidden:?} reached the output:\n{text:?}"
+        );
     }
     if let Some(expected) = expected_lines {
-        assert_eq!(text.lines().count(), expected, "a name added lines:\n{text}");
+        assert_eq!(
+            text.lines().count(),
+            expected,
+            "a name added lines:\n{text}"
+        );
     }
 }
 
@@ -726,7 +816,11 @@ fn hostile_names_cannot_reach_the_terminal_through_any_text_output() {
 fn show_prints_the_same_lines_whatever_the_hostile_content_is() {
     let calm = render(|out| human::show(out, &sample_details()));
     let hostile = render(|out| human::show(out, &hostile_details()));
-    assert_eq!(calm.lines().count(), hostile.lines().count(), "no line was added or split");
+    assert_eq!(
+        calm.lines().count(),
+        hostile.lines().count(),
+        "no line was added or split"
+    );
 }
 
 #[test]
@@ -736,7 +830,10 @@ fn hostile_content_in_json_is_data_not_syntax() {
     let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
     assert_eq!(parsed["host"], "evil\x1b]0;owned\x07host\nsecond line");
     assert_eq!(parsed["config"]["excludes"][0], "pattern\x1b[31m\nnext");
-    assert!(!text[..text.len() - 1].contains('\n'), "raw newlines are escaped");
+    assert!(
+        !text[..text.len() - 1].contains('\n'),
+        "raw newlines are escaped"
+    );
     assert!(!text.contains('\x1b'), "control characters are escaped too");
 }
 
@@ -750,7 +847,9 @@ fn writing_output_ends_quietly_when_the_reader_goes_away() {
 
 #[test]
 fn the_sample_manifest_is_a_valid_manifest() {
-    sample_manifest().validate().expect("the fixture must satisfy the format's rules");
+    sample_manifest()
+        .validate()
+        .expect("the fixture must satisfy the format's rules");
     let mut hostile = hostile_details().manifest;
     hostile.stats = hostile.compute_stats();
     hostile.validate().expect("so must the hostile one");

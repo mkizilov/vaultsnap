@@ -81,20 +81,30 @@ fn print_report(report: &RestoreReport) {
         report.snapshot,
         escape_path(&report.target)
     );
-    println!("  files         {} ({} written)", report.files, human_size(report.bytes));
+    println!(
+        "  files         {} ({} written)",
+        report.files,
+        human_size(report.bytes)
+    );
     println!("  directories   {}", report.directories);
     println!(
         "  links         {} symbolic, {} hard",
         report.symlinks, report.hard_links
     );
     if !report.skipped.is_empty() {
-        println!("  skipped       {} (left out on purpose)", report.skipped.len());
+        println!(
+            "  skipped       {} (left out on purpose)",
+            report.skipped.len()
+        );
     }
     if !report.failed.is_empty() {
         println!("  failed        {}", report.failed.len());
     }
     if !report.warnings.is_empty() {
-        println!("  attributes    {} could not be applied", report.warnings.len());
+        println!(
+            "  attributes    {} could not be applied",
+            report.warnings.len()
+        );
     }
     println!("  duration      {:.1}s", report.duration.as_secs_f64());
 }
@@ -105,7 +115,11 @@ fn print_report(report: &RestoreReport) {
 fn list_problems(report: &RestoreReport) {
     list("could not be restored", &report.failed, usize::MAX);
     list("skipped", &report.skipped, LISTED);
-    list("attributes that could not be applied", &report.warnings, LISTED);
+    list(
+        "attributes that could not be applied",
+        &report.warnings,
+        LISTED,
+    );
 }
 
 fn list(heading: &str, problems: &[RestoreProblem], limit: usize) {
@@ -182,16 +196,28 @@ mod tests {
     fn the_policies_map_one_to_one() {
         assert_eq!(conflict_policy(ConflictArg::Fail), ConflictPolicy::Fail);
         assert_eq!(conflict_policy(ConflictArg::Skip), ConflictPolicy::Skip);
-        assert_eq!(conflict_policy(ConflictArg::Overwrite), ConflictPolicy::Overwrite);
-        assert_eq!(symlink_policy(SymlinkArg::Contained), RestoreSymlinks::Contained);
+        assert_eq!(
+            conflict_policy(ConflictArg::Overwrite),
+            ConflictPolicy::Overwrite
+        );
+        assert_eq!(
+            symlink_policy(SymlinkArg::Contained),
+            RestoreSymlinks::Contained
+        );
         assert_eq!(symlink_policy(SymlinkArg::Skip), RestoreSymlinks::Skip);
-        assert_eq!(symlink_policy(SymlinkArg::AsRecorded), RestoreSymlinks::AsRecorded);
+        assert_eq!(
+            symlink_policy(SymlinkArg::AsRecorded),
+            RestoreSymlinks::AsRecorded
+        );
     }
 
     #[test]
     fn progress_counts_what_it_is_told() {
         let progress = Progress::new();
-        progress.event(&RestoreEvent::Planned { files: 2, bytes: 100 });
+        progress.event(&RestoreEvent::Planned {
+            files: 2,
+            bytes: 100,
+        });
         progress.event(&RestoreEvent::BytesWritten { bytes: 30 });
         progress.event(&RestoreEvent::BytesWritten { bytes: 12 });
         progress.event(&RestoreEvent::EntryRestored {

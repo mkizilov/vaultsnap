@@ -53,7 +53,11 @@ impl Findings {
     /// A collector listing at most `max_findings` findings (0 = all).
     pub(super) fn new(max_findings: usize) -> Self {
         Self {
-            cap: if max_findings == 0 { usize::MAX } else { max_findings },
+            cap: if max_findings == 0 {
+                usize::MAX
+            } else {
+                max_findings
+            },
             errors: Vec::new(),
             warnings: Vec::new(),
             counts: BTreeMap::new(),
@@ -194,7 +198,12 @@ fn verify(
                         if let Some(failure) = verify_one(chunks, item, full) {
                             local.push((index, failure));
                         }
-                        notify(options, CheckEvent::Step { phase: CheckPhase::Objects });
+                        notify(
+                            options,
+                            CheckEvent::Step {
+                                phase: CheckPhase::Objects,
+                            },
+                        );
                     }
                     local
                 })
@@ -351,7 +360,12 @@ pub(crate) fn run(
                 findings.add(snapshot_finding(&id, &err));
             }
         }
-        notify(options, CheckEvent::Step { phase: CheckPhase::Snapshots });
+        notify(
+            options,
+            CheckEvent::Step {
+                phase: CheckPhase::Snapshots,
+            },
+        );
     }
     stats.snapshots = readable.len() as u64;
     stats.chunks_referenced = referenced.len() as u64;
@@ -440,7 +454,11 @@ pub(crate) fn run(
     Ok(CheckReport {
         repository_id: config.repository_id.clone(),
         format_version: config.format_version,
-        mode: if full { CheckMode::Full } else { CheckMode::Quick },
+        mode: if full {
+            CheckMode::Full
+        } else {
+            CheckMode::Quick
+        },
         stats,
         affected,
         findings: finished.findings,
@@ -505,7 +523,10 @@ mod tests {
     fn a_limit_keeps_errors_before_warnings_and_the_counts_exact() {
         let mut findings = Findings::new(3);
         for index in 0..5 {
-            findings.add(finding(FindingKind::OrphanObject, &format!("orphan-{index}")));
+            findings.add(finding(
+                FindingKind::OrphanObject,
+                &format!("orphan-{index}"),
+            ));
         }
         findings.add(finding(FindingKind::ChunkMissing, "gone-1"));
         findings.add(finding(FindingKind::ChunkCorrupt, "bad"));
@@ -526,7 +547,10 @@ mod tests {
             ],
             "the errors fill the limit, ordered by kind and then as found"
         );
-        assert_eq!((finished.errors, finished.warnings, finished.suppressed), (3, 5, 5));
+        assert_eq!(
+            (finished.errors, finished.warnings, finished.suppressed),
+            (3, 5, 5)
+        );
         assert_eq!(finished.counts[&FindingKind::OrphanObject], 5);
         assert_eq!(finished.counts[&FindingKind::ChunkMissing], 2);
     }
@@ -541,7 +565,10 @@ mod tests {
         let finished = findings.finish();
         assert_eq!(finished.findings.len(), 4);
         assert_eq!(finished.findings[0].kind, FindingKind::IoError);
-        assert_eq!((finished.errors, finished.warnings, finished.suppressed), (1, 6, 3));
+        assert_eq!(
+            (finished.errors, finished.warnings, finished.suppressed),
+            (1, 6, 3)
+        );
 
         let mut unlimited = Findings::new(0);
         for index in 0..2500 {
@@ -554,7 +581,10 @@ mod tests {
     #[test]
     fn errors_are_classified_by_what_they_say() {
         let cases = [
-            (Error::ChunkNotFound("x".to_owned()), FindingKind::ChunkMissing),
+            (
+                Error::ChunkNotFound("x".to_owned()),
+                FindingKind::ChunkMissing,
+            ),
             (
                 Error::CorruptObject {
                     id: "x".to_owned(),
@@ -617,7 +647,11 @@ mod tests {
         fs::write(&path, &bytes[..bytes.len() - 3]).expect("write");
         fs::remove_file(fx.path_of(&gone)).expect("remove");
 
-        assert_eq!(verify_one(&fx.chunks, &flipped, false), None, "quick mode cannot see this");
+        assert_eq!(
+            verify_one(&fx.chunks, &flipped, false),
+            None,
+            "quick mode cannot see this"
+        );
         let (kind, detail) = verify_one(&fx.chunks, &flipped, true).expect("full mode does");
         assert_eq!(kind, FindingKind::ChunkCorrupt);
         assert!(detail.contains("authentication failed"), "{detail}");
@@ -635,7 +669,10 @@ mod tests {
         let fx = Fx::new();
         let mut items = Vec::new();
         for seed in 0..40_u64 {
-            items.push(fx.item(&pseudo_random(2000 + seed as usize, seed + 100), Some(2000 + seed as u32)));
+            items.push(fx.item(
+                &pseudo_random(2000 + seed as usize, seed + 100),
+                Some(2000 + seed as u32),
+            ));
         }
         items.sort_by_key(|item| item.id);
         for index in [3, 10, 11, 25, 39] {
@@ -662,7 +699,11 @@ mod tests {
             .enumerate()
             .filter_map(|(index, failure)| failure.as_ref().map(|_| index))
             .collect();
-        assert_eq!(positions, [3, 10, 11, 25, 39], "the failures are at their own positions");
+        assert_eq!(
+            positions,
+            [3, 10, 11, 25, 39],
+            "the failures are at their own positions"
+        );
     }
 
     #[test]
@@ -688,7 +729,10 @@ mod tests {
             ..CheckOptions::default()
         };
         verify(&fx.chunks, &items, false, &options).expect("verify");
-        assert_eq!((total.load(Ordering::SeqCst), steps.load(Ordering::SeqCst)), (12, 12));
+        assert_eq!(
+            (total.load(Ordering::SeqCst), steps.load(Ordering::SeqCst)),
+            (12, 12)
+        );
 
         let options = CheckOptions::default();
         options.cancel.cancel();

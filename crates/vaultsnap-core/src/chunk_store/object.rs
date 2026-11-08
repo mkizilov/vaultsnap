@@ -182,8 +182,8 @@ pub(super) fn inspect(id: &ChunkId, prefix: &[u8], object_len: u64) -> Result<Ob
     if prefix[5] != KIND_CHUNK {
         return Err(corrupt("unknown object kind"));
     }
-    let compression = Compression::from_code(prefix[6])
-        .ok_or_else(|| corrupt("unknown compression method"))?;
+    let compression =
+        Compression::from_code(prefix[6]).ok_or_else(|| corrupt("unknown compression method"))?;
     if prefix[7] != 0 {
         return Err(corrupt("unknown flags"));
     }
@@ -196,7 +196,9 @@ pub(super) fn inspect(id: &ChunkId, prefix: &[u8], object_len: u64) -> Result<Ob
     let largest_body = (NONCE_LEN + TAG_LEN) as u64 + u64::from(plaintext_len);
     match compression {
         Compression::Uncompressed if body_len != largest_body => {
-            return Err(corrupt("length does not match the header (truncated or extended)"));
+            return Err(corrupt(
+                "length does not match the header (truncated or extended)",
+            ));
         }
         Compression::Zstd if body_len > largest_body => {
             return Err(corrupt("compressed payload is larger than the original"));
@@ -251,7 +253,9 @@ pub(super) fn decode(keys: &ChunkKeys, id: &ChunkId, object: &[u8]) -> Result<Ve
     }
     // The id is public (it is the file name), so an ordinary comparison leaks nothing.
     if keys.chunk_id(&plaintext) != *id {
-        return Err(corrupt("content does not hash to the id it is stored under"));
+        return Err(corrupt(
+            "content does not hash to the id it is stored under",
+        ));
     }
     Ok(plaintext)
 }
@@ -310,7 +314,11 @@ mod tests {
         let text = compressible(100_000);
         let (_, object, compression) = encode_chunk(&keys, &text);
         assert_eq!(compression, Compression::Zstd);
-        assert!(object.len() < 5000, "compressible data took {} bytes", object.len());
+        assert!(
+            object.len() < 5000,
+            "compressible data took {} bytes",
+            object.len()
+        );
 
         let noise = pseudo_random(100_000, 9);
         let (_, object, compression) = encode_chunk(&keys, &noise);
@@ -350,8 +358,13 @@ mod tests {
                 plaintext.extend_from_slice(&pseudo_random(2000, 6));
             }
             let (_, object, _) = encode_chunk(&keys, &plaintext);
-            let found = object.windows(16).any(|window| marker.windows(16).any(|m| m == window));
-            assert!(!found, "plaintext visible in the object (compressed: {compress})");
+            let found = object
+                .windows(16)
+                .any(|window| marker.windows(16).any(|m| m == window));
+            assert!(
+                !found,
+                "plaintext visible in the object (compressed: {compress})"
+            );
         }
     }
 
@@ -362,7 +375,10 @@ mod tests {
         let (id, first, _) = encode_chunk(&keys, &plaintext);
         let (_, second, _) = encode_chunk(&keys, &plaintext);
         assert_ne!(first, second);
-        assert_ne!(first[HEADER_LEN..HEADER_LEN + NONCE_LEN], second[HEADER_LEN..HEADER_LEN + NONCE_LEN]);
+        assert_ne!(
+            first[HEADER_LEN..HEADER_LEN + NONCE_LEN],
+            second[HEADER_LEN..HEADER_LEN + NONCE_LEN]
+        );
         assert_eq!(decode(&keys, &id, &first).expect("decode"), plaintext);
         assert_eq!(decode(&keys, &id, &second).expect("decode"), plaintext);
     }
@@ -376,7 +392,10 @@ mod tests {
                 for bit in 0..8 {
                     let mut damaged = object.clone();
                     damaged[index] ^= 1 << bit;
-                    assert_rejected(decode(&keys, &id, &damaged), &format!("byte {index} bit {bit}"));
+                    assert_rejected(
+                        decode(&keys, &id, &damaged),
+                        &format!("byte {index} bit {bit}"),
+                    );
                 }
             }
         }
@@ -389,7 +408,10 @@ mod tests {
             let (id, object, _) = encode_chunk(&keys, &plaintext);
             for len in 0..object.len() {
                 let result = decode(&keys, &id, &object[..len]);
-                assert!(matches!(result, Err(Error::CorruptObject { .. })), "len {len}: {result:?}");
+                assert!(
+                    matches!(result, Err(Error::CorruptObject { .. })),
+                    "len {len}: {result:?}"
+                );
             }
         }
     }
@@ -440,7 +462,13 @@ mod tests {
         object[4] = 2;
         let result = decode(&keys, &id, &object);
         assert!(
-            matches!(result, Err(Error::UnsupportedObjectVersion { found: 2, supported: 1 })),
+            matches!(
+                result,
+                Err(Error::UnsupportedObjectVersion {
+                    found: 2,
+                    supported: 1
+                })
+            ),
             "{result:?}"
         );
     }
@@ -459,7 +487,8 @@ mod tests {
     #[test]
     fn decompression_bombs_are_rejected() {
         let keys = keys();
-        let bomb = zstd::bulk::compress(&vec![0_u8; 4 * 1024 * 1024], ZSTD_LEVEL).expect("compress");
+        let bomb =
+            zstd::bulk::compress(&vec![0_u8; 4 * 1024 * 1024], ZSTD_LEVEL).expect("compress");
         let declared = 1000_u32;
         let header = header(Compression::Zstd, declared);
         let id = keys.chunk_id(b"irrelevant");
@@ -510,7 +539,10 @@ mod tests {
         let (id, object, compression) = encode_chunk(&keys, &text);
         assert_eq!(compression, Compression::Zstd);
         let info = inspected(&id, &object).expect("valid");
-        assert_eq!((info.plaintext_len, info.compression), (70_000, Compression::Zstd));
+        assert_eq!(
+            (info.plaintext_len, info.compression),
+            (70_000, Compression::Zstd)
+        );
         assert!(info.stored_len < 70_000);
     }
 
@@ -522,23 +554,35 @@ mod tests {
         // Every truncation of an uncompressed object changes its size.
         for length in 0..object.len() {
             let result = inspected(&id, &object[..length]);
-            assert!(matches!(result, Err(Error::CorruptObject { .. })), "length {length}");
+            assert!(
+                matches!(result, Err(Error::CorruptObject { .. })),
+                "length {length}"
+            );
         }
         // So does appending.
         let mut longer = object.clone();
         longer.push(0);
-        assert!(matches!(inspected(&id, &longer), Err(Error::CorruptObject { .. })));
+        assert!(matches!(
+            inspected(&id, &longer),
+            Err(Error::CorruptObject { .. })
+        ));
 
         // Header fields: magic, kind, compression, flags, declared length.
         for (position, value) in [(0, b'X'), (5, 9), (6, 7), (7, 1)] {
             let mut damaged = object.clone();
             damaged[position] = value;
             let result = inspected(&id, &damaged);
-            assert!(matches!(result, Err(Error::CorruptObject { .. })), "byte {position}");
+            assert!(
+                matches!(result, Err(Error::CorruptObject { .. })),
+                "byte {position}"
+            );
         }
         let mut damaged = object.clone();
         damaged[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(matches!(inspected(&id, &damaged), Err(Error::CorruptObject { .. })));
+        assert!(matches!(
+            inspected(&id, &damaged),
+            Err(Error::CorruptObject { .. })
+        ));
         let mut damaged = object;
         damaged[8] ^= 1;
         assert!(
@@ -553,7 +597,13 @@ mod tests {
         let (id, mut object, _) = encode_chunk(&keys, &pseudo_random(100, 6));
         object[4] = 2;
         let result = inspected(&id, &object);
-        assert!(matches!(result, Err(Error::UnsupportedObjectVersion { found: 2, .. })), "{result:?}");
+        assert!(
+            matches!(
+                result,
+                Err(Error::UnsupportedObjectVersion { found: 2, .. })
+            ),
+            "{result:?}"
+        );
     }
 
     #[test]
@@ -562,13 +612,19 @@ mod tests {
         let (id, mut object, _) = encode_chunk(&keys, &pseudo_random(5000, 7));
         let middle = object.len() / 2;
         object[middle] ^= 1;
-        assert!(inspected(&id, &object).is_ok(), "only the full verification can see this");
+        assert!(
+            inspected(&id, &object).is_ok(),
+            "only the full verification can see this"
+        );
         assert_rejected(decode(&keys, &id, &object), "the full verification does");
 
         let (id, object, compression) = encode_chunk(&keys, &compressible(70_000));
         assert_eq!(compression, Compression::Zstd);
         let cut = &object[..object.len() - 1];
-        assert!(inspected(&id, cut).is_ok(), "a shorter compressed object is still possible");
+        assert!(
+            inspected(&id, cut).is_ok(),
+            "a shorter compressed object is still possible"
+        );
         assert_rejected(decode(&keys, &id, cut), "but it does not authenticate");
     }
 
@@ -577,6 +633,9 @@ mod tests {
         let keys = keys();
         let (id, object, _) = encode_chunk(&keys, &pseudo_random(100, 8));
         let result = inspect(&id, &object[..4], object.len() as u64);
-        assert!(matches!(result, Err(Error::CorruptObject { .. })), "{result:?}");
+        assert!(
+            matches!(result, Err(Error::CorruptObject { .. })),
+            "{result:?}"
+        );
     }
 }

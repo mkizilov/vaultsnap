@@ -81,7 +81,11 @@ pub fn list(out: &mut dyn Write, list: &SnapshotList) -> io::Result<()> {
         .map(|info| {
             let summary = &info.summary;
             let marker = if info.unreadable > 0 { "!" } else { "" };
-            let tags: Vec<String> = summary.tags.iter().map(|tag| escape(tag.as_bytes())).collect();
+            let tags: Vec<String> = summary
+                .tags
+                .iter()
+                .map(|tag| escape(tag.as_bytes()))
+                .collect();
             let sources: Vec<String> = summary.roots.iter().map(|root| escape(root)).collect();
             vec![
                 format!("{}{marker}", summary.id.short()),
@@ -96,7 +100,9 @@ pub fn list(out: &mut dyn Write, list: &SnapshotList) -> io::Result<()> {
             ]
         })
         .collect();
-    let header = ["ID", "CREATED", "HOST", "TAGS", "FILES", "LOGICAL", "STORED", "UNIQUE", "SOURCES"];
+    let header = [
+        "ID", "CREATED", "HOST", "TAGS", "FILES", "LOGICAL", "STORED", "UNIQUE", "SOURCES",
+    ];
     let right = [false, false, false, false, true, true, true, true, false];
     table(out, &header, &right, &rows)?;
 
@@ -110,7 +116,10 @@ pub fn list(out: &mut dyn Write, list: &SnapshotList) -> io::Result<()> {
         plural(list.referenced_chunks, "chunk", "chunks"),
     )?;
     if list.snapshots.iter().any(|info| info.unreadable > 0) {
-        writeln!(out, "! incomplete: some paths could not be backed up (see `vaultsnap show`)")?;
+        writeln!(
+            out,
+            "! incomplete: some paths could not be backed up (see `vaultsnap show`)"
+        )?;
     }
     if !list.unique_sizes_exact() {
         let damaged = list.damaged.len() as u64;
@@ -167,17 +176,25 @@ fn patterns(list: &[String]) -> String {
     if list.is_empty() {
         "-".to_owned()
     } else {
-        list.iter().map(|pattern| escape(pattern.as_bytes())).collect::<Vec<_>>().join(", ")
+        list.iter()
+            .map(|pattern| escape(pattern.as_bytes()))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
 fn skip_reason(reason: &SkippedReason) -> String {
     match reason {
         SkippedReason::Vanished => "disappeared during the backup".to_owned(),
-        SkippedReason::Unreadable { detail } => format!("unreadable: {}", escape(detail.as_bytes())),
+        SkippedReason::Unreadable { detail } => {
+            format!("unreadable: {}", escape(detail.as_bytes()))
+        }
         SkippedReason::OtherFilesystem => "on another filesystem, not entered".to_owned(),
         SkippedReason::SpecialFile { kind } => {
-            format!("special file ({}) skipped by policy", escape(kind.as_bytes()))
+            format!(
+                "special file ({}) skipped by policy",
+                escape(kind.as_bytes())
+            )
         }
     }
 }
@@ -186,19 +203,34 @@ fn skip_reason(reason: &SkippedReason) -> String {
 pub fn show(out: &mut dyn Write, details: &SnapshotDetails) -> io::Result<()> {
     let manifest = &details.manifest;
     let unreadable = unreadable_paths(manifest);
-    let tags: Vec<String> = manifest.tags.iter().map(|tag| escape(tag.as_bytes())).collect();
+    let tags: Vec<String> = manifest
+        .tags
+        .iter()
+        .map(|tag| escape(tag.as_bytes()))
+        .collect();
     let status = if unreadable == 0 {
         "complete".to_owned()
     } else {
-        format!("INCOMPLETE: {} could not be backed up", plural(unreadable, "path", "paths"))
+        format!(
+            "INCOMPLETE: {} could not be backed up",
+            plural(unreadable, "path", "paths")
+        )
     };
     field(out, "Snapshot", manifest.id.as_str())?;
     field(out, "Created", &time_seconds(manifest.created))?;
     field(out, "Host", &or_dash(escape(manifest.host.as_bytes())))?;
     field(out, "Tags", &or_dash(tags.join(", ")))?;
-    field(out, "Program", &or_dash(escape(manifest.program.as_bytes())))?;
+    field(
+        out,
+        "Program",
+        &or_dash(escape(manifest.program.as_bytes())),
+    )?;
     field(out, "Status", &status)?;
-    field(out, "Manifest", &format!("version {}", manifest.format_version))?;
+    field(
+        out,
+        "Manifest",
+        &format!("version {}", manifest.format_version),
+    )?;
 
     writeln!(out)?;
     writeln!(out, "Sources")?;
@@ -254,7 +286,11 @@ pub fn show(out: &mut dyn Write, details: &SnapshotDetails) -> io::Result<()> {
             "stored data no other snapshot refers to",
         ),
     ];
-    let width = rows.iter().map(|(_, value, _)| value.chars().count()).max().unwrap_or(0);
+    let width = rows
+        .iter()
+        .map(|(_, value, _)| value.chars().count())
+        .max()
+        .unwrap_or(0);
     writeln!(out)?;
     writeln!(out, "Sizes")?;
     for (label, value, note) in rows {
@@ -273,7 +309,10 @@ pub fn show(out: &mut dyn Write, details: &SnapshotDetails) -> io::Result<()> {
         )?;
     }
     if !details.unique_sizes_exact {
-        writeln!(out, "  note: another snapshot could not be read, so the unique size may be too large")?;
+        writeln!(
+            out,
+            "  note: another snapshot could not be read, so the unique size may be too large"
+        )?;
     }
 
     let config = &manifest.config;
@@ -291,11 +330,22 @@ pub fn show(out: &mut dyn Write, details: &SnapshotDetails) -> io::Result<()> {
         ("symbolic links", symlinks(config.symlinks).to_owned()),
         ("hard links", hard_links(config.hard_links).to_owned()),
         ("unreadable paths", on_error(config.on_error).to_owned()),
-        ("special files", special_files(config.special_files).to_owned()),
-        ("changing files", changed_files(config.changed_files).to_owned()),
+        (
+            "special files",
+            special_files(config.special_files).to_owned(),
+        ),
+        (
+            "changing files",
+            changed_files(config.changed_files).to_owned(),
+        ),
         (
             "other filesystems",
-            if config.cross_filesystems { "entered" } else { "not entered" }.to_owned(),
+            if config.cross_filesystems {
+                "entered"
+            } else {
+                "not entered"
+            }
+            .to_owned(),
         ),
         ("include patterns", patterns(&config.includes)),
         ("exclude patterns", patterns(&config.excludes)),
@@ -342,8 +392,12 @@ pub fn entries(out: &mut dyn Write, manifest: &Manifest, under: Option<&Path>) -
         let kind = entry.entry_type();
         let attributes = &entry.entry.attributes;
         let mode = mode_string(kind, attributes.mode);
-        let size = entry.size().map_or_else(|| "-".to_owned(), |size| size.to_string());
-        let modified = attributes.modified.map_or_else(|| "-".to_owned(), time_seconds);
+        let size = entry
+            .size()
+            .map_or_else(|| "-".to_owned(), |size| size.to_string());
+        let modified = attributes
+            .modified
+            .map_or_else(|| "-".to_owned(), time_seconds);
         let mut path = escape(&entry.path);
         if kind == EntryType::Directory && !path.ends_with('/') {
             path.push('/');
@@ -351,7 +405,10 @@ pub fn entries(out: &mut dyn Write, manifest: &Manifest, under: Option<&Path>) -
         let suffix = match &entry.entry.kind {
             NodeKind::Symlink { target } => format!(" -> {}", escape(target)),
             NodeKind::HardLink { .. } => {
-                format!(" => {}", escape(entry.link_to.as_deref().unwrap_or_default()))
+                format!(
+                    " => {}",
+                    escape(entry.link_to.as_deref().unwrap_or_default())
+                )
             }
             _ => String::new(),
         };

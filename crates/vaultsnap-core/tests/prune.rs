@@ -57,7 +57,13 @@ fn pause() {
 fn names(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .expect("read_dir")
-        .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     names.sort();
     names
@@ -92,7 +98,11 @@ fn keep_last(count: u32) -> RetentionPolicy {
 fn assert_intact(report: &CheckReport) {
     let stats = &report.stats;
     assert_eq!(
-        (stats.chunks_missing, stats.objects_damaged, stats.snapshots_damaged),
+        (
+            stats.chunks_missing,
+            stats.objects_damaged,
+            stats.snapshots_damaged
+        ),
         (0, 0, 0),
         "{:?}",
         report.findings
@@ -177,7 +187,10 @@ impl Env {
             read_data: true,
             ..CheckOptions::default()
         };
-        self.repo.check(&self.keys, options).await.expect("the check runs")
+        self.repo
+            .check(&self.keys, options)
+            .await
+            .expect("the check runs")
     }
 
     fn chunk_file(&self, id: &ChunkId) -> PathBuf {
@@ -196,7 +209,11 @@ impl Env {
 
     /// Every chunk the snapshot needs.
     async fn chunks(&self, id: &SnapshotId) -> HashSet<ChunkId> {
-        let manifest = self.repo.snapshot(&self.keys, &SnapshotRef::from(id)).await.expect("load");
+        let manifest = self
+            .repo
+            .snapshot(&self.keys, &SnapshotRef::from(id))
+            .await
+            .expect("load");
         let mut chunks = HashSet::new();
         for listed in vaultsnap_core::history::entries(&manifest, None) {
             if let NodeKind::File { chunks: list } = &listed.entry.kind {
@@ -210,11 +227,21 @@ impl Env {
     async fn assert_restores(&self, id: &SnapshotId, expected: &Tree) {
         let target = self.path(&format!("restored-{}", id.short()));
         let options = RestoreOptions::new(SnapshotRef::from(id), &target);
-        let report = self.repo.restore(&self.keys, options).await.expect("restore succeeds");
+        let report = self
+            .repo
+            .restore(&self.keys, options)
+            .await
+            .expect("restore succeeds");
         assert!(report.is_complete(), "{report:?}");
         let source = fs::canonicalize(self.path("src")).expect("the source exists");
-        let root = report.target.join(source.strip_prefix("/").expect("absolute source"));
-        assert_eq!(&read_tree(&root), expected, "snapshot {id} restores differently");
+        let root = report
+            .target
+            .join(source.strip_prefix("/").expect("absolute source"));
+        assert_eq!(
+            &read_tree(&root),
+            expected,
+            "snapshot {id} restores differently"
+        );
         fs::remove_dir_all(&target).expect("remove the restored copy");
     }
 }
@@ -242,8 +269,14 @@ impl History {
     /// Every snapshot that still exists restores to the files it was taken from.
     async fn assert_remaining_restore(&self) {
         for name in self.env.snapshot_names() {
-            let index = self.ids.iter().position(|id| id.as_str() == name).expect("a known id");
-            self.env.assert_restores(&self.ids[index], &self.trees[index]).await;
+            let index = self
+                .ids
+                .iter()
+                .position(|id| id.as_str() == name)
+                .expect("a known id");
+            self.env
+                .assert_restores(&self.ids[index], &self.trees[index])
+                .await;
         }
     }
 }
@@ -301,8 +334,19 @@ async fn a_dry_run_is_the_default_and_changes_nothing() {
     assert!(!report.executed);
     assert_eq!(report.snapshots_to_remove(), 2);
     assert!(report.chunks_unreferenced > 0 && report.bytes_unreferenced > 0);
-    assert_eq!((report.snapshots_removed, report.chunks_removed, report.bytes_removed), (0, 0, 0));
-    assert_eq!(h.env.repo_state(), before, "nothing in the repository changed");
+    assert_eq!(
+        (
+            report.snapshots_removed,
+            report.chunks_removed,
+            report.bytes_removed
+        ),
+        (0, 0, 0)
+    );
+    assert_eq!(
+        h.env.repo_state(),
+        before,
+        "nothing in the repository changed"
+    );
     h.env.assert_unlocked();
 }
 
@@ -313,32 +357,66 @@ async fn pruning_removes_old_snapshots_and_exactly_the_chunks_no_kept_snapshot_n
     let (c1, c2) = (h.env.chunks(s1).await, h.env.chunks(s2).await);
     let (c3, c4) = (h.env.chunks(s3).await, h.env.chunks(s4).await);
     let kept: HashSet<ChunkId> = c3.union(&c4).copied().collect();
-    let doomed: HashSet<ChunkId> =
-        c1.union(&c2).copied().filter(|id| !kept.contains(id)).collect();
+    let doomed: HashSet<ChunkId> = c1
+        .union(&c2)
+        .copied()
+        .filter(|id| !kept.contains(id))
+        .collect();
     let shared_with_kept: Vec<ChunkId> = c1.intersection(&kept).copied().collect();
-    assert!(!doomed.is_empty() && !shared_with_kept.is_empty(), "the history must share chunks");
+    assert!(
+        !doomed.is_empty() && !shared_with_kept.is_empty(),
+        "the history must share chunks"
+    );
 
-    let report = h.env.prune(keep_last(2), PruneMode::Unattended).await.expect("prune");
+    let report = h
+        .env
+        .prune(keep_last(2), PruneMode::Unattended)
+        .await
+        .expect("prune");
 
     assert!(report.executed && report.is_complete());
-    assert_eq!(report.decisions.iter().map(|d| d.id.clone()).collect::<Vec<_>>(), h.ids);
+    assert_eq!(
+        report
+            .decisions
+            .iter()
+            .map(|d| d.id.clone())
+            .collect::<Vec<_>>(),
+        h.ids
+    );
     let reasons: Vec<Vec<KeepReason>> = report.decisions.iter().map(|d| d.keep.clone()).collect();
-    assert_eq!(reasons, [vec![], vec![], vec![KeepReason::Last], vec![KeepReason::Last]]);
+    assert_eq!(
+        reasons,
+        [
+            vec![],
+            vec![],
+            vec![KeepReason::Last],
+            vec![KeepReason::Last]
+        ]
+    );
     assert_eq!(report.snapshots_removed, 2);
     assert_eq!(report.chunks_removed, doomed.len() as u64);
     assert_eq!(report.chunks_unreferenced, doomed.len() as u64);
     assert_eq!(report.chunks_in_use, kept.len() as u64);
     assert_eq!(report.chunks_verified, kept.len() as u64);
 
-    assert_eq!(h.env.snapshot_names(), [s3.to_string(), s4.to_string()]);
+    // Snapshot ids are random, so the file names are not in creation order; `names` sorts them.
+    let mut kept_names = vec![s3.to_string(), s4.to_string()];
+    kept_names.sort();
+    assert_eq!(h.env.snapshot_names(), kept_names);
     for id in &doomed {
         assert!(!h.env.chunk_file(id).exists(), "{id:?} should be gone");
     }
     for id in &kept {
-        assert!(h.env.chunk_file(id).exists(), "{id:?} is needed by a kept snapshot");
+        assert!(
+            h.env.chunk_file(id).exists(),
+            "{id:?} is needed by a kept snapshot"
+        );
     }
     for id in &shared_with_kept {
-        assert!(h.env.chunk_file(id).exists(), "{id:?} was shared with a removed snapshot");
+        assert!(
+            h.env.chunk_file(id).exists(),
+            "{id:?} was shared with a removed snapshot"
+        );
     }
     h.assert_remaining_restore().await;
     assert_intact(&h.env.check().await);
@@ -348,7 +426,11 @@ async fn pruning_removes_old_snapshots_and_exactly_the_chunks_no_kept_snapshot_n
 #[tokio::test]
 async fn the_newest_snapshot_survives_the_strictest_policy() {
     let h = history().await;
-    let report = h.env.prune(keep_last(1), PruneMode::Unattended).await.expect("prune");
+    let report = h
+        .env
+        .prune(keep_last(1), PruneMode::Unattended)
+        .await
+        .expect("prune");
     assert_eq!(report.snapshots_removed, 3);
     assert_eq!(h.env.snapshot_names(), [h.ids[3].to_string()]);
     h.assert_remaining_restore().await;
@@ -360,15 +442,33 @@ async fn the_newest_snapshot_survives_the_strictest_policy() {
 async fn a_policy_that_keeps_everything_deletes_nothing_and_a_second_prune_has_nothing_to_do() {
     let h = history().await;
     let before = h.env.repo_state();
-    let report = h.env.prune(keep_last(10), PruneMode::Unattended).await.expect("prune");
+    let report = h
+        .env
+        .prune(keep_last(10), PruneMode::Unattended)
+        .await
+        .expect("prune");
     assert!(report.executed && report.is_noop(), "{report:?}");
     assert_eq!(h.env.repo_state(), before);
 
-    h.env.prune(keep_last(1), PruneMode::Unattended).await.expect("prune");
+    h.env
+        .prune(keep_last(1), PruneMode::Unattended)
+        .await
+        .expect("prune");
     let after = h.env.repo_state();
-    let again = h.env.prune(keep_last(1), PruneMode::Unattended).await.expect("prune again");
+    let again = h
+        .env
+        .prune(keep_last(1), PruneMode::Unattended)
+        .await
+        .expect("prune again");
     assert!(again.is_noop(), "{again:?}");
-    assert_eq!((again.snapshots_removed, again.chunks_removed, again.bytes_removed), (0, 0, 0));
+    assert_eq!(
+        (
+            again.snapshots_removed,
+            again.chunks_removed,
+            again.bytes_removed
+        ),
+        (0, 0, 0)
+    );
     assert_eq!(h.env.repo_state(), after);
     h.env.assert_unlocked();
 }
@@ -388,8 +488,15 @@ async fn policies_that_could_delete_everything_are_refused_before_anything_happe
     ];
     for policy in policies {
         for mode in [PruneMode::DryRun, PruneMode::Unattended] {
-            let err = h.env.prune(policy.clone(), mode).await.expect_err("must refuse");
-            assert!(matches!(err, Error::InvalidRetention(_)), "{policy:?}: {err}");
+            let err = h
+                .env
+                .prune(policy.clone(), mode)
+                .await
+                .expect_err("must refuse");
+            assert!(
+                matches!(err, Error::InvalidRetention(_)),
+                "{policy:?}: {err}"
+            );
         }
     }
     assert_eq!(h.env.repo_state(), before);
@@ -411,7 +518,11 @@ async fn objects_no_snapshot_uses_are_collected_and_strangers_in_the_repository_
         .collect();
     assert_eq!(strays.len(), 2);
 
-    let report = h.env.prune(keep_last(10), PruneMode::Unattended).await.expect("prune");
+    let report = h
+        .env
+        .prune(keep_last(10), PruneMode::Unattended)
+        .await
+        .expect("prune");
 
     assert_eq!(report.snapshots_removed, 0);
     assert_eq!(report.chunks_unreferenced, 2);
@@ -437,13 +548,20 @@ async fn data_deleted_by_a_prune_is_stored_again_by_the_next_backup() {
     fs::remove_file(src.join("old.bin")).expect("remove");
     write(&src, "now.txt", b"only this remains");
     env.backup().await;
-    let report = env.prune(keep_last(1), PruneMode::Unattended).await.expect("prune");
+    let report = env
+        .prune(keep_last(1), PruneMode::Unattended)
+        .await
+        .expect("prune");
     assert!(report.chunks_removed > 0, "{report:?}");
 
     write(&src, "old.bin", &old);
     let backup = env.backup_report().await;
-    assert!(backup.transfer.chunks_new > 0, "the deleted chunks must be stored again");
-    env.assert_restores(&backup.snapshot, &read_tree(&src)).await;
+    assert!(
+        backup.transfer.chunks_new > 0,
+        "the deleted chunks must be stored again"
+    );
+    env.assert_restores(&backup.snapshot, &read_tree(&src))
+        .await;
     assert_intact(&env.check().await);
 }
 
@@ -454,7 +572,11 @@ async fn data_deleted_by_a_prune_is_stored_again_by_the_next_backup() {
 #[tokio::test]
 async fn a_confirmed_plan_runs_exactly_as_shown() {
     let h = history().await;
-    let plan = h.env.prune(keep_last(1), PruneMode::DryRun).await.expect("plan");
+    let plan = h
+        .env
+        .prune(keep_last(1), PruneMode::DryRun)
+        .await
+        .expect("plan");
     let report = h
         .env
         .prune(keep_last(1), PruneMode::Confirmed(plan.digest))
@@ -470,7 +592,11 @@ async fn a_confirmed_plan_runs_exactly_as_shown() {
 #[tokio::test]
 async fn a_plan_confirmed_before_the_snapshots_changed_deletes_nothing() {
     let h = history().await;
-    let plan = h.env.prune(keep_last(1), PruneMode::DryRun).await.expect("plan");
+    let plan = h
+        .env
+        .prune(keep_last(1), PruneMode::DryRun)
+        .await
+        .expect("plan");
     h.env.backup().await;
     let before = h.env.repo_state();
 
@@ -482,9 +608,16 @@ async fn a_plan_confirmed_before_the_snapshots_changed_deletes_nothing() {
     assert!(matches!(err, Error::PlanChanged), "{err}");
     assert_eq!(h.env.repo_state(), before);
 
-    let fresh = h.env.prune(keep_last(1), PruneMode::DryRun).await.expect("new plan");
+    let fresh = h
+        .env
+        .prune(keep_last(1), PruneMode::DryRun)
+        .await
+        .expect("new plan");
     assert_ne!(fresh.digest, plan.digest);
-    h.env.prune(keep_last(1), PruneMode::Confirmed(fresh.digest)).await.expect("and now it runs");
+    h.env
+        .prune(keep_last(1), PruneMode::Confirmed(fresh.digest))
+        .await
+        .expect("and now it runs");
     assert_eq!(h.env.snapshot_names().len(), 1);
 }
 
@@ -503,7 +636,11 @@ async fn a_snapshot_that_cannot_be_read_stops_the_prune_before_anything_is_delet
     let before = h.env.repo_state();
 
     for mode in [PruneMode::DryRun, PruneMode::Unattended] {
-        let err = h.env.prune(keep_last(1), mode).await.expect_err("must refuse");
+        let err = h
+            .env
+            .prune(keep_last(1), mode)
+            .await
+            .expect_err("must refuse");
         match err {
             Error::UnreadableSnapshots { count, first, .. } => {
                 assert_eq!(count, 1);
@@ -525,8 +662,16 @@ async fn the_wrong_keys_cannot_prune() {
         mode: PruneMode::Unattended,
         ..PruneOptions::new(keep_last(1))
     };
-    let err = h.env.repo.prune(&stranger.keys, options).await.expect_err("must refuse");
-    assert!(matches!(err, Error::UnreadableSnapshots { count: 4, .. }), "{err}");
+    let err = h
+        .env
+        .repo
+        .prune(&stranger.keys, options)
+        .await
+        .expect_err("must refuse");
+    assert!(
+        matches!(err, Error::UnreadableSnapshots { count: 4, .. }),
+        "{err}"
+    );
     assert_eq!(h.env.repo_state(), before);
 }
 
@@ -543,7 +688,11 @@ async fn a_kept_snapshot_that_lacks_a_chunk_stops_the_prune() {
     let before = h.env.repo_state();
 
     for mode in [PruneMode::DryRun, PruneMode::Unattended] {
-        let err = h.env.prune(keep_last(2), mode).await.expect_err("must refuse");
+        let err = h
+            .env
+            .prune(keep_last(2), mode)
+            .await
+            .expect_err("must refuse");
         match err {
             Error::KeptSnapshotsDamaged { count, first } => {
                 assert_eq!(count, 1);
@@ -571,7 +720,11 @@ async fn a_chunk_missing_from_a_snapshot_that_is_going_anyway_does_not_stop_the_
         .expect("snapshot 1 has chunks of its own");
     fs::remove_file(h.env.chunk_file(&lost)).expect("remove chunk");
 
-    let report = h.env.prune(keep_last(2), PruneMode::Unattended).await.expect("prune");
+    let report = h
+        .env
+        .prune(keep_last(2), PruneMode::Unattended)
+        .await
+        .expect("prune");
     assert_eq!(report.snapshots_removed, 2);
     h.assert_remaining_restore().await;
     assert_intact(&h.env.check().await);
@@ -587,14 +740,29 @@ async fn a_deleting_prune_refuses_while_the_repository_is_in_use_and_a_dry_run_d
     let reader = h.env.repo.lock(LockKind::Shared).await.expect("lock");
     let before = h.env.repo_state();
 
-    h.env.prune(keep_last(1), PruneMode::DryRun).await.expect("a dry run reads next to a reader");
-    let err = h.env.prune(keep_last(1), PruneMode::Unattended).await.expect_err("must refuse");
+    h.env
+        .prune(keep_last(1), PruneMode::DryRun)
+        .await
+        .expect("a dry run reads next to a reader");
+    let err = h
+        .env
+        .prune(keep_last(1), PruneMode::Unattended)
+        .await
+        .expect_err("must refuse");
     assert!(matches!(err, Error::Locked { .. }), "{err}");
-    assert_eq!(h.env.repo_state(), before, "the refused prune left no trace");
+    assert_eq!(
+        h.env.repo_state(),
+        before,
+        "the refused prune left no trace"
+    );
     drop(reader);
     h.env.assert_unlocked();
 
-    let report = h.env.prune(keep_last(1), PruneMode::Unattended).await.expect("and then it runs");
+    let report = h
+        .env
+        .prune(keep_last(1), PruneMode::Unattended)
+        .await
+        .expect("and then it runs");
     assert_eq!(report.snapshots_removed, 3);
 }
 
@@ -606,9 +774,18 @@ async fn nothing_else_starts_while_a_prune_holds_the_repository() {
 
     let err = h.env.try_backup().await.expect_err("a backup must wait");
     assert!(matches!(err, Error::Locked { .. }), "{err}");
-    let err = h.env.prune(keep_last(1), PruneMode::DryRun).await.expect_err("even a dry run");
+    let err = h
+        .env
+        .prune(keep_last(1), PruneMode::DryRun)
+        .await
+        .expect_err("even a dry run");
     assert!(matches!(err, Error::Locked { .. }), "{err}");
-    let err = h.env.repo.check(&h.env.keys, CheckOptions::default()).await.expect_err("a check");
+    let err = h
+        .env
+        .repo
+        .check(&h.env.keys, CheckOptions::default())
+        .await
+        .expect_err("a check");
     assert!(matches!(err, Error::Locked { .. }), "{err}");
     assert_eq!(h.env.repo_state(), before);
     drop(holder);
@@ -645,7 +822,10 @@ async fn a_prune_racing_a_backup_or_another_prune_never_damages_a_snapshot() {
         h.assert_remaining_restore().await;
         assert_intact(&h.env.check().await);
     }
-    h.env.prune(keep_last(1), PruneMode::Unattended).await.expect("a lone prune always runs");
+    h.env
+        .prune(keep_last(1), PruneMode::Unattended)
+        .await
+        .expect("a lone prune always runs");
     assert_eq!(h.env.snapshot_names().len(), 1);
 }
 
@@ -655,9 +835,17 @@ async fn a_prune_racing_a_backup_or_another_prune_never_damages_a_snapshot() {
 
 #[tokio::test]
 async fn an_interrupted_prune_never_endangers_a_snapshot_and_a_rerun_finishes_the_job() {
-    let plan = history().await.env.prune(keep_last(2), PruneMode::DryRun).await.expect("plan");
+    let plan = history()
+        .await
+        .env
+        .prune(keep_last(2), PruneMode::DryRun)
+        .await
+        .expect("plan");
     let total = (plan.snapshots_to_remove() + plan.chunks_unreferenced) as usize;
-    assert!(total > 8, "the scenario must have a few deletions to interrupt: {total}");
+    assert!(
+        total > 8,
+        "the scenario must have a few deletions to interrupt: {total}"
+    );
 
     // Early in the removal of snapshots, between the two, and at several points in the chunks.
     for stop in [1, 2, 3, total / 2, total - 1] {
@@ -667,21 +855,39 @@ async fn an_interrupted_prune_never_endangers_a_snapshot_and_a_rerun_finishes_th
             ..PruneOptions::new(keep_last(2))
         };
         cancel_after_deletions(&mut options, stop);
-        let err = h.env.repo.prune(&h.env.keys, options).await.expect_err("cancelled");
+        let err = h
+            .env
+            .repo
+            .prune(&h.env.keys, options)
+            .await
+            .expect_err("cancelled");
         assert!(matches!(err, Error::PruneCancelled), "stop {stop}: {err}");
         h.env.assert_unlocked();
 
         for kept in [&h.ids[2], &h.ids[3]] {
-            assert!(h.env.snapshot_file(kept).exists(), "stop {stop}: a kept snapshot is gone");
+            assert!(
+                h.env.snapshot_file(kept).exists(),
+                "stop {stop}: a kept snapshot is gone"
+            );
         }
         h.assert_remaining_restore().await;
         let report = h.env.check().await;
         assert_intact(&report);
 
-        let done = h.env.prune(keep_last(2), PruneMode::Unattended).await.expect("rerun");
+        let done = h
+            .env
+            .prune(keep_last(2), PruneMode::Unattended)
+            .await
+            .expect("rerun");
         assert!(done.executed && done.is_complete(), "stop {stop}: {done:?}");
-        assert_eq!(h.env.snapshot_names(), [h.ids[2].to_string(), h.ids[3].to_string()]);
-        let rest = h.env.prune(keep_last(2), PruneMode::DryRun).await.expect("plan");
+        let mut kept_names = vec![h.ids[2].to_string(), h.ids[3].to_string()];
+        kept_names.sort();
+        assert_eq!(h.env.snapshot_names(), kept_names);
+        let rest = h
+            .env
+            .prune(keep_last(2), PruneMode::DryRun)
+            .await
+            .expect("plan");
         assert!(rest.is_noop(), "stop {stop}: {rest:?}");
         h.assert_remaining_restore().await;
         let clean = h.env.check().await;
@@ -698,7 +904,12 @@ async fn a_prune_cancelled_before_it_starts_changes_nothing() {
         ..PruneOptions::new(keep_last(1))
     };
     options.cancel.cancel();
-    let err = h.env.repo.prune(&h.env.keys, options).await.expect_err("cancelled");
+    let err = h
+        .env
+        .repo
+        .prune(&h.env.keys, options)
+        .await
+        .expect_err("cancelled");
     assert!(matches!(err, Error::PruneCancelled), "{err}");
     assert_eq!(h.env.repo_state(), before);
     h.env.assert_unlocked();

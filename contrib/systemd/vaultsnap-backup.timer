@@ -1,0 +1,12 @@
+# Starts vaultsnap-backup.service every night. Persistent=true runs a backup that was missed
+# because the machine was off at 02:30 as soon as it is on again.
+[Unit]
+Description=Run the VaultSnap backup every night
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

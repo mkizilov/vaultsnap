@@ -63,6 +63,7 @@ pub struct FakeS3 {
     page_size: usize,
     honors_if_none_match: bool,
     honors_if_match: bool,
+    creates_on_if_match: bool,
     writes_denied: bool,
     bucket_missing: bool,
     delay: Duration,
@@ -93,6 +94,7 @@ impl FakeS3 {
             page_size: 1000,
             honors_if_none_match: true,
             honors_if_match: true,
+            creates_on_if_match: false,
             writes_denied: false,
             bucket_missing: false,
             delay: Duration::ZERO,
@@ -119,6 +121,15 @@ impl FakeS3 {
     #[must_use]
     pub fn ignoring_if_match(mut self) -> Self {
         self.honors_if_match = false;
+        self
+    }
+
+    /// Creates the object when `If-Match` names one that does not exist, instead of answering
+    /// `404`: what the MinIO release of April 2025 does (found by running the storage contract
+    /// against it). A stale `If-Match` on an existing object is still refused.
+    #[must_use]
+    pub fn creating_on_if_match(mut self) -> Self {
+        self.creates_on_if_match = true;
         self
     }
 
@@ -188,7 +199,10 @@ impl FakeS3 {
 
     /// The bytes stored under `key`, if any.
     pub fn object(&self, key: &str) -> Option<Vec<u8>> {
-        self.lock().objects.get(key).map(|stored| stored.data.clone())
+        self.lock()
+            .objects
+            .get(key)
+            .map(|stored| stored.data.clone())
     }
 
     /// Stores `data` under `key` as if another client had written it (not counted as a call).
@@ -367,6 +381,7 @@ impl ObjectApi for FakeS3 {
                     return Err(Self::precondition_failed());
                 }
                 Condition::IfMatch(etag) if self.honors_if_match => match state.objects.get(key) {
+                    None if self.creates_on_if_match => {}
                     None => return Err(Self::no_such_key()),
                     Some(stored) if stored.etag != *etag => return Err(Self::precondition_failed()),
                     Some(_) => {}
@@ -455,37 +470,65 @@ mod tests {
         let second = put(&s3, "a", b"one");
         assert_ne!(first, second, "every write is a new version");
         let read = s3.get("a", None, 100).expect("get");
-        assert_eq!((read.data.as_slice(), &read.etag, read.total_len), (b"one".as_slice(), &second, 3));
+        assert_eq!(
+            (read.data.as_slice(), &read.etag, read.total_len),
+            (b"one".as_slice(), &second, 3)
+        );
         let head = s3.head("a").expect("head");
         assert_eq!((head.len, head.etag), (3, second));
-        assert_eq!(s3.get("missing", None, 10).expect_err("missing").kind, ApiErrorKind::NotFound);
-        assert_eq!(s3.head("missing").expect_err("missing").kind, ApiErrorKind::NotFound);
+        assert_eq!(
+            s3.get("missing", None, 10).expect_err("missing").kind,
+            ApiErrorKind::NotFound
+        );
+        assert_eq!(
+            s3.head("missing").expect_err("missing").kind,
+            ApiErrorKind::NotFound
+        );
     }
 
     #[test]
     fn conditions_are_honored_the_way_s3_honors_them() {
         let s3 = FakeS3::new();
-        let etag = s3.put("k", b"1", &Condition::IfNoneMatchAny).expect("create");
-        let err = s3.put("k", b"2", &Condition::IfNoneMatchAny).expect_err("exists");
-        assert_eq!((err.kind, err.status), (ApiErrorKind::PreconditionFailed, Some(412)));
+        let etag = s3
+            .put("k", b"1", &Condition::IfNoneMatchAny)
+            .expect("create");
+        let err = s3
+            .put("k", b"2", &Condition::IfNoneMatchAny)
+            .expect_err("exists");
+        assert_eq!(
+            (err.kind, err.status),
+            (ApiErrorKind::PreconditionFailed, Some(412))
+        );
         assert_eq!(s3.object("k").as_deref(), Some(b"1".as_slice()));
 
         let stale = "\"0\"".to_owned();
-        let err = s3.put("k", b"3", &Condition::IfMatch(stale)).expect_err("stale");
+        let err = s3
+            .put("k", b"3", &Condition::IfMatch(stale))
+            .expect_err("stale");
         assert_eq!(err.kind, ApiErrorKind::PreconditionFailed);
-        s3.put("k", b"3", &Condition::IfMatch(etag)).expect("current version");
+        s3.put("k", b"3", &Condition::IfMatch(etag))
+            .expect("current version");
         assert_eq!(s3.object("k").as_deref(), Some(b"3".as_slice()));
 
-        let err = s3.put("absent", b"x", &Condition::IfMatch("\"1\"".to_owned())).expect_err("missing");
-        assert_eq!(err.kind, ApiErrorKind::NotFound, "S3 answers 404 to If-Match on a missing key");
+        let err = s3
+            .put("absent", b"x", &Condition::IfMatch("\"1\"".to_owned()))
+            .expect_err("missing");
+        assert_eq!(
+            err.kind,
+            ApiErrorKind::NotFound,
+            "S3 answers 404 to If-Match on a missing key"
+        );
     }
 
     #[test]
     fn a_store_that_ignores_the_conditional_headers_overwrites_silently() {
         let s3 = FakeS3::new().ignoring_if_none_match().ignoring_if_match();
-        s3.put("k", b"1", &Condition::IfNoneMatchAny).expect("create");
-        s3.put("k", b"2", &Condition::IfNoneMatchAny).expect("silently overwrites");
-        s3.put("k", b"3", &Condition::IfMatch("\"stale\"".to_owned())).expect("silently overwrites");
+        s3.put("k", b"1", &Condition::IfNoneMatchAny)
+            .expect("create");
+        s3.put("k", b"2", &Condition::IfNoneMatchAny)
+            .expect("silently overwrites");
+        s3.put("k", b"3", &Condition::IfMatch("\"stale\"".to_owned()))
+            .expect("silently overwrites");
         assert_eq!(s3.object("k").as_deref(), Some(b"3".as_slice()));
     }
 
@@ -494,13 +537,25 @@ mod tests {
         let s3 = FakeS3::new();
         put(&s3, "digits", b"0123456789");
         let part = s3.get("digits", Some((0, 3)), u64::MAX).expect("range");
-        assert_eq!((part.data.as_slice(), part.total_len), (b"0123".as_slice(), 10));
-        let tail = s3.get("digits", Some((8, 100)), u64::MAX).expect("range past the end is cut");
+        assert_eq!(
+            (part.data.as_slice(), part.total_len),
+            (b"0123".as_slice(), 10)
+        );
+        let tail = s3
+            .get("digits", Some((8, 100)), u64::MAX)
+            .expect("range past the end is cut");
         assert_eq!(tail.data, b"89");
-        let err = s3.get("digits", Some((10, 12)), u64::MAX).expect_err("beyond the end");
-        assert_eq!((err.kind, err.status), (ApiErrorKind::InvalidRange, Some(416)));
+        let err = s3
+            .get("digits", Some((10, 12)), u64::MAX)
+            .expect_err("beyond the end");
+        assert_eq!(
+            (err.kind, err.status),
+            (ApiErrorKind::InvalidRange, Some(416))
+        );
         put(&s3, "empty", b"");
-        let err = s3.get("empty", Some((0, 9)), u64::MAX).expect_err("empty object");
+        let err = s3
+            .get("empty", Some((0, 9)), u64::MAX)
+            .expect_err("empty object");
         assert_eq!(err.kind, ApiErrorKind::InvalidRange);
         assert!(s3.get("empty", None, 0).expect("whole").data.is_empty());
     }
@@ -509,8 +564,14 @@ mod tests {
     fn a_whole_read_beyond_the_limit_is_refused_before_any_body() {
         let s3 = FakeS3::new();
         put(&s3, "ten", b"0123456789");
-        assert_eq!(s3.get("ten", None, 10).expect("at the limit").data.len(), 10);
-        assert_eq!(s3.get("ten", None, 9).expect_err("over").kind, ApiErrorKind::TooLarge);
+        assert_eq!(
+            s3.get("ten", None, 10).expect("at the limit").data.len(),
+            10
+        );
+        assert_eq!(
+            s3.get("ten", None, 9).expect_err("over").kind,
+            ApiErrorKind::TooLarge
+        );
     }
 
     #[test]
@@ -526,8 +587,15 @@ mod tests {
         loop {
             let page = s3.list("p/", true, token.as_deref()).expect("list");
             pages += 1;
-            assert!(page.objects.len() + page.prefixes.len() <= 2, "pages hold at most 2 entries");
-            objects.extend(page.objects.into_iter().map(|object| (object.key, object.len)));
+            assert!(
+                page.objects.len() + page.prefixes.len() <= 2,
+                "pages hold at most 2 entries"
+            );
+            objects.extend(
+                page.objects
+                    .into_iter()
+                    .map(|object| (object.key, object.len)),
+            );
             prefixes.extend(page.prefixes);
             token = page.next_token;
             if token.is_none() {
@@ -546,7 +614,11 @@ mod tests {
             put(&s3, key, b"x");
         }
         let page = s3.list("p/", false, None).expect("list");
-        let keys: Vec<&str> = page.objects.iter().map(|object| object.key.as_str()).collect();
+        let keys: Vec<&str> = page
+            .objects
+            .iter()
+            .map(|object| object.key.as_str())
+            .collect();
         assert_eq!(keys, ["p/a/1", "p/a/2", "p/b"]);
         assert!(page.prefixes.is_empty() && page.next_token.is_none());
     }
@@ -566,12 +638,25 @@ mod tests {
         let boom = ApiError::response(ApiErrorKind::Transient, 503, "SlowDown", "slow down");
         s3.fail_next("put", 1, &boom);
         s3.lose_answer_next("put", 1, &boom);
-        assert!(s3.head_bucket().is_ok(), "other operations are not affected");
-        assert_eq!(s3.put("a", b"1", &Condition::None).expect_err("refused").code.as_deref(), Some("SlowDown"));
+        assert!(
+            s3.head_bucket().is_ok(),
+            "other operations are not affected"
+        );
+        assert_eq!(
+            s3.put("a", b"1", &Condition::None)
+                .expect_err("refused")
+                .code
+                .as_deref(),
+            Some("SlowDown")
+        );
         assert!(s3.keys().is_empty(), "the first failure did nothing");
-        assert!(s3.put("a", b"1", &Condition::None).is_err(), "the second loses its answer");
+        assert!(
+            s3.put("a", b"1", &Condition::None).is_err(),
+            "the second loses its answer"
+        );
         assert_eq!(s3.keys(), ["a"], "but it was carried out");
-        s3.put("a", b"2", &Condition::None).expect("the script is used up");
+        s3.put("a", b"2", &Condition::None)
+            .expect("the script is used up");
         assert_eq!(s3.calls("put"), 3);
         assert_eq!(s3.total_calls(), 4);
     }
@@ -581,13 +666,31 @@ mod tests {
         let read_only = FakeS3::new().read_only();
         read_only.insert("a", b"1");
         assert!(read_only.get("a", None, 10).is_ok());
-        assert_eq!(read_only.put("b", b"1", &Condition::None).expect_err("denied").kind, ApiErrorKind::Denied);
-        assert_eq!(read_only.delete("a").expect_err("denied").kind, ApiErrorKind::Denied);
+        assert_eq!(
+            read_only
+                .put("b", b"1", &Condition::None)
+                .expect_err("denied")
+                .kind,
+            ApiErrorKind::Denied
+        );
+        assert_eq!(
+            read_only.delete("a").expect_err("denied").kind,
+            ApiErrorKind::Denied
+        );
 
         let gone = FakeS3::new().without_bucket();
-        assert_eq!(gone.head_bucket().expect_err("no bucket").kind, ApiErrorKind::NoSuchBucket);
-        assert_eq!(gone.head("a").expect_err("no bucket").kind, ApiErrorKind::NoSuchBucket);
-        assert_eq!(gone.list("", true, None).expect_err("no bucket").kind, ApiErrorKind::NoSuchBucket);
+        assert_eq!(
+            gone.head_bucket().expect_err("no bucket").kind,
+            ApiErrorKind::NoSuchBucket
+        );
+        assert_eq!(
+            gone.head("a").expect_err("no bucket").kind,
+            ApiErrorKind::NoSuchBucket
+        );
+        assert_eq!(
+            gone.list("", true, None).expect_err("no bucket").kind,
+            ApiErrorKind::NoSuchBucket
+        );
     }
 
     #[test]

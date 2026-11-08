@@ -9,9 +9,12 @@
 #   export VAULTSNAP_S3_TEST_ENDPOINT=http://127.0.0.1:21100
 #   docker compose -f docker/minio/compose.yaml down -v        # when done; -v deletes the data
 #
-# The image is pinned by tag. The tag is a release that exists on Docker Hub and Quay; whether it
-# honors conditional writes (If-None-Match / If-Match on PutObject) has not been checked here,
-# and VaultSnap refuses a server that does not, at connect time, with a message that says so.
+# This file was never run (Docker was not available where it was written). The same release was
+# built from source and run without Docker by scripts/minio-local.sh, and the S3 tests passed
+# against it (docs/S3.md); whether this image tag is still pullable was not checked. That release
+# honors If-None-Match, which is all a repository needs, but creates an object on If-Match of a
+# missing one (unlike S3); VaultSnap refuses a server that ignores If-None-Match, at connect time.
+# MinIO stopped publishing binaries when it was archived, so the native script is the maintained path.
 name: vaultsnap-minio
 
 services:

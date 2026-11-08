@@ -96,7 +96,9 @@ pub(crate) fn logical_path(root: &Root, index: usize) -> Vec<u8> {
 
 /// The logical path of a path the backup left out, in the same form as the paths of entries.
 pub fn skipped_path(manifest: &Manifest, record: &SkippedRecord) -> Vec<u8> {
-    let root = usize::try_from(record.root).ok().and_then(|index| manifest.roots.get(index));
+    let root = usize::try_from(record.root)
+        .ok()
+        .and_then(|index| manifest.roots.get(index));
     match root {
         Some(root) => join_path(&root.source, &record.path),
         None => record.path.clone(),
@@ -168,13 +170,17 @@ pub fn entries<'a>(
                 .enumerate()
                 .filter_map(move |(index, entry)| {
                     let path = logical_path(root, index);
-                    if prefix.as_ref().is_some_and(|prefix| !is_under(&path, prefix)) {
+                    if prefix
+                        .as_ref()
+                        .is_some_and(|prefix| !is_under(&path, prefix))
+                    {
                         return None;
                     }
                     let link_to = match entry.kind {
-                        NodeKind::HardLink { target } => {
-                            Some(logical_path(root, usize::try_from(target).unwrap_or(usize::MAX)))
-                        }
+                        NodeKind::HardLink { target } => Some(logical_path(
+                            root,
+                            usize::try_from(target).unwrap_or(usize::MAX),
+                        )),
                         _ => None,
                     };
                     Some(ListedEntry {
@@ -239,8 +245,16 @@ mod tests {
             .find(|listed| listed.path.ends_with(b"/alias"))
             .expect("the hard link exists");
         assert_eq!(alias.entry_type(), EntryType::HardLink);
-        assert_eq!(alias.link_to.as_deref(), Some(&b"/home/me/Documents/docs/report.txt"[..]));
-        assert_eq!(entries(&manifest, None).filter(|l| l.link_to.is_some()).count(), 1);
+        assert_eq!(
+            alias.link_to.as_deref(),
+            Some(&b"/home/me/Documents/docs/report.txt"[..])
+        );
+        assert_eq!(
+            entries(&manifest, None)
+                .filter(|l| l.link_to.is_some())
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -262,9 +276,15 @@ mod tests {
         let manifest = rich();
         assert_eq!(paths(&manifest, Some("/home/me/Documents/docs")).len(), 4);
         assert_eq!(paths(&manifest, Some("/home/me/Documents/docs/")).len(), 4);
-        assert_eq!(paths(&manifest, Some("/home/me/Documents/docs/report.txt")).len(), 1);
+        assert_eq!(
+            paths(&manifest, Some("/home/me/Documents/docs/report.txt")).len(),
+            1
+        );
         assert_eq!(paths(&manifest, Some("/home/me/Documents")).len(), 12);
-        assert_eq!(paths(&manifest, Some("/home/me/notes.txt")), ["/home/me/notes.txt"]);
+        assert_eq!(
+            paths(&manifest, Some("/home/me/notes.txt")),
+            ["/home/me/notes.txt"]
+        );
         assert_eq!(paths(&manifest, Some("/home/me")).len(), 13);
         assert_eq!(paths(&manifest, Some("/")).len(), 13);
     }
@@ -293,8 +313,11 @@ mod tests {
     #[test]
     fn skipped_paths_are_given_like_entry_paths() {
         let manifest = rich();
-        let paths: Vec<Vec<u8>> =
-            manifest.skipped.iter().map(|record| skipped_path(&manifest, record)).collect();
+        let paths: Vec<Vec<u8>> = manifest
+            .skipped
+            .iter()
+            .map(|record| skipped_path(&manifest, record))
+            .collect();
         assert_eq!(paths[0], b"/home/me/Documents/locked");
         assert_eq!(paths[1], b"/home/me/Documents/secret");
         assert_eq!(paths[2], b"/home/me/notes.txt", "the root itself");

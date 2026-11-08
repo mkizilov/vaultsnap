@@ -266,7 +266,10 @@ mod tests {
         };
         report.skipped.push(problem.clone());
         report.warnings.push(problem.clone());
-        assert!(report.is_complete(), "skipped entries and warnings are not failures");
+        assert!(
+            report.is_complete(),
+            "skipped entries and warnings are not failures"
+        );
         report.failed.push(problem);
         assert!(!report.is_complete());
     }

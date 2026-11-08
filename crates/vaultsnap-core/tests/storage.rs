@@ -91,7 +91,10 @@ async fn backup(repo: &Repository, keys: &RepositoryKeys, src: &Path) -> Snapsho
         racy_margin: Duration::ZERO,
         ..BackupOptions::default()
     };
-    repo.backup(keys, options).await.expect("backup succeeds").snapshot
+    repo.backup(keys, options)
+        .await
+        .expect("backup succeeds")
+        .snapshot
 }
 
 /// Restores a snapshot of `src` into `out` and returns the restored files.
@@ -106,7 +109,11 @@ async fn restored_files(
     let report = repo.restore(keys, options).await.expect("restore succeeds");
     assert!(report.is_complete(), "{report:?}");
     let canonical = fs::canonicalize(src).expect("the source exists");
-    read_tree(&report.target.join(canonical.strip_prefix("/").expect("absolute")))
+    read_tree(
+        &report
+            .target
+            .join(canonical.strip_prefix("/").expect("absolute")),
+    )
 }
 
 async fn assert_healthy(repo: &Repository, keys: &RepositoryKeys) {
@@ -128,7 +135,11 @@ async fn full_cycle(repo: &Repository, work: &Path) {
 
     let src = work.join("src");
     write(&src, "readme.txt", b"hello storage");
-    write(&src, "docs/report.txt", &b"quarterly numbers\n".repeat(2000));
+    write(
+        &src,
+        "docs/report.txt",
+        &b"quarterly numbers\n".repeat(2000),
+    );
     write(&src, "docs/data.bin", &pseudo_random(200_000, 1));
     write(&src, "old.bin", &pseudo_random(30_000, 2));
     write(&src, "empty.bin", b"");
@@ -144,11 +155,21 @@ async fn full_cycle(repo: &Repository, work: &Path) {
 
     let listing = repo.snapshots(&keys).await.expect("list");
     assert!(listing.damaged.is_empty());
-    let listed: Vec<SnapshotId> = listing.snapshots.iter().map(|info| info.summary.id.clone()).collect();
+    let listed: Vec<SnapshotId> = listing
+        .snapshots
+        .iter()
+        .map(|info| info.summary.id.clone())
+        .collect();
     assert_eq!(listed, [first.clone(), second.clone()], "oldest first");
 
-    assert_eq!(restored_files(repo, &keys, &first, &src, &work.join("out1")).await, first_files);
-    assert_eq!(restored_files(repo, &keys, &second, &src, &work.join("out2")).await, second_files);
+    assert_eq!(
+        restored_files(repo, &keys, &first, &src, &work.join("out1")).await,
+        first_files
+    );
+    assert_eq!(
+        restored_files(repo, &keys, &second, &src, &work.join("out2")).await,
+        second_files
+    );
     assert_healthy(repo, &keys).await;
 
     let policy = RetentionPolicy {
@@ -161,9 +182,15 @@ async fn full_cycle(repo: &Repository, work: &Path) {
     };
     let pruned = repo.prune(&keys, options).await.expect("prune");
     assert_eq!(pruned.snapshots_removed, 1);
-    assert!(pruned.chunks_removed > 0, "the removed snapshot had chunks of its own");
+    assert!(
+        pruned.chunks_removed > 0,
+        "the removed snapshot had chunks of its own"
+    );
     assert_healthy(repo, &keys).await;
-    assert_eq!(restored_files(repo, &keys, &second, &src, &work.join("out3")).await, second_files);
+    assert_eq!(
+        restored_files(repo, &keys, &second, &src, &work.join("out3")).await,
+        second_files
+    );
     let listing = repo.snapshots(&keys).await.expect("list");
     assert_eq!(listing.snapshots.len(), 1);
 }
@@ -190,7 +217,8 @@ fn every_reference_backend_passes_the_contract() {
             max_attempts: 12,
             ..RetryPolicy::none()
         };
-        let retrying = RetryingBackend::with_sleeper(Arc::new(flaky), policy, Arc::new(ImmediateSleeper));
+        let retrying =
+            RetryingBackend::with_sleeper(Arc::new(flaky), policy, Arc::new(ImmediateSleeper));
         Fixture::new(Arc::new(retrying))
     });
 }
@@ -218,7 +246,10 @@ async fn a_repository_works_end_to_end_on_object_store_semantics() {
     assert!(names.iter().any(|name| name.starts_with("keys/")));
     assert!(names.iter().any(|name| name.starts_with("snapshots/")));
     assert!(names.iter().any(|name| name.starts_with("data/")));
-    assert!(names.iter().all(|name| !name.starts_with("locks/")), "no lock is left behind");
+    assert!(
+        names.iter().all(|name| !name.starts_with("locks/")),
+        "no lock is left behind"
+    );
 }
 
 #[tokio::test]
@@ -234,16 +265,24 @@ async fn a_repository_works_on_storage_that_fails_now_and_then_behind_retries() 
 
     full_cycle(&repo, work.path()).await;
 
-    assert!(flaky.injected() > 20, "the storage must really have failed: {}", flaky.injected());
+    assert!(
+        flaky.injected() > 20,
+        "the storage must really have failed: {}",
+        flaky.injected()
+    );
 }
 
 #[tokio::test]
 async fn without_retries_a_failure_of_the_storage_reaches_the_caller_as_a_transient_error() {
-    let flaky = FlakyBackend::scripted_for(Arc::new(MemoryBackend::new()), &["probe"], [Fault::Before]);
+    let flaky =
+        FlakyBackend::scripted_for(Arc::new(MemoryBackend::new()), &["probe"], [Fault::Before]);
     let repo = Repository::with_backend(Arc::new(flaky));
     let err = repo.load_config().await.expect_err("the first probe fails");
     assert!(err.is_transient(), "{err}");
-    let err = repo.load_config().await.expect_err("and then the repository is simply not there");
+    let err = repo
+        .load_config()
+        .await
+        .expect_err("and then the repository is simply not there");
     assert!(matches!(err, Error::NotARepository { .. }), "{err}");
 }
 
@@ -286,7 +325,10 @@ async fn a_repository_moves_between_backends_object_by_object_without_conversion
     let directory = LocalBackend::new(work.path().join("repo"));
     directory.create_root().expect("create the directory");
     let original = Repository::with_backend(Arc::new(directory));
-    original.init_with_kdf(&passphrase, kdf()).await.expect("init");
+    original
+        .init_with_kdf(&passphrase, kdf())
+        .await
+        .expect("init");
     let keys = original.unlock(&passphrase).await.expect("unlock");
     let id = backup(&original, &keys, &src).await;
 
@@ -294,8 +336,14 @@ async fn a_repository_moves_between_backends_object_by_object_without_conversion
     let memory = Arc::new(MemoryBackend::new());
     copy_objects(original.backend().as_ref(), memory.as_ref(), "");
     let in_memory = Repository::with_backend(memory.clone());
-    let keys = in_memory.unlock(&passphrase).await.expect("the same passphrase unlocks it");
-    assert_eq!(restored_files(&in_memory, &keys, &id, &src, &work.path().join("out1")).await, files);
+    let keys = in_memory
+        .unlock(&passphrase)
+        .await
+        .expect("the same passphrase unlocks it");
+    assert_eq!(
+        restored_files(&in_memory, &keys, &id, &src, &work.path().join("out1")).await,
+        files
+    );
     assert_healthy(&in_memory, &keys).await;
 
     // ... and copied back into a new directory. The four directories of the format are
@@ -308,7 +356,10 @@ async fn a_repository_moves_between_backends_object_by_object_without_conversion
     copy_objects(memory.as_ref(), &back, "");
     let on_disk = Repository::at(work.path().join("repo2"));
     let keys = on_disk.unlock(&passphrase).await.expect("unlocks");
-    assert_eq!(restored_files(&on_disk, &keys, &id, &src, &work.path().join("out2")).await, files);
+    assert_eq!(
+        restored_files(&on_disk, &keys, &id, &src, &work.path().join("out2")).await,
+        files
+    );
     assert_healthy(&on_disk, &keys).await;
     assert_eq!(
         read_tree(&work.path().join("repo")),
@@ -345,8 +396,14 @@ async fn a_backend_that_cannot_guarantee_what_the_format_needs_is_refused_untouc
     for capabilities in weak {
         let memory = Arc::new(MemoryBackend::with_capabilities(capabilities.clone()));
         let repo = Repository::with_backend(memory.clone());
-        let err = repo.init_with_kdf(&passphrase(), kdf()).await.expect_err("must be refused");
-        assert!(matches!(err, Error::UnsupportedBackend(_)), "{capabilities:?}: {err}");
+        let err = repo
+            .init_with_kdf(&passphrase(), kdf())
+            .await
+            .expect_err("must be refused");
+        assert!(
+            matches!(err, Error::UnsupportedBackend(_)),
+            "{capabilities:?}: {err}"
+        );
         assert!(memory.object_names().is_empty(), "nothing was written");
         let err = repo.load_config().await.expect_err("must be refused");
         assert!(matches!(err, Error::UnsupportedBackend(_)), "{err}");
@@ -370,7 +427,10 @@ async fn a_directory_given_as_a_backend_still_keeps_restores_out_of_itself() {
 
     for target in [repo_dir.join("inside"), repo_dir.join("data")] {
         let options = RestoreOptions::new(SnapshotRef::from(&id), &target);
-        let err = repo.restore(&keys, options).await.expect_err("must be refused");
+        let err = repo
+            .restore(&keys, options)
+            .await
+            .expect_err("must be refused");
         assert!(matches!(err, Error::InvalidTarget(_)), "{target:?}: {err}");
     }
     assert!(!repo_dir.join("inside").exists());

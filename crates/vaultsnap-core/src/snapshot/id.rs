@@ -166,7 +166,9 @@ mod tests {
     fn rejects_uppercase_and_non_hex() {
         assert!("A".repeat(64).parse::<SnapshotId>().is_err());
         assert!("g".repeat(64).parse::<SnapshotId>().is_err());
-        assert!(format!("{}/", "a".repeat(63)).parse::<SnapshotId>().is_err());
+        assert!(format!("{}/", "a".repeat(63))
+            .parse::<SnapshotId>()
+            .is_err());
     }
 
     #[test]
@@ -188,10 +190,22 @@ mod tests {
     #[test]
     fn references_reject_everything_else() {
         let too_long = "a".repeat(65);
-        let bad = ["", "abc", "latest", "ABCD", "ab cd", "../..", "abcd/", too_long.as_str()];
+        let bad = [
+            "",
+            "abc",
+            "latest",
+            "ABCD",
+            "ab cd",
+            "../..",
+            "abcd/",
+            too_long.as_str(),
+        ];
         for text in bad {
             let result = text.parse::<SnapshotRef>();
-            assert!(matches!(result, Err(Error::InvalidSnapshotRef(_))), "{text:?}");
+            assert!(
+                matches!(result, Err(Error::InvalidSnapshotRef(_))),
+                "{text:?}"
+            );
         }
     }
 

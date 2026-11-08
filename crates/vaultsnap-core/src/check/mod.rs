@@ -467,7 +467,11 @@ mod tests {
         );
         let mut sorted = FindingKind::ALL;
         sorted.sort();
-        assert_eq!(sorted, FindingKind::ALL, "the declaration order is the listing order");
+        assert_eq!(
+            sorted,
+            FindingKind::ALL,
+            "the declaration order is the listing order"
+        );
         assert_eq!(FindingKind::ChunkMissing.to_string(), "chunk_missing");
     }
 
@@ -484,7 +488,10 @@ mod tests {
             .iter()
             .all(|kind| kind.severity() == Severity::Warning));
         assert!(Severity::Error < Severity::Warning);
-        assert_eq!((Severity::Error.name(), Severity::Warning.name()), ("error", "warning"));
+        assert_eq!(
+            (Severity::Error.name(), Severity::Warning.name()),
+            ("error", "warning")
+        );
     }
 
     #[test]
@@ -522,8 +529,17 @@ mod tests {
         assert!(report.is_ok() && report.is_clean());
         report.warnings = 2;
         report.counts.insert(FindingKind::OrphanObject, 2);
-        assert!(report.is_ok() && !report.is_clean(), "warnings are not errors");
-        assert_eq!((report.count(FindingKind::OrphanObject), report.count(FindingKind::IoError)), (2, 0));
+        assert!(
+            report.is_ok() && !report.is_clean(),
+            "warnings are not errors"
+        );
+        assert_eq!(
+            (
+                report.count(FindingKind::OrphanObject),
+                report.count(FindingKind::IoError)
+            ),
+            (2, 0)
+        );
         report.errors = 1;
         assert!(!report.is_ok());
     }
@@ -532,10 +548,16 @@ mod tests {
     fn the_defaults_are_a_quick_bounded_check() {
         let options = CheckOptions::default();
         assert!(!options.read_data);
-        assert_eq!((options.jobs, options.max_findings), (0, DEFAULT_MAX_FINDINGS));
+        assert_eq!(
+            (options.jobs, options.max_findings),
+            (0, DEFAULT_MAX_FINDINGS)
+        );
         assert!(options.observer.is_none() && !options.cancel.is_cancelled());
         assert!(format!("{options:?}").contains("CheckOptions"));
-        assert_eq!((CheckMode::Quick.name(), CheckMode::Full.name()), ("quick", "full"));
+        assert_eq!(
+            (CheckMode::Quick.name(), CheckMode::Full.name()),
+            ("quick", "full")
+        );
     }
 
     #[test]
@@ -547,8 +569,13 @@ mod tests {
                 counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
         });
-        observer.event(&CheckEvent::Step { phase: CheckPhase::Objects });
-        observer.event(&CheckEvent::Started { phase: CheckPhase::Objects, total: 1 });
+        observer.event(&CheckEvent::Step {
+            phase: CheckPhase::Objects,
+        });
+        observer.event(&CheckEvent::Started {
+            phase: CheckPhase::Objects,
+            total: 1,
+        });
         assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

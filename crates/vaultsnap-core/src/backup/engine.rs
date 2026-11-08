@@ -146,7 +146,9 @@ impl Slot {
 }
 
 fn lost_worker() -> Reply {
-    Reply::Fatal(Error::Task("a backup worker stopped unexpectedly".to_owned()))
+    Reply::Fatal(Error::Task(
+        "a backup worker stopped unexpectedly".to_owned(),
+    ))
 }
 
 struct Context<'a> {
@@ -169,7 +171,9 @@ pub(crate) fn run(services: &Services, options: &BackupOptions) -> Result<Backup
     let started = Timestamp::now();
 
     if options.sources.is_empty() {
-        return Err(Error::InvalidArgument("at least one source path is required"));
+        return Err(Error::InvalidArgument(
+            "at least one source path is required",
+        ));
     }
     if options.cancel.is_cancelled() {
         return Err(Error::Cancelled);
@@ -228,7 +232,9 @@ pub(crate) fn run(services: &Services, options: &BackupOptions) -> Result<Backup
 /// operations that run a pool.
 pub(crate) fn effective_jobs(requested: usize) -> usize {
     let jobs = if requested == 0 {
-        std::thread::available_parallelism().map_or(2, std::num::NonZeroUsize::get).min(4)
+        std::thread::available_parallelism()
+            .map_or(2, std::num::NonZeroUsize::get)
+            .min(4)
     } else {
         requested
     };
@@ -246,7 +252,9 @@ fn build_scanners(services: &Services, options: &BackupOptions) -> Result<Vec<Sc
     for source in &options.sources {
         let scanner = Scanner::new(source, scan.clone())?;
         if scanner.root().starts_with(&repository) {
-            return Err(Error::InvalidArgument("a source cannot be inside the repository"));
+            return Err(Error::InvalidArgument(
+                "a source cannot be inside the repository",
+            ));
         }
         if scanners.iter().any(|other| other.root() == scanner.root()) {
             return Err(Error::InvalidArgument("the same source was given twice"));
@@ -290,7 +298,10 @@ fn select_parents(
         .map(|scanner| {
             let source = os_bytes(scanner.root().as_os_str());
             candidates.iter().find_map(|manifest| {
-                let root = manifest.roots.iter().position(|root| root.source == source)?;
+                let root = manifest
+                    .roots
+                    .iter()
+                    .position(|root| root.source == source)?;
                 Some(ParentRoot::new(Arc::clone(manifest), root))
             })
         })
@@ -501,7 +512,9 @@ impl Context<'_> {
     ) -> Result<()> {
         match slot {
             Slot::Ready { entry, chunks } => builder.add_entry(root, &entry, chunks),
-            Slot::Failed { path, reason } => self.record_failure(builder, root, path, &reason, failed),
+            Slot::Failed { path, reason } => {
+                self.record_failure(builder, root, path, &reason, failed)
+            }
             Slot::Waiting {
                 entry,
                 receiver,
@@ -638,7 +651,9 @@ impl Context<'_> {
             };
             let length = chunk.data.len();
             let Ok(len) = u32::try_from(length) else {
-                return Attempt::Fatal(Error::InvalidArgument("a chunk is larger than the format allows"));
+                return Attempt::Fatal(Error::InvalidArgument(
+                    "a chunk is larger than the format allows",
+                ));
             };
             match self.services.chunks.put(chunk.data) {
                 Ok(put) => {
@@ -687,7 +702,10 @@ mod tests {
             kind: io::ErrorKind::PermissionDenied,
             message: "Permission denied".to_owned(),
         };
-        assert_eq!(describe_skip(&unreadable), "read directory: Permission denied");
+        assert_eq!(
+            describe_skip(&unreadable),
+            "read directory: Permission denied"
+        );
         assert!(describe_skip(&SkipReason::Vanished).contains("disappeared"));
         assert!(describe_skip(&SkipReason::SpecialFile(EntryKind::Fifo)).contains("Fifo"));
     }
@@ -767,7 +785,13 @@ mod tests {
         assert!(!slot.is_ready(), "nothing sent yet");
         reply.send(Reply::Cancelled).expect("send");
         assert!(slot.is_ready());
-        assert!(matches!(slot, Slot::Waiting { received: Some(Reply::Cancelled), .. }));
+        assert!(matches!(
+            slot,
+            Slot::Waiting {
+                received: Some(Reply::Cancelled),
+                ..
+            }
+        ));
 
         let (reply, receiver) = mpsc::channel::<Reply>();
         let mut orphan = Slot::Waiting {
@@ -776,7 +800,16 @@ mod tests {
             received: None,
         };
         drop(reply);
-        assert!(orphan.is_ready(), "a disconnected worker settles the slot as a failure");
-        assert!(matches!(orphan, Slot::Waiting { received: Some(Reply::Fatal(_)), .. }));
+        assert!(
+            orphan.is_ready(),
+            "a disconnected worker settles the slot as a failure"
+        );
+        assert!(matches!(
+            orphan,
+            Slot::Waiting {
+                received: Some(Reply::Fatal(_)),
+                ..
+            }
+        ));
     }
 }

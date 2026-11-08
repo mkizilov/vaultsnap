@@ -7,9 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::scan::{Metadata, Timestamp};
-use crate::snapshot::{
-    relative_path_bytes, Attributes, ChunkRef, Manifest, NodeKind, SnapshotId,
-};
+use crate::snapshot::{relative_path_bytes, Attributes, ChunkRef, Manifest, NodeKind, SnapshotId};
 
 /// One root of an earlier snapshot, indexed by path.
 pub(super) struct ParentRoot {
@@ -97,7 +95,8 @@ pub(super) fn unchanged(
         && prev_changed == changed
         && prev_inode == inode
         && prev_device == device;
-    same && older_than(changed, parent_started, margin) && older_than(modified, parent_started, margin)
+    same && older_than(changed, parent_started, margin)
+        && older_than(modified, parent_started, margin)
 }
 
 /// Whether `time` is strictly earlier than `reference` minus `margin`.
@@ -161,10 +160,18 @@ mod tests {
 
     const MARGIN: Duration = Duration::from_secs(2);
 
+    /// A change to a file's metadata, to try one difference at a time.
+    type Change = Box<dyn Fn(&mut Metadata)>;
+
     #[test]
     fn identical_old_files_are_unchanged() {
         assert!(unchanged(&attributes(), &metadata(), at(2000), MARGIN));
-        assert!(unchanged(&attributes(), &metadata(), at(2000), Duration::ZERO));
+        assert!(unchanged(
+            &attributes(),
+            &metadata(),
+            at(2000),
+            Duration::ZERO
+        ));
     }
 
     #[test]
@@ -178,28 +185,42 @@ mod tests {
     #[test]
     fn any_difference_in_the_identity_of_the_file_means_changed() {
         let parent = at(2000);
-        let cases: Vec<(&str, Box<dyn Fn(&mut Metadata)>)> = vec![
+        let cases: Vec<(&str, Change)> = vec![
             ("size", Box::new(|m: &mut Metadata| m.size = 101)),
-            ("modified", Box::new(|m: &mut Metadata| m.modified = Some(at(999)))),
+            (
+                "modified",
+                Box::new(|m: &mut Metadata| m.modified = Some(at(999))),
+            ),
             (
                 "modified nanoseconds",
-                Box::new(|m: &mut Metadata| m.modified = Some(Timestamp { secs: 1000, nanos: 1 })),
+                Box::new(|m: &mut Metadata| {
+                    m.modified = Some(Timestamp {
+                        secs: 1000,
+                        nanos: 1,
+                    })
+                }),
             ),
-            ("changed", Box::new(|m: &mut Metadata| m.changed = Some(at(1002)))),
+            (
+                "changed",
+                Box::new(|m: &mut Metadata| m.changed = Some(at(1002))),
+            ),
             ("inode", Box::new(|m: &mut Metadata| m.inode = Some(78))),
             ("device", Box::new(|m: &mut Metadata| m.device = Some(8))),
         ];
         for (what, change) in cases {
             let mut current = metadata();
             change(&mut current);
-            assert!(!unchanged(&attributes(), &current, parent, MARGIN), "{what}");
+            assert!(
+                !unchanged(&attributes(), &current, parent, MARGIN),
+                "{what}"
+            );
         }
     }
 
     #[test]
     fn missing_information_never_matches() {
         let parent = at(2000);
-        let clear: Vec<(&str, Box<dyn Fn(&mut Metadata)>)> = vec![
+        let clear: Vec<(&str, Change)> = vec![
             ("modified", Box::new(|m: &mut Metadata| m.modified = None)),
             ("changed", Box::new(|m: &mut Metadata| m.changed = None)),
             ("inode", Box::new(|m: &mut Metadata| m.inode = None)),
@@ -208,27 +229,59 @@ mod tests {
         for (what, change) in clear {
             let mut current = metadata();
             change(&mut current);
-            assert!(!unchanged(&attributes(), &current, parent, MARGIN), "current {what}");
+            assert!(
+                !unchanged(&attributes(), &current, parent, MARGIN),
+                "current {what}"
+            );
         }
         let mut previous = attributes();
         previous.inode = None;
-        assert!(!unchanged(&previous, &metadata(), parent, MARGIN), "previous inode");
+        assert!(
+            !unchanged(&previous, &metadata(), parent, MARGIN),
+            "previous inode"
+        );
         let mut previous = attributes();
         previous.changed = None;
-        assert!(!unchanged(&previous, &metadata(), parent, MARGIN), "previous changed");
+        assert!(
+            !unchanged(&previous, &metadata(), parent, MARGIN),
+            "previous changed"
+        );
     }
 
     #[test]
     fn files_touched_around_the_parent_backup_are_never_trusted() {
         // modified 1000, changed 1001.
-        assert!(unchanged(&attributes(), &metadata(), at(1004), MARGIN), "3 s before: fine");
-        assert!(!unchanged(&attributes(), &metadata(), at(1003), MARGIN), "2 s before: racy");
-        assert!(!unchanged(&attributes(), &metadata(), at(1002), MARGIN), "1 s before: racy");
-        assert!(!unchanged(&attributes(), &metadata(), at(1001), MARGIN), "same second: racy");
-        assert!(!unchanged(&attributes(), &metadata(), at(1000), MARGIN), "before the change");
+        assert!(
+            unchanged(&attributes(), &metadata(), at(1004), MARGIN),
+            "3 s before: fine"
+        );
+        assert!(
+            !unchanged(&attributes(), &metadata(), at(1003), MARGIN),
+            "2 s before: racy"
+        );
+        assert!(
+            !unchanged(&attributes(), &metadata(), at(1002), MARGIN),
+            "1 s before: racy"
+        );
+        assert!(
+            !unchanged(&attributes(), &metadata(), at(1001), MARGIN),
+            "same second: racy"
+        );
+        assert!(
+            !unchanged(&attributes(), &metadata(), at(1000), MARGIN),
+            "before the change"
+        );
         // With no margin only strictly earlier counts.
-        assert!(unchanged(&attributes(), &metadata(), at(1002), Duration::ZERO));
-        assert!(!unchanged(&attributes(), &metadata(), at(1001), Duration::ZERO), "equal is racy");
+        assert!(unchanged(
+            &attributes(),
+            &metadata(),
+            at(1002),
+            Duration::ZERO
+        ));
+        assert!(
+            !unchanged(&attributes(), &metadata(), at(1001), Duration::ZERO),
+            "equal is racy"
+        );
     }
 
     #[test]
@@ -239,9 +292,15 @@ mod tests {
         previous.changed = Some(at(1001));
         current.changed = Some(at(1001));
         // 1001 < 1002.5 - 1.5 = 1001.0? No: equal, so not strictly older.
-        let started = Timestamp { secs: 1002, nanos: 500_000_000 };
+        let started = Timestamp {
+            secs: 1002,
+            nanos: 500_000_000,
+        };
         assert!(!unchanged(&previous, &current, started, margin));
-        let started = Timestamp { secs: 1002, nanos: 500_000_001 };
+        let started = Timestamp {
+            secs: 1002,
+            nanos: 500_000_001,
+        };
         assert!(unchanged(&previous, &current, started, margin));
     }
 
@@ -298,11 +357,19 @@ mod tests {
     #[test]
     fn directories_unknown_paths_and_changed_files_are_not_reusable() {
         let parent = ParentRoot::new(manifest_with_file(), 0);
-        assert!(parent.reusable(Path::new("dir"), &metadata(), MARGIN).is_none());
-        assert!(parent.reusable(Path::new(""), &metadata(), MARGIN).is_none());
-        assert!(parent.reusable(Path::new("dir/other"), &metadata(), MARGIN).is_none());
+        assert!(parent
+            .reusable(Path::new("dir"), &metadata(), MARGIN)
+            .is_none());
+        assert!(parent
+            .reusable(Path::new(""), &metadata(), MARGIN)
+            .is_none());
+        assert!(parent
+            .reusable(Path::new("dir/other"), &metadata(), MARGIN)
+            .is_none());
         let mut changed = metadata();
         changed.size = 5;
-        assert!(parent.reusable(Path::new("dir/file"), &changed, MARGIN).is_none());
+        assert!(parent
+            .reusable(Path::new("dir/file"), &changed, MARGIN)
+            .is_none());
     }
 }

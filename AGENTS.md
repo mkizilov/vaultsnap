@@ -177,10 +177,13 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   can be refused without a network is refused in `S3Config::validate` or the CLI's `remote`
   module, before connecting; the SDK's own retries stay off so `RetryingBackend` sees every
   attempt; the backend declares only what the connect-time check saw work; texts from the
-  service go through `redact`; the SDK and HTTP stack stay at warnings under `-v`. Tests
-  against MinIO (`crates/vaultsnap-core/tests/s3_minio.rs`, `docker/minio/compose.yaml`) run
-  only when `VAULTSNAP_S3_TEST_ENDPOINT` is set, use loopback ports 21100-21199 and a prefix of
-  their own, and are reported as unverified when they could not run.
+  service go through `redact`; the SDK and HTTP stack stay at warnings under `-v`; a guarantee is
+  declared only after the connect-time probe saw it hold (a real server once failed one the
+  fake never would). Tests against MinIO (`crates/vaultsnap-core/tests/s3_minio.rs`) run only
+  when `VAULTSNAP_S3_TEST_ENDPOINT` is set, use loopback ports 21100-21199 and a prefix of their
+  own, and are reported as unverified when they could not run. `scripts/minio-local.sh` builds
+  and runs the pinned MinIO natively inside the repository (no Docker, loopback only, random
+  credentials); `docker/minio/compose.yaml` is the alternative that has not been run.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
   manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, `restore`,
@@ -192,8 +195,24 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   be cleaned up. Never use `unsafe` (it is forbidden), even in tests: spawn `mkfifo` instead.
 - Tests and benchmarks: chunking property tests live in `crates/vaultsnap-core/tests/chunking.rs`
   (`proptest`; only properties that are provable, plus fixed-seed statistical tests with wide
-  margins, to avoid flaky tests); the benchmark is `crates/vaultsnap-core/benches/chunking.rs`
-  (`harness = false`, in-memory data only). Report benchmark numbers only if actually run.
+  margins, to avoid flaky tests); the benchmarks are `crates/vaultsnap-core/benches/chunking.rs`
+  (in-memory data only) and `benches/throughput.rs` (end-to-end throughput and deduplication on
+  real directories; both `harness = false`). Report benchmark numbers only if actually run.
+- Reliability tests (`docs/RELIABILITY.md` says what each proves): `tests/properties.rs` (proptest
+  invariants of crypto, retention, parsers, the chunk store, and the backends), `tests/roundtrip.rs`
+  (seeded random trees; a failure names its seed, `VAULTSNAP_ROUNDTRIP_SEED=n` replays it),
+  `tests/crash.rs` (a backup and a prune killed at every storage call, in both ways a call can
+  fail to answer; `VAULTSNAP_CRASH_STRIDE=n` samples), and `crates/vaultsnap-cli/tests/e2e.rs`
+  (the binary over a repository's life, the scheduled invocation, version output). They use the
+  in-memory backend where they can; keep them deterministic. A new failure mode of a command is
+  not handled until the crash test covers it.
+- Release and version: the version has one source, `[workspace.package] version`. `build.rs` in
+  the CLI records the commit, target, and profile; `version` prints them with the format numbers
+  from the core constants, so never hard-code a format number in the CLI. `scripts/package.sh`
+  and `.github/workflows/release.yml` build releases (`docs/RELEASING.md`); `Cargo.lock` is
+  committed and releases build `--locked`. Scheduler files and their test are in `contrib/`
+  (`sh contrib/test-scheduled.sh`); the wrapper script takes everything from the environment and
+  the passphrase only as a file.
 - CLI passphrases (`passphrase` module) come from `--password-file`/`VAULTSNAP_PASSWORD_FILE` or a
   no-echo prompt, never from arguments or environment values, and are read before any repository
   file is created.
@@ -210,11 +229,14 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   `inspect` (`snapshots`/`show`/`ls`/`diff`: `human` = text, `json` = one JSON document built
   from explicit `serde` structs, `tests` = golden output), `format` (sizes, UTC times, `escape`
   for names, `ls`-style modes), `passphrase` (including `unlock`), `remote` (turns `--repo` into a directory or an S3
-  repository; the S3 options are `cli::S3Args`), `logging` (tracing setup,
-  stderr only; `-v` raises only VaultSnap's own messages). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
+  repository; the S3 options are `cli::S3Args`), `version` (`--version` and the `version`
+  command), `logging` (tracing setup, stderr only; `-v` raises only VaultSnap's own messages).
+  `serde`/`serde_json` are for CLI output only; the core does not depend on them.
 - `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, `CHECK.md`,
-  `PRUNE.md`, `STORAGE.md`, `S3.md`, and `CLI.md` (the command reference; every new or changed command,
-  option, or output goes there with an example).
+  `PRUNE.md`, `STORAGE.md`, `S3.md`, and `CLI.md` (the command reference; every new or changed
+  command, option, or output goes there with an example); for people using the tool `INSTALL.md`,
+  `GUIDE.md`, `DISASTER_RECOVERY.md`, `LIMITATIONS.md`; for maintainers `RELIABILITY.md` and
+  `RELEASING.md`. A behavior change updates the guide that describes it in the same commit.
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors
 are typed in core and converted at the CLI boundary; user-supplied identifiers are validated
@@ -226,11 +248,42 @@ Run from the repository root with the project-local environment:
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+sh contrib/test-scheduled.sh && sh scripts/test-package.sh
 ```
 
-At most two build/test workers (`CARGO_BUILD_JOBS=2`). Test servers, if ever added, bind to
-loopback ports 21100-21199. Tests that need Docker must stay reproducible and be reported as
-unverified when they cannot run here.
+At most two build/test workers (`CARGO_BUILD_JOBS=2`, `RUST_TEST_THREADS=2`). Test servers bind to
+loopback ports 21100-21199 and are stopped, with their data and credentials deleted, before a
+turn ends (`sh scripts/minio-local.sh clean`). The MinIO tests (`docs/S3.md`) must stay
+reproducible and be reported as unverified when they cannot run.
+
+A test failure is analyzed before anything is changed: say whether the product or the test was
+wrong, and why (`docs/RELIABILITY.md` section 2 shows the form). Never edit an expectation to
+match behavior you have not explained.
+
+### Toolchain in this sandbox
+
+The toolchain lives under `.agent-local/` (git-ignored). Nothing is installed globally and no shell
+profile is touched:
+
+```sh
+# once: rustup into the project-local CARGO_HOME / RUSTUP_HOME, then the pinned toolchain
+curl -fsSL https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init -o .agent-local/tmp/rustup-init
+chmod +x .agent-local/tmp/rustup-init
+.agent-local/tmp/rustup-init -y --no-modify-path --default-toolchain none --profile minimal
+"$CARGO_HOME/bin/rustup" toolchain install "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" \
+    --profile minimal -c rustfmt -c clippy --no-self-update
+```
+
+On macOS the sandbox does not let `xcrun` write its cache under `/var/folders`, so clang finds no
+SDK and C dependencies (`ring`, `zstd`) fail with `'TargetConditionals.h' file not found`. Name the
+SDK and the compiler directly (read-only paths, nothing outside the repository is written):
+
+```sh
+export PATH="$CARGO_HOME/bin:$PATH" CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2
+export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+export CC=/Library/Developer/CommandLineTools/usr/bin/clang
+export CXX=/Library/Developer/CommandLineTools/usr/bin/clang++
+```

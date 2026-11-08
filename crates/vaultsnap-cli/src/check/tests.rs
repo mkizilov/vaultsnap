@@ -8,9 +8,7 @@ use std::io::{self, Write};
 use std::time::Duration;
 
 use vaultsnap_core::snapshot::SnapshotId;
-use vaultsnap_core::{
-    AffectedSnapshot, CheckMode, CheckReport, CheckStats, Finding, FindingKind,
-};
+use vaultsnap_core::{AffectedSnapshot, CheckMode, CheckReport, CheckStats, Finding, FindingKind};
 
 use super::{human, json};
 
@@ -148,7 +146,10 @@ fn a_damaged_repository_as_text() {
     let advice = |kind: FindingKind| format!("  {kind}: {}", kind.advice());
     let expected = [
         format!("Repository {REPOSITORY} (format version 1)"),
-        field("Mode", "quick: snapshots authenticated, chunk objects examined by structure only"),
+        field(
+            "Mode",
+            "quick: snapshots authenticated, chunk objects examined by structure only",
+        ),
         String::new(),
         field("Snapshots", "2 readable, 1 damaged"),
         field("Chunks", "4 referenced by snapshots, 1 missing"),
@@ -192,7 +193,10 @@ fn a_damaged_repository_as_text() {
     ];
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines, expected);
-    assert!(text.ends_with('\n') && !text.contains("  \n"), "no trailing spaces");
+    assert!(
+        text.ends_with('\n') && !text.contains("  \n"),
+        "no trailing spaces"
+    );
 }
 
 #[test]
@@ -221,8 +225,16 @@ fn a_clean_full_check_as_text() {
 #[test]
 fn warnings_alone_pass_and_a_quick_check_says_what_it_did_not_read() {
     let findings = vec![
-        finding(FindingKind::OrphanObject, &chunk("ab"), "no snapshot refers to this object"),
-        finding(FindingKind::LockPresent, "locks/x.lock", "a shared lock held by process 7"),
+        finding(
+            FindingKind::OrphanObject,
+            &chunk("ab"),
+            "no snapshot refers to this object",
+        ),
+        finding(
+            FindingKind::LockPresent,
+            "locks/x.lock",
+            "a shared lock held by process 7",
+        ),
     ];
     let mut report = clean_full();
     report.mode = CheckMode::Quick;
@@ -231,17 +243,34 @@ fn warnings_alone_pass_and_a_quick_check_says_what_it_did_not_read() {
     report.warnings = 2;
     let text = render(|out| human::report(out, &report));
     let lines: Vec<&str> = text.lines().collect();
-    assert!(lines.contains(&"Result: no errors found, 2 warnings."), "{text}");
-    assert!(lines.last().is_some_and(|line| line.starts_with("Quick mode does not read")));
-    assert!(!text.contains("ERRORS") && !text.contains("AFFECTED"), "{text}");
-    assert!(text.contains("  lock_present: A process may be using the repository"), "{text}");
-    assert!(!text.contains("Verified"), "nothing was authenticated in quick mode");
+    assert!(
+        lines.contains(&"Result: no errors found, 2 warnings."),
+        "{text}"
+    );
+    assert!(lines
+        .last()
+        .is_some_and(|line| line.starts_with("Quick mode does not read")));
+    assert!(
+        !text.contains("ERRORS") && !text.contains("AFFECTED"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  lock_present: A process may be using the repository"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("Verified"),
+        "nothing was authenticated in quick mode"
+    );
 
     report.warnings = 1;
     report.counts.remove(&FindingKind::LockPresent);
     report.findings.pop();
     let text = render(|out| human::report(out, &report));
-    assert!(text.contains("Result: no errors found, 1 warning.\n"), "{text}");
+    assert!(
+        text.contains("Result: no errors found, 1 warning.\n"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -306,7 +335,11 @@ fn the_counts_object_has_a_field_for_every_kind() {
     assert_eq!(counts.len(), FindingKind::ALL.len());
     for kind in FindingKind::ALL {
         let expected = damaged().count(kind);
-        assert_eq!(counts[kind.name()], expected, "{kind}: a new kind must be added to the JSON too");
+        assert_eq!(
+            counts[kind.name()],
+            expected,
+            "{kind}: a new kind must be added to the JSON too"
+        );
     }
 }
 
@@ -314,13 +347,20 @@ fn the_counts_object_has_a_field_for_every_kind() {
 fn json_is_one_valid_line_and_the_output_does_not_depend_on_the_clock() {
     for report in [damaged(), clean_full()] {
         let text = render(|out| json::report(out, &report));
-        assert!(text.ends_with('\n') && !text[..text.len() - 1].contains('\n'), "{text}");
+        assert!(
+            text.ends_with('\n') && !text[..text.len() - 1].contains('\n'),
+            "{text}"
+        );
         let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
         assert!(parsed.is_object());
 
         let mut later = report.clone();
         later.duration = Duration::from_secs(99);
-        assert_eq!(render(|out| json::report(out, &later)), text, "no time is in the document");
+        assert_eq!(
+            render(|out| json::report(out, &later)),
+            text,
+            "no time is in the document"
+        );
     }
 }
 
@@ -339,13 +379,25 @@ fn hostile_names_cannot_reach_the_terminal_and_stay_exact_in_json() {
 
     let text = render(|out| human::report(out, &report));
     for forbidden in ['\x1b', '\x07', '\r', '\u{202e}'] {
-        assert!(!text.contains(forbidden), "{forbidden:?} reached the output:\n{text:?}");
+        assert!(
+            !text.contains(forbidden),
+            "{forbidden:?} reached the output:\n{text:?}"
+        );
     }
-    assert!(!text.lines().any(|line| line.starts_with("forged")), "a name started a new line");
-    assert!(text.contains(r"x\x1b[2J\x07\r\nforged: ok\u{202e}"), "{text}");
+    assert!(
+        !text.lines().any(|line| line.starts_with("forged")),
+        "a name started a new line"
+    );
+    assert!(
+        text.contains(r"x\x1b[2J\x07\r\nforged: ok\u{202e}"),
+        "{text}"
+    );
 
     let text = render(|out| json::report(out, &report));
     let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
-    assert_eq!(parsed["findings"][0]["subject"], name, "JSON keeps the name exact");
+    assert_eq!(
+        parsed["findings"][0]["subject"], name,
+        "JSON keeps the name exact"
+    );
     assert!(!text.contains('\x1b') && !text[..text.len() - 1].contains('\n'));
 }

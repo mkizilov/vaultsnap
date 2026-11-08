@@ -186,8 +186,8 @@ Other limitations:
 
 ## Verification status
 
-The tests below were written together with the scanner but **have not been run**: the authoring
-environment had no Rust toolchain. The first real build and test run is the first verification.
+The tests below pass on macOS with Rust 1.94.1 ([`RELIABILITY.md`](RELIABILITY.md)). Some of them
+skip themselves where the platform cannot create the case (see below), and none has run on Linux.
 
 The scanner is covered by integration tests on real directory trees: nested and scrambled
 creation order, ordering checked against an independent walk, unusual names (spaces, newlines,

@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use vaultsnap_core::scan::Timestamp;
 use vaultsnap_core::snapshot::SnapshotId;
-use vaultsnap_core::{Decision, KeepReason, PlanDigest, PruneFailure, PruneReport, RetentionPolicy};
+use vaultsnap_core::{
+    Decision, KeepReason, PlanDigest, PruneFailure, PruneReport, RetentionPolicy,
+};
 
 use super::{decide, human, permission, Permission};
 use crate::commands::CliError;
@@ -94,7 +96,10 @@ fn deleting_needs_a_dry_run_an_explicit_yes_or_a_person_to_ask() {
     ];
     for ((dry_run, yes, interactive), expected) in cases {
         let got = permission(dry_run, yes, interactive).expect("permitted");
-        assert_eq!(got, expected, "dry_run={dry_run} yes={yes} interactive={interactive}");
+        assert_eq!(
+            got, expected,
+            "dry_run={dry_run} yes={yes} interactive={interactive}"
+        );
     }
 }
 
@@ -103,7 +108,10 @@ fn without_a_person_and_without_yes_nothing_is_deleted() {
     let err = permission(false, false, false).expect_err("must refuse");
     assert!(matches!(err, CliError::PruneNeedsConfirmation), "{err}");
     let text = err.to_string();
-    assert!(text.contains("--dry-run") && text.contains("--yes"), "{text}");
+    assert!(
+        text.contains("--dry-run") && text.contains("--yes"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -112,13 +120,29 @@ fn only_the_word_yes_is_a_yes() {
     for answer in accepted {
         let mut input = answer.as_bytes();
         let mut out = Vec::new();
-        assert!(decide(&mut input, &mut out, "Proceed? ").expect("read"), "{answer:?}");
+        assert!(
+            decide(&mut input, &mut out, "Proceed? ").expect("read"),
+            "{answer:?}"
+        );
     }
-    let refused = ["", "\n", "y\n", "Y\n", "YES\n", "Yes\n", "no\n", "yes please\n", "yess\n"];
+    let refused = [
+        "",
+        "\n",
+        "y\n",
+        "Y\n",
+        "YES\n",
+        "Yes\n",
+        "no\n",
+        "yes please\n",
+        "yess\n",
+    ];
     for answer in refused {
         let mut input = answer.as_bytes();
         let mut out = Vec::new();
-        assert!(!decide(&mut input, &mut out, "Proceed? ").expect("read"), "{answer:?}");
+        assert!(
+            !decide(&mut input, &mut out, "Proceed? ").expect("read"),
+            "{answer:?}"
+        );
     }
 }
 
@@ -176,7 +200,10 @@ fn the_policy_is_written_in_the_order_of_the_rules_and_only_with_the_rules_that_
         keep_monthly: Some(12),
         keep_yearly: Some(2),
     };
-    assert_eq!(human::policy_text(&all), "keep last 3, daily 7, weekly 4, monthly 12, yearly 2");
+    assert_eq!(
+        human::policy_text(&all),
+        "keep last 3, daily 7, weekly 4, monthly 12, yearly 2"
+    );
     let only_yearly = RetentionPolicy {
         keep_yearly: Some(5),
         ..RetentionPolicy::default()

@@ -347,10 +347,28 @@ mod tests {
         let long_bad = "a".repeat(MAX_NAME_LEN + 1);
         assert!(validate_name(&long_ok).is_ok());
         for bad in [
-            "", "/", "/abs", "a//b", "a/", "../x", "a/../b", ".", "..", ".hidden", "a/.b",
-            ".tmp-0011", "a b", "a\\b", "a\0b", "naïve", long_bad.as_str(),
+            "",
+            "/",
+            "/abs",
+            "a//b",
+            "a/",
+            "../x",
+            "a/../b",
+            ".",
+            "..",
+            ".hidden",
+            "a/.b",
+            ".tmp-0011",
+            "a b",
+            "a\\b",
+            "a\0b",
+            "naïve",
+            long_bad.as_str(),
         ] {
-            assert!(matches!(validate_name(bad), Err(Error::InvalidName(_))), "{bad:?}");
+            assert!(
+                matches!(validate_name(bad), Err(Error::InvalidName(_))),
+                "{bad:?}"
+            );
         }
     }
 
@@ -382,20 +400,40 @@ mod tests {
     fn a_backend_needs_consistency_conditional_create_and_atomic_writes() {
         assert!(caps().require_repository_support().is_ok());
         let cases = [
-            Capabilities { read_after_write: false, ..caps() },
-            Capabilities { create_if_absent: Guarantee::Process, ..caps() },
-            Capabilities { create_if_absent: Guarantee::None, ..caps() },
-            Capabilities { atomic_put: false, ..caps() },
+            Capabilities {
+                read_after_write: false,
+                ..caps()
+            },
+            Capabilities {
+                create_if_absent: Guarantee::Process,
+                ..caps()
+            },
+            Capabilities {
+                create_if_absent: Guarantee::None,
+                ..caps()
+            },
+            Capabilities {
+                atomic_put: false,
+                ..caps()
+            },
         ];
         for case in cases {
-            let err = case.require_repository_support().expect_err("must be refused");
-            assert!(matches!(err, Error::UnsupportedBackend(_)), "{case:?}: {err}");
+            let err = case
+                .require_repository_support()
+                .expect_err("must be refused");
+            assert!(
+                matches!(err, Error::UnsupportedBackend(_)),
+                "{case:?}: {err}"
+            );
         }
     }
 
     #[test]
     fn replacing_conditionally_is_not_needed_to_hold_a_repository() {
-        let caps = Capabilities { replace_if_unchanged: Guarantee::None, ..caps() };
+        let caps = Capabilities {
+            replace_if_unchanged: Guarantee::None,
+            ..caps()
+        };
         assert!(caps.require_repository_support().is_ok());
     }
 

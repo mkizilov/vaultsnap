@@ -62,9 +62,15 @@ mod tests {
 
     #[test]
     fn rejects_empty_and_oversized() {
-        assert!(matches!(Passphrase::new(Vec::new()), Err(Error::InvalidPassphrase(_))));
+        assert!(matches!(
+            Passphrase::new(Vec::new()),
+            Err(Error::InvalidPassphrase(_))
+        ));
         let too_long = vec![b'a'; MAX_PASSPHRASE_BYTES + 1];
-        assert!(matches!(Passphrase::new(too_long), Err(Error::InvalidPassphrase(_))));
+        assert!(matches!(
+            Passphrase::new(too_long),
+            Err(Error::InvalidPassphrase(_))
+        ));
         assert!(Passphrase::new(vec![b'a'; MAX_PASSPHRASE_BYTES]).is_ok());
     }
 

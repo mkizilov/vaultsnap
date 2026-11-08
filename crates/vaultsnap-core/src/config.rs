@@ -109,14 +109,23 @@ mod tests {
         let config = RepositoryConfig::new(id(), 1_700_000_000);
         assert_eq!(config.format_version, FORMAT_VERSION);
         assert_eq!(config.to_bytes(), valid_text().into_bytes());
-        assert_eq!(RepositoryConfig::parse(&config.to_bytes()).expect("parses"), config);
+        assert_eq!(
+            RepositoryConfig::parse(&config.to_bytes()).expect("parses"),
+            config
+        );
     }
 
     #[test]
     fn newer_version_is_reported_even_with_unknown_fields() {
         let text = format!("{MAGIC}\nformat_version=2\nsomething_new=yes\nrepository_id=zz\n");
         let err = RepositoryConfig::parse(text.as_bytes()).expect_err("must fail");
-        assert!(matches!(err, Error::UnsupportedVersion { found: 2, supported: 1 }));
+        assert!(matches!(
+            err,
+            Error::UnsupportedVersion {
+                found: 2,
+                supported: 1
+            }
+        ));
     }
 
     #[test]
@@ -147,7 +156,10 @@ mod tests {
         ];
         for case in cases {
             let err = RepositoryConfig::parse(case.as_bytes()).expect_err(&case);
-            assert!(matches!(err, Error::InvalidConfig(_)), "{case:?} gave {err}");
+            assert!(
+                matches!(err, Error::InvalidConfig(_)),
+                "{case:?} gave {err}"
+            );
         }
     }
 

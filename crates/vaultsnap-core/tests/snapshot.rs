@@ -54,7 +54,11 @@ async fn repository() -> Repo {
     let dir = tempfile::tempdir().expect("create temporary directory");
     let path = dir.path().join("repo");
     let repo = Repository::at(&path);
-    let kdf = KdfParams { m_cost_kib: 64, t_cost: 1, p_cost: 1 };
+    let kdf = KdfParams {
+        m_cost_kib: 64,
+        t_cost: 1,
+        p_cost: 1,
+    };
     let config = repo.init_with_kdf(&passphrase(), kdf).await.expect("init");
     let keys = repo.unlock(&passphrase()).await.expect("unlock");
     Repo {
@@ -118,7 +122,11 @@ fn source_tree() -> TempDir {
     let root = dir.path();
     write(root, "readme.txt", b"hello snapshot");
     write(root, "empty.bin", b"");
-    write(root, "docs/report-2024.txt", &b"quarterly numbers\n".repeat(2000));
+    write(
+        root,
+        "docs/report-2024.txt",
+        &b"quarterly numbers\n".repeat(2000),
+    );
     write(root, "docs/archive/data.bin", &pseudo_random(120_000, 1));
     write(root, "docs/archive/notes", b"x");
     write(root, "unicode/日本語 ファイル.txt", "こんにちは".as_bytes());
@@ -157,12 +165,20 @@ async fn a_backup_commits_and_loads_back_with_its_full_structure() {
     for (index, entry) in scanned.iter().enumerate() {
         let recorded = root.relative_path(index);
         let expected = entry.path.to_string_lossy().replace('\\', "/");
-        assert_eq!(String::from_utf8_lossy(&recorded), expected, "entry {index}");
+        assert_eq!(
+            String::from_utf8_lossy(&recorded),
+            expected,
+            "entry {index}"
+        );
         let kind_matches = matches!(
             (&entry.kind, &root.entries[index].kind),
             (EntryKind::Directory, NodeKind::Directory) | (EntryKind::File, NodeKind::File { .. })
         );
-        assert!(kind_matches, "entry {index}: {:?} vs {:?}", entry.kind, root.entries[index].kind);
+        assert!(
+            kind_matches,
+            "entry {index}: {:?} vs {:?}",
+            entry.kind, root.entries[index].kind
+        );
         let attributes = &root.entries[index].attributes;
         assert_eq!(attributes.mode, entry.metadata.mode);
         assert_eq!(attributes.modified, entry.metadata.modified);
@@ -200,9 +216,16 @@ async fn large_files_are_recorded_as_ordered_multi_chunk_lists() {
         panic!("not a file");
     };
     assert!(chunks.len() > 5, "{} chunks", chunks.len());
-    assert_eq!(chunks.iter().map(|c| u64::from(c.len)).sum::<u64>(), 120_000);
+    assert_eq!(
+        chunks.iter().map(|c| u64::from(c.len)).sum::<u64>(),
+        120_000
+    );
     assert!(chunks.iter().all(|c| (1..=16_384).contains(&c.len)));
-    assert_eq!(content(&repo, entry), pseudo_random(120_000, 1), "entry {index}");
+    assert_eq!(
+        content(&repo, entry),
+        pseudo_random(120_000, 1),
+        "entry {index}"
+    );
 }
 
 #[tokio::test]
@@ -220,13 +243,19 @@ async fn historical_snapshots_stay_intact_and_share_chunks() {
     let second = take_snapshot(&repo, source.path(), ScanOptions::default(), &["tuesday"]);
     repo.snapshots.commit(&second).expect("commit second");
     let new_objects = count_files(&repo.path.join("data")) - chunk_objects_after_first;
-    assert!(new_objects <= 3, "{new_objects} new chunk objects for a tiny change");
+    assert!(
+        new_objects <= 3,
+        "{new_objects} new chunk objects for a tiny change"
+    );
 
     let ids = repo.snapshots.ids().expect("ids");
     assert_eq!(ids.len(), 2);
     assert_ne!(first.id, second.id);
     assert_eq!(repo.snapshots.load(&first.id).expect("load first"), first);
-    assert_eq!(repo.snapshots.load(&second.id).expect("load second"), second);
+    assert_eq!(
+        repo.snapshots.load(&second.id).expect("load second"),
+        second
+    );
 
     // The first snapshot still describes the tree as it was.
     let old = &first.roots[0];
@@ -247,7 +276,10 @@ async fn historical_snapshots_stay_intact_and_share_chunks() {
         .map(|l| l.summary.as_ref().expect("healthy").tags.clone())
         .collect();
     tags.sort();
-    assert_eq!(tags, [vec!["monday".to_owned()], vec!["tuesday".to_owned()]]);
+    assert_eq!(
+        tags,
+        [vec!["monday".to_owned()], vec!["tuesday".to_owned()]]
+    );
 }
 
 fn count_files(dir: &Path) -> usize {
@@ -275,7 +307,10 @@ async fn an_interrupted_backup_never_leaves_a_snapshot() {
     let manifest = take_snapshot(&repo, source.path(), ScanOptions::default(), &[]);
     assert!(repo.snapshots.ids().expect("ids").is_empty());
     assert!(repo.snapshots.list().expect("list").is_empty());
-    assert!(matches!(repo.snapshots.load(&manifest.id), Err(Error::SnapshotNotFound(_))));
+    assert!(matches!(
+        repo.snapshots.load(&manifest.id),
+        Err(Error::SnapshotNotFound(_))
+    ));
 
     // A chunk that went missing (for example removed by a concurrent prune) blocks the commit.
     let victim = manifest.roots[0]
@@ -290,14 +325,20 @@ async fn an_interrupted_backup_never_leaves_a_snapshot() {
     let object = repo.path.join("data").join(&hex[..2]).join(&hex);
     let saved = fs::read(&object).expect("read chunk object");
     fs::remove_file(&object).expect("remove chunk object");
-    let err = repo.snapshots.commit(&manifest).expect_err("must not commit");
+    let err = repo
+        .snapshots
+        .commit(&manifest)
+        .expect_err("must not commit");
     assert!(matches!(err, Error::IncompleteSnapshot { .. }), "{err}");
     assert!(repo.snapshots.ids().expect("ids").is_empty());
 
     // Once the chunk is back the very same manifest commits.
     fs::write(&object, saved).expect("restore chunk object");
     repo.snapshots.commit(&manifest).expect("commit");
-    assert_eq!(repo.snapshots.ids().expect("ids"), [manifest.id.clone()]);
+    assert_eq!(
+        repo.snapshots.ids().expect("ids"),
+        std::slice::from_ref(&manifest.id)
+    );
 }
 
 #[tokio::test]
@@ -364,23 +405,46 @@ async fn links_and_special_files_round_trip_through_the_manifest() {
 
     assert!(matches!(by_name(b"a").kind, NodeKind::File { .. }));
     assert_eq!(by_name(b"b").kind, NodeKind::HardLink { target: 1 });
-    assert_eq!(by_name(b"link").kind, NodeKind::Symlink { target: b"a".to_vec() });
+    assert_eq!(
+        by_name(b"link").kind,
+        NodeKind::Symlink {
+            target: b"a".to_vec()
+        }
+    );
     assert_eq!(
         by_name(b"dangling").kind,
-        NodeKind::Symlink { target: b"/definitely/not/here".to_vec() }
+        NodeKind::Symlink {
+            target: b"/definitely/not/here".to_vec()
+        }
     );
     assert_eq!(loaded.stats.hard_links, 1);
     assert_eq!(loaded.stats.symlinks, 2);
-    assert_eq!(loaded.stats.files, 1, "the data of a hard-linked file is recorded once");
+    assert_eq!(
+        loaded.stats.files, 1,
+        "the data of a hard-linked file is recorded once"
+    );
 }
 
 #[tokio::test]
 async fn nothing_that_identifies_the_backed_up_data_is_visible_in_the_repository() {
     let repo = repository().await;
     let source = tempfile::tempdir().expect("create temporary directory");
-    write(source.path(), "confidential-merger-plan.txt", &b"acquire the competitor\n".repeat(500));
-    write(source.path(), "projects-secret-codename/budget.xlsx", &pseudo_random(30_000, 5));
-    let manifest = take_snapshot(&repo, source.path(), ScanOptions::default(), &["board-only"]);
+    write(
+        source.path(),
+        "confidential-merger-plan.txt",
+        &b"acquire the competitor\n".repeat(500),
+    );
+    write(
+        source.path(),
+        "projects-secret-codename/budget.xlsx",
+        &pseudo_random(30_000, 5),
+    );
+    let manifest = take_snapshot(
+        &repo,
+        source.path(),
+        ScanOptions::default(),
+        &["board-only"],
+    );
     repo.snapshots.commit(&manifest).expect("commit");
 
     let source_path = source.path().to_string_lossy().into_owned();
@@ -398,8 +462,15 @@ async fn nothing_that_identifies_the_backed_up_data_is_visible_in_the_repository
     while let Some(dir) = pending.pop() {
         for entry in fs::read_dir(&dir).expect("read_dir") {
             let path = entry.expect("entry").path();
-            let name = path.file_name().expect("name").to_string_lossy().into_owned();
-            assert!(!name.contains("confidential") && !name.contains("secret"), "{name}");
+            let name = path
+                .file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned();
+            assert!(
+                !name.contains("confidential") && !name.contains("secret"),
+                "{name}"
+            );
             if path.is_dir() {
                 pending.push(path);
                 continue;
@@ -407,7 +478,12 @@ async fn nothing_that_identifies_the_backed_up_data_is_visible_in_the_repository
             let bytes = fs::read(&path).expect("read repository file");
             for secret in &secrets {
                 let found = bytes.windows(secret.len()).any(|window| window == *secret);
-                assert!(!found, "{:?} found in {}", String::from_utf8_lossy(secret), path.display());
+                assert!(
+                    !found,
+                    "{:?} found in {}",
+                    String::from_utf8_lossy(secret),
+                    path.display()
+                );
             }
             scanned_files += 1;
         }
@@ -420,15 +496,30 @@ async fn snapshots_survive_closing_and_reopening_the_repository() {
     let repo = repository().await;
     let source = source_tree();
     let manifest = take_snapshot(&repo, source.path(), ScanOptions::default(), &["persisted"]);
-    repo.snapshots.commit_async(manifest.clone()).await.expect("commit");
+    repo.snapshots
+        .commit_async(manifest.clone())
+        .await
+        .expect("commit");
 
     let reopened = Repository::at(&repo.path);
     let keys = reopened.unlock(&passphrase()).await.expect("unlock again");
-    let snapshots = reopened.snapshot_store(&keys).await.expect("snapshot store");
-    assert_eq!(snapshots.load_async(manifest.id.clone()).await.expect("load"), manifest);
+    let snapshots = reopened
+        .snapshot_store(&keys)
+        .await
+        .expect("snapshot store");
+    assert_eq!(
+        snapshots
+            .load_async(manifest.id.clone())
+            .await
+            .expect("load"),
+        manifest
+    );
 
     let wrong = Passphrase::new(b"not the passphrase".to_vec()).expect("valid");
-    assert!(matches!(reopened.unlock(&wrong).await, Err(Error::WrongPassphrase)));
+    assert!(matches!(
+        reopened.unlock(&wrong).await,
+        Err(Error::WrongPassphrase)
+    ));
 }
 
 #[tokio::test]
@@ -446,6 +537,12 @@ async fn a_snapshot_from_another_repository_cannot_be_loaded_or_committed() {
         second.path.join("snapshots").join(&name),
     )
     .expect("copy");
-    assert!(matches!(second.snapshots.load(&manifest.id), Err(Error::CorruptSnapshot { .. })));
-    assert!(matches!(second.snapshots.commit(&manifest), Err(Error::InvalidManifest(_))));
+    assert!(matches!(
+        second.snapshots.load(&manifest.id),
+        Err(Error::CorruptSnapshot { .. })
+    ));
+    assert!(matches!(
+        second.snapshots.commit(&manifest),
+        Err(Error::InvalidManifest(_))
+    ));
 }

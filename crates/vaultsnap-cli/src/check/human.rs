@@ -29,7 +29,12 @@ fn findings(
     writeln!(out)?;
     writeln!(out, "{heading} ({total})")?;
     for finding in report.findings.iter().filter(|f| f.severity() == severity) {
-        writeln!(out, "  {}  {}", finding.kind, escape(finding.subject.as_bytes()))?;
+        writeln!(
+            out,
+            "  {}  {}",
+            finding.kind,
+            escape(finding.subject.as_bytes())
+        )?;
         writeln!(out, "      {}", escape(finding.detail.as_bytes()))?;
     }
     Ok(())
@@ -58,7 +63,10 @@ pub fn report(out: &mut dyn Write, report: &CheckReport) -> io::Result<()> {
     field(
         out,
         "Snapshots",
-        &format!("{} readable, {} damaged", stats.snapshots, stats.snapshots_damaged),
+        &format!(
+            "{} readable, {} damaged",
+            stats.snapshots, stats.snapshots_damaged
+        ),
     )?;
     field(
         out,
@@ -97,10 +105,17 @@ pub fn report(out: &mut dyn Write, report: &CheckReport) -> io::Result<()> {
         field(
             out,
             "Verified",
-            &format!("{} read and authenticated", human_size(stats.bytes_authenticated)),
+            &format!(
+                "{} read and authenticated",
+                human_size(stats.bytes_authenticated)
+            ),
         )?;
     }
-    field(out, "Took", &format!("{:.1}s", report.duration.as_secs_f64()))?;
+    field(
+        out,
+        "Took",
+        &format!("{:.1}s", report.duration.as_secs_f64()),
+    )?;
 
     findings(out, report, "ERRORS", Severity::Error, report.errors)?;
     findings(out, report, "WARNINGS", Severity::Warning, report.warnings)?;
@@ -136,7 +151,10 @@ pub fn report(out: &mut dyn Write, report: &CheckReport) -> io::Result<()> {
         .collect();
     if !present.is_empty() {
         writeln!(out)?;
-        writeln!(out, "WHAT TO DO (the check changed nothing; see docs/CHECK.md)")?;
+        writeln!(
+            out,
+            "WHAT TO DO (the check changed nothing; see docs/CHECK.md)"
+        )?;
         for kind in present {
             writeln!(out, "  {kind}: {}", kind.advice())?;
         }

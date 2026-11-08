@@ -19,7 +19,9 @@
 //! connection-refused case uses a free port from 21110 to 21149.
 //!
 //! The behavior of the backend itself (retries, limits, conditional writes) is tested without a
-//! network next to the code, in `src/storage/s3/`.
+//! network next to the code, in `src/storage/s3/`. The last test here runs the whole storage
+//! contract (`vaultsnap_core::storage::contract`) against the real server: the acceptance test of
+//! the guarantees the S3 backend declares, including exactly one winner among racing creators.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -31,6 +33,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use vaultsnap_core::storage::contract::{self, Fixture};
 use vaultsnap_core::storage::DirEntryKind;
 use vaultsnap_core::{
     Backend, BackupEvent, BackupOptions, CheckOptions, ChunkerConfig, Error, KdfParams, Passphrase,
@@ -167,6 +170,19 @@ impl Drop for Site {
     }
 }
 
+/// Removes every object below the backend's prefix when dropped.
+struct Cleanup(Arc<dyn Backend>);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        if let Ok(names) = walk(self.0.as_ref(), "") {
+            for name in names {
+                let _ = self.0.delete(&name);
+            }
+        }
+    }
+}
+
 fn walk(backend: &dyn Backend, dir: &str) -> Result<Vec<String>, Error> {
     let mut names = Vec::new();
     for entry in backend.list_dir(dir)? {
@@ -267,7 +283,11 @@ async fn restored_files(
     let report = repo.restore(keys, options).await.expect("restore succeeds");
     assert!(report.is_complete(), "{report:?}");
     let canonical = fs::canonicalize(src).expect("the source exists");
-    read_tree(&report.target.join(canonical.strip_prefix("/").expect("absolute")))
+    read_tree(
+        &report
+            .target
+            .join(canonical.strip_prefix("/").expect("absolute")),
+    )
 }
 
 /// A full check that finds no missing chunk and no damaged snapshot. (Leftovers such as the lock
@@ -283,7 +303,9 @@ async fn assert_no_damage(repo: &Repository, keys: &RepositoryKeys) {
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// The secrets the AWS credential chain may have been given through the environment.
@@ -350,8 +372,13 @@ impl Proxy {
         let listener = (21_150..=21_199)
             .find_map(|port| TcpListener::bind(("127.0.0.1", port)).ok())
             .expect("a free port from 21150 to 21199");
-        let port = listener.local_addr().expect("the listener has an address").port();
-        listener.set_nonblocking(true).expect("non-blocking listener");
+        let port = listener
+            .local_addr()
+            .expect("the listener has an address")
+            .port();
+        listener
+            .set_nonblocking(true)
+            .expect("non-blocking listener");
         let control = Arc::new(ProxyControl::default());
         control.restore();
         let stop = Arc::new(AtomicBool::new(false));
@@ -434,6 +461,21 @@ fn closed_port() -> u16 {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The storage contract
+// ---------------------------------------------------------------------------------------------
+
+/// Not async: `S3Backend::connect` starts a runtime of its own and must not run inside another.
+#[test]
+fn the_s3_backend_passes_the_whole_storage_contract_on_a_real_server() {
+    require_minio!(minio);
+    contract::run(&|| {
+        let config = config(&minio, &unique_prefix("contract"));
+        let backend = S3Backend::connect(config).expect("connect to MinIO");
+        Fixture::keeping(backend.clone(), Cleanup(backend))
+    });
+}
+
+// ---------------------------------------------------------------------------------------------
 // Restoring from remote storage
 // ---------------------------------------------------------------------------------------------
 
@@ -446,7 +488,9 @@ async fn a_repository_in_a_bucket_is_restored_from_a_fresh_connection() {
     let expected = read_tree(&src);
 
     let repo = site.repository();
-    repo.init_with_kdf(&passphrase(), kdf()).await.expect("init");
+    repo.init_with_kdf(&passphrase(), kdf())
+        .await
+        .expect("init");
     let keys = repo.unlock(&passphrase()).await.expect("unlock");
     let report = repo.backup(&keys, options(&src)).await.expect("backup");
     assert!(report.transfer.chunks_new > 0);
@@ -455,14 +499,29 @@ async fn a_repository_in_a_bucket_is_restored_from_a_fresh_connection() {
     // Restoring needs nothing but the bucket location and the passphrase.
     let other = site.repository_via(&minio.endpoint).await;
     let wrong = Passphrase::new(b"not the passphrase".to_vec()).expect("valid passphrase");
-    assert!(other.unlock(&wrong).await.is_err(), "a wrong passphrase must not unlock");
-    let keys = other.unlock(&passphrase()).await.expect("unlock from the bucket alone");
+    assert!(
+        other.unlock(&wrong).await.is_err(),
+        "a wrong passphrase must not unlock"
+    );
+    let keys = other
+        .unlock(&passphrase())
+        .await
+        .expect("unlock from the bucket alone");
     let listing = other.snapshots(&keys).await.expect("list");
     assert!(listing.damaged.is_empty());
     assert_eq!(listing.snapshots.len(), 1);
-    let restored =
-        restored_files(&other, &keys, &report.snapshot, &src, &work.path().join("out")).await;
-    assert_eq!(restored, expected, "the restored files equal the originals byte for byte");
+    let restored = restored_files(
+        &other,
+        &keys,
+        &report.snapshot,
+        &src,
+        &work.path().join("out"),
+    )
+    .await;
+    assert_eq!(
+        restored, expected,
+        "the restored files equal the originals byte for byte"
+    );
 
     let check = CheckOptions {
         read_data: true,
@@ -485,7 +544,9 @@ async fn nothing_readable_is_uploaded() {
         .1;
 
     let repo = site.repository();
-    repo.init_with_kdf(&passphrase(), kdf()).await.expect("init");
+    repo.init_with_kdf(&passphrase(), kdf())
+        .await
+        .expect("init");
     let keys = repo.unlock(&passphrase()).await.expect("unlock");
     repo.backup(&keys, options(&src)).await.expect("backup");
 
@@ -494,7 +555,10 @@ async fn nothing_readable_is_uploaded() {
     assert!(names.iter().any(|name| name.starts_with("snapshots/")));
     assert!(names.iter().any(|name| name.starts_with("keys/")));
     for name in &names {
-        let object = site.backend.get(name, 64 << 20).expect("read the object back");
+        let object = site
+            .backend
+            .get(name, 64 << 20)
+            .expect("read the object back");
         for secret in [
             PLAINTEXT_MARKER,
             b"marker.txt".as_slice(),
@@ -524,16 +588,28 @@ async fn data_that_is_already_in_the_bucket_is_not_uploaded_again() {
     let src = make_source(work.path(), 6);
 
     let repo = site.repository();
-    repo.init_with_kdf(&passphrase(), kdf()).await.expect("init");
+    repo.init_with_kdf(&passphrase(), kdf())
+        .await
+        .expect("init");
     let keys = repo.unlock(&passphrase()).await.expect("unlock");
-    let first = repo.backup(&keys, options(&src)).await.expect("first backup");
+    let first = repo
+        .backup(&keys, options(&src))
+        .await
+        .expect("first backup");
     assert!(first.transfer.chunks_new > 0);
     let objects = site.objects("data");
 
-    let second = repo.backup(&keys, options(&src)).await.expect("second backup");
+    let second = repo
+        .backup(&keys, options(&src))
+        .await
+        .expect("second backup");
     assert_eq!(second.transfer.chunks_new, 0, "{:?}", second.transfer);
     assert_eq!(second.transfer.bytes_stored, 0, "{:?}", second.transfer);
-    assert_eq!(site.objects("data"), objects, "no chunk object was added or replaced");
+    assert_eq!(
+        site.objects("data"),
+        objects,
+        "no chunk object was added or replaced"
+    );
     assert_ne!(first.snapshot, second.snapshot);
 
     // Many writers storing the same new chunk: exactly one of them creates the object.
@@ -570,7 +646,9 @@ async fn a_cancelled_backup_publishes_nothing_and_the_next_run_reuses_the_upload
     let expected = read_tree(&src);
 
     let repo = site.repository();
-    repo.init_with_kdf(&passphrase(), kdf()).await.expect("init");
+    repo.init_with_kdf(&passphrase(), kdf())
+        .await
+        .expect("init");
     let keys = repo.unlock(&passphrase()).await.expect("unlock");
 
     let mut interrupted = options(&src);
@@ -584,24 +662,42 @@ async fn a_cancelled_backup_publishes_nothing_and_the_next_run_reuses_the_upload
             cancel.cancel();
         }
     }));
-    let err = repo.backup(&keys, interrupted).await.expect_err("cancelled");
+    let err = repo
+        .backup(&keys, interrupted)
+        .await
+        .expect_err("cancelled");
     assert!(matches!(err, Error::Cancelled), "{err}");
 
     let listing = repo.snapshots(&keys).await.expect("list");
     assert!(listing.snapshots.is_empty(), "no snapshot is visible");
-    assert!(site.objects("snapshots").is_empty(), "no snapshot object exists");
+    assert!(
+        site.objects("snapshots").is_empty(),
+        "no snapshot object exists"
+    );
     assert!(site.objects("locks").is_empty(), "the lock was released");
     let uploaded = site.objects("data").len();
-    assert!(uploaded >= 3, "the chunks of the finished files stay: {uploaded}");
+    assert!(
+        uploaded >= 3,
+        "the chunks of the finished files stay: {uploaded}"
+    );
 
-    let report = repo.backup(&keys, options(&src)).await.expect("the next run succeeds");
+    let report = repo
+        .backup(&keys, options(&src))
+        .await
+        .expect("the next run succeeds");
     assert!(
         report.transfer.chunks_existing as usize >= uploaded,
         "{:?} against {uploaded} uploaded chunks",
         report.transfer
     );
-    let restored =
-        restored_files(&repo, &keys, &report.snapshot, &src, &work.path().join("out")).await;
+    let restored = restored_files(
+        &repo,
+        &keys,
+        &report.snapshot,
+        &src,
+        &work.path().join("out"),
+    )
+    .await;
     assert_eq!(restored, expected);
 }
 
@@ -618,12 +714,18 @@ async fn a_network_outage_during_a_backup_publishes_nothing_and_the_next_run_res
     let expected = read_tree(&src);
 
     let direct = site.repository();
-    direct.init_with_kdf(&passphrase(), kdf()).await.expect("init");
+    direct
+        .init_with_kdf(&passphrase(), kdf())
+        .await
+        .expect("init");
     let direct_keys = direct.unlock(&passphrase()).await.expect("unlock");
 
     let proxy = Proxy::start(upstream);
     let through = site.repository_via(&proxy.endpoint()).await;
-    let keys = through.unlock(&passphrase()).await.expect("unlock through the forwarder");
+    let keys = through
+        .unlock(&passphrase())
+        .await
+        .expect("unlock through the forwarder");
 
     let mut doomed = options(&src);
     doomed.jobs = 1;
@@ -637,7 +739,10 @@ async fn a_network_outage_during_a_backup_publishes_nothing_and_the_next_run_res
         }
     }));
     let started = Instant::now();
-    let err = through.backup(&keys, doomed).await.expect_err("the backup cannot finish");
+    let err = through
+        .backup(&keys, doomed)
+        .await
+        .expect_err("the backup cannot finish");
     assert!(!matches!(err, Error::Cancelled), "{err}");
     assert!(
         started.elapsed() < Duration::from_secs(120),
@@ -652,12 +757,18 @@ async fn a_network_outage_during_a_backup_publishes_nothing_and_the_next_run_res
     assert!(listing.snapshots.is_empty(), "no snapshot is visible");
     assert!(site.objects("snapshots").is_empty());
     let uploaded = site.objects("data").len();
-    assert!(uploaded >= 3, "the chunks uploaded before the outage stay: {uploaded}");
+    assert!(
+        uploaded >= 3,
+        "the chunks uploaded before the outage stay: {uploaded}"
+    );
 
     // Once the network is back, a new run reuses what was uploaded and completes.
     let again = site.repository_via(&proxy.endpoint()).await;
     let again_keys = again.unlock(&passphrase()).await.expect("unlock again");
-    let report = again.backup(&again_keys, options(&src)).await.expect("the next run succeeds");
+    let report = again
+        .backup(&again_keys, options(&src))
+        .await
+        .expect("the next run succeeds");
     assert!(
         report.transfer.chunks_existing as usize >= uploaded,
         "{:?} against {uploaded} uploaded chunks",
@@ -687,13 +798,17 @@ async fn connection_failures_are_reported_promptly_and_never_show_credentials() 
     // Nothing listens on this port.
     let mut refused = config(&minio, "refused");
     refused.endpoint = Some(format!("http://127.0.0.1:{}", closed_port()));
-    let err = try_connect(refused.clone()).await.expect_err("connection refused");
+    let err = try_connect(refused.clone())
+        .await
+        .expect_err("connection refused");
     assert_no_credentials(&err, &refused);
 
     // The server answers, but there is no such bucket.
     let mut missing = config(&minio, "missing");
     missing.bucket = "vaultsnap-no-such-bucket".to_owned();
-    let err = try_connect(missing.clone()).await.expect_err("no such bucket");
+    let err = try_connect(missing.clone())
+        .await
+        .expect_err("no such bucket");
     assert_no_credentials(&err, &missing);
 
     assert!(

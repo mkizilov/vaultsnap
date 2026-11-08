@@ -5,4 +5,6 @@
 _opam/
 .DS_Store
 target/
+dist/
+proptest-regressions/
 .cortexkit/

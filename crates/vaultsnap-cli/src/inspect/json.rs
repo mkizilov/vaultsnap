@@ -18,8 +18,8 @@ use std::path::Path;
 
 use serde::{Serialize, Serializer};
 use vaultsnap_core::history::{
-    self, skipped_path, unreadable_paths, Change, Diff, ListedEntry, SnapshotDetails,
-    SnapshotList, SnapshotSizes,
+    self, skipped_path, unreadable_paths, Change, Diff, ListedEntry, SnapshotDetails, SnapshotList,
+    SnapshotSizes,
 };
 use vaultsnap_core::scan::{
     ChangePolicy, ErrorPolicy, HardLinkPolicy, SpecialFilePolicy, SymlinkPolicy,
@@ -137,7 +137,11 @@ pub fn list(out: &mut dyn Write, list: &SnapshotList) -> io::Result<()> {
                 created: time_nanos(summary.created),
                 host: &summary.host,
                 tags: &summary.tags,
-                sources: summary.roots.iter().map(|root| SourceView::new(root)).collect(),
+                sources: summary
+                    .roots
+                    .iter()
+                    .map(|root| SourceView::new(root))
+                    .collect(),
                 complete: info.unreadable == 0,
                 unreadable_paths: info.unreadable,
                 skipped_paths: summary.stats.skipped,

@@ -43,14 +43,23 @@ mod tests {
     fn splitmix64_matches_the_reference_implementation() {
         // First two outputs of Vigna's reference SplitMix64 seeded with 0.
         assert_eq!(splitmix64_output(INCREMENT), 0xE220_A839_7B1D_CDAF);
-        assert_eq!(splitmix64_output(INCREMENT.wrapping_mul(2)), 0x6E78_9E6A_A1B9_65F4);
+        assert_eq!(
+            splitmix64_output(INCREMENT.wrapping_mul(2)),
+            0x6E78_9E6A_A1B9_65F4
+        );
     }
 
     #[test]
     fn the_table_follows_the_documented_recipe() {
         assert_eq!(GEAR[0], splitmix64_output(SEED.wrapping_add(INCREMENT)));
-        assert_eq!(GEAR[1], splitmix64_output(SEED.wrapping_add(INCREMENT.wrapping_mul(2))));
-        assert_eq!(GEAR[255], splitmix64_output(SEED.wrapping_add(INCREMENT.wrapping_mul(256))));
+        assert_eq!(
+            GEAR[1],
+            splitmix64_output(SEED.wrapping_add(INCREMENT.wrapping_mul(2)))
+        );
+        assert_eq!(
+            GEAR[255],
+            splitmix64_output(SEED.wrapping_add(INCREMENT.wrapping_mul(256)))
+        );
     }
 
     #[test]
@@ -59,7 +68,10 @@ mod tests {
         assert_eq!(distinct.len(), 256);
         for (index, value) in GEAR.iter().enumerate() {
             let ones = value.count_ones();
-            assert!((12..=52).contains(&ones), "entry {index} has {ones} set bits");
+            assert!(
+                (12..=52).contains(&ones),
+                "entry {index} has {ones} set bits"
+            );
         }
     }
 }

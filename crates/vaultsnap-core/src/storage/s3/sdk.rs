@@ -34,8 +34,8 @@ use aws_smithy_types::checksum_config::{RequestChecksumCalculation, ResponseChec
 use tokio::runtime::{Builder, Handle, Runtime};
 
 use super::api::{
-    classify_response, ApiError, ApiErrorKind, ApiResult, Condition, GetOutput, HeadInfo,
-    ListPage, ListedObject, ObjectApi,
+    classify_response, ApiError, ApiErrorKind, ApiResult, Condition, GetOutput, HeadInfo, ListPage,
+    ListedObject, ObjectApi,
 };
 use super::{redact, S3Config};
 use crate::error::{BackendErrorKind, Error, Result};
@@ -216,7 +216,9 @@ where
 }
 
 fn length(value: Option<i64>) -> u64 {
-    value.and_then(|value| u64::try_from(value).ok()).unwrap_or(0)
+    value
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or(0)
 }
 
 fn etag(value: Option<&str>) -> ApiResult<String> {

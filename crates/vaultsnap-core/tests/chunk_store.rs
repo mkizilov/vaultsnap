@@ -100,7 +100,10 @@ async fn a_chunked_file_round_trips_through_the_encrypted_store() {
     // single file.
     let distinct: HashSet<&ChunkId> = ids.iter().collect();
     assert_eq!(new, distinct.len());
-    assert!(distinct.len() < ids.len(), "repeated text should repeat chunks");
+    assert!(
+        distinct.len() < ids.len(),
+        "repeated text should repeat chunks"
+    );
     assert!(ids.len() > 100, "{} chunks", ids.len());
     assert_eq!(restore_file(&chunks, &ids), data);
 }
@@ -119,7 +122,11 @@ async fn editing_a_file_stores_only_the_changed_chunks() {
     edited.extend_from_slice(&original[500_000..]);
     let (second_ids, second_new) = store_file(&chunks, &edited);
 
-    assert!(second_new <= 6, "{second_new} of {} chunks were new", second_ids.len());
+    assert!(
+        second_new <= 6,
+        "{second_new} of {} chunks were new",
+        second_ids.len()
+    );
     assert!(second_new >= 1);
     assert_eq!(restore_file(&chunks, &first_ids), original);
     assert_eq!(restore_file(&chunks, &second_ids), edited);
@@ -144,7 +151,10 @@ async fn data_survives_reopening_the_repository_with_the_passphrase() {
     let chunks = repo.chunk_store(&keys).expect("chunk store");
     assert_eq!(restore_file(&chunks, &ids), data);
     let (ids_again, new) = store_file(&chunks, &data);
-    assert_eq!(new, 0, "ids are stable across sessions, so everything deduplicates");
+    assert_eq!(
+        new, 0,
+        "ids are stable across sessions, so everything deduplicates"
+    );
     assert_eq!(ids_again, ids);
 }
 
@@ -166,7 +176,10 @@ async fn a_different_repository_cannot_read_or_match_the_chunks() {
     let target_dir = dir_b.path().join("data").join(&name[..2]);
     fs::create_dir_all(&target_dir).expect("mkdir");
     fs::copy(&source, target_dir.join(&name)).expect("copy");
-    assert!(matches!(chunks_b.get(&put_a.id), Err(Error::CorruptObject { .. })));
+    assert!(matches!(
+        chunks_b.get(&put_a.id),
+        Err(Error::CorruptObject { .. })
+    ));
 }
 
 #[tokio::test]
@@ -215,12 +228,20 @@ async fn concurrent_backups_of_the_same_data_do_not_conflict() {
     let ids = &results[0].0;
     assert!(results.iter().all(|(other, _)| other == ids));
     let new_total: usize = results.iter().map(|(_, new)| new).sum();
-    assert_eq!(new_total, ids.len(), "every chunk was written by exactly one worker");
+    assert_eq!(
+        new_total,
+        ids.len(),
+        "every chunk was written by exactly one worker"
+    );
     assert_eq!(restore_file(&chunks, ids), data);
 
     let object_files = all_files(&dir.path().join("data"));
     assert_eq!(object_files.len(), ids.len());
     assert!(object_files.iter().all(|path| {
-        !path.file_name().expect("name").to_string_lossy().starts_with(".tmp-")
+        !path
+            .file_name()
+            .expect("name")
+            .to_string_lossy()
+            .starts_with(".tmp-")
     }));
 }

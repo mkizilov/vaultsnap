@@ -262,24 +262,45 @@ mod tests {
         Decision {
             id: pair.repeat(32).parse().expect("valid id"),
             created: Timestamp { secs: 0, nanos: 0 },
-            keep: if kept { vec![KeepReason::Last] } else { Vec::new() },
+            keep: if kept {
+                vec![KeepReason::Last]
+            } else {
+                Vec::new()
+            },
         }
     }
 
     #[test]
     fn the_digest_names_who_is_kept_and_who_is_removed_whatever_the_order() {
-        let plan = [decision("aa", true), decision("bb", false), decision("cc", true)];
+        let plan = [
+            decision("aa", true),
+            decision("bb", false),
+            decision("cc", true),
+        ];
         let digest = PlanDigest::of(&plan);
-        let shuffled = [decision("cc", true), decision("aa", true), decision("bb", false)];
+        let shuffled = [
+            decision("cc", true),
+            decision("aa", true),
+            decision("bb", false),
+        ];
         assert_eq!(PlanDigest::of(&shuffled), digest);
         assert_eq!(digest.to_hex().len(), 64);
         assert_eq!(digest.to_string(), digest.to_hex());
         assert!(format!("{digest:?}").starts_with("PlanDigest("));
 
         // Any change of who is kept or removed, or of who exists, changes it.
-        let flipped = [decision("aa", true), decision("bb", true), decision("cc", true)];
+        let flipped = [
+            decision("aa", true),
+            decision("bb", true),
+            decision("cc", true),
+        ];
         assert_ne!(PlanDigest::of(&flipped), digest);
-        let extra = [decision("aa", true), decision("bb", false), decision("cc", true), decision("dd", true)];
+        let extra = [
+            decision("aa", true),
+            decision("bb", false),
+            decision("cc", true),
+            decision("dd", true),
+        ];
         assert_ne!(PlanDigest::of(&extra), digest);
         assert_ne!(PlanDigest::of(&plan[..2]), digest);
         assert_ne!(PlanDigest::of(&[]), digest);
@@ -306,7 +327,10 @@ mod tests {
     fn the_reasons_for_keeping_do_not_matter_to_the_digest() {
         let mut other = decision("aa", true);
         other.keep = vec![KeepReason::Daily, KeepReason::Monthly];
-        assert_eq!(PlanDigest::of(&[other]), PlanDigest::of(&[decision("aa", true)]));
+        assert_eq!(
+            PlanDigest::of(&[other]),
+            PlanDigest::of(&[decision("aa", true)])
+        );
     }
 
     #[test]
@@ -347,7 +371,12 @@ mod tests {
         assert!(!plan.is_noop());
         assert_eq!(plan.snapshots_to_remove(), 1);
         assert_eq!(plan.kept().count(), 1);
-        assert_eq!(plan.to_remove().next().map(|d| d.id.as_str()[..2].to_owned()), Some("aa".to_owned()));
+        assert_eq!(
+            plan.to_remove()
+                .next()
+                .map(|d| d.id.as_str()[..2].to_owned()),
+            Some("aa".to_owned())
+        );
         assert!(plan.is_complete());
         assert!(!report(Vec::new(), 0, 2).is_complete());
     }
@@ -361,8 +390,13 @@ mod tests {
                 counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
         });
-        observer.event(&PruneEvent::Step { phase: PrunePhase::RemovingChunks });
-        observer.event(&PruneEvent::Started { phase: PrunePhase::Reading, total: 1 });
+        observer.event(&PruneEvent::Step {
+            phase: PrunePhase::RemovingChunks,
+        });
+        observer.event(&PruneEvent::Started {
+            phase: PrunePhase::Reading,
+            total: 1,
+        });
         assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

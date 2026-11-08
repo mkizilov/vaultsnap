@@ -125,10 +125,14 @@ impl SnapshotStore {
         let body = object::open(&self.key, id, &file)?;
         let manifest = codec::decode(&body)?;
         if manifest.id != *id {
-            return Err(corrupt("the manifest inside records a different snapshot id"));
+            return Err(corrupt(
+                "the manifest inside records a different snapshot id",
+            ));
         }
         if manifest.repository_id != self.repository_id {
-            return Err(corrupt("the manifest inside belongs to a different repository"));
+            return Err(corrupt(
+                "the manifest inside belongs to a different repository",
+            ));
         }
         Ok(manifest)
     }
@@ -191,7 +195,9 @@ impl SnapshotStore {
                 Err(err) => return Err(err),
             }
         }
-        dated.sort_by(|(a_time, a_id), (b_time, b_id)| b_time.cmp(a_time).then_with(|| a_id.cmp(b_id)));
+        dated.sort_by(|(a_time, a_id), (b_time, b_id)| {
+            b_time.cmp(a_time).then_with(|| a_id.cmp(b_id))
+        });
         Ok(dated.into_iter().map(|(_, id)| id).collect())
     }
 
@@ -270,7 +276,11 @@ mod tests {
             let keys = RepositoryKeys::generate().expect("generate");
             let chunks = ChunkStore::new(local.clone(), &keys).expect("chunk store");
             let snapshots = SnapshotStore::new(local, &keys, REPO_ID).expect("snapshot store");
-            Self { dir, chunks, snapshots }
+            Self {
+                dir,
+                chunks,
+                snapshots,
+            }
         }
 
         fn path_of(&self, id: &SnapshotId) -> PathBuf {
@@ -292,7 +302,10 @@ mod tests {
                                 .or_insert_with(|| vec![chunk.id.as_bytes()[0]; len])
                                 .clone();
                             let put = self.chunks.put(&data).expect("put chunk");
-                            *chunk = ChunkRef { id: put.id, len: chunk.len };
+                            *chunk = ChunkRef {
+                                id: put.id,
+                                len: chunk.len,
+                            };
                         }
                     }
                 }
@@ -316,7 +329,10 @@ mod tests {
         let fx = Fixture::new();
         let manifest = fx.committed();
         assert_eq!(fx.snapshots.load(&manifest.id).expect("load"), manifest);
-        assert_eq!(fx.snapshots.ids().expect("ids"), [manifest.id.clone()]);
+        assert_eq!(
+            fx.snapshots.ids().expect("ids"),
+            std::slice::from_ref(&manifest.id)
+        );
     }
 
     #[test]
@@ -333,7 +349,11 @@ mod tests {
             b"docs",
         ] {
             let found = raw.windows(secret.len()).any(|window| window == secret);
-            assert!(!found, "{:?} is visible in the snapshot file", String::from_utf8_lossy(secret));
+            assert!(
+                !found,
+                "{:?} is visible in the snapshot file",
+                String::from_utf8_lossy(secret)
+            );
         }
         assert!(fx.path_of(&manifest.id).ends_with(manifest.id.as_str()));
     }
@@ -345,7 +365,10 @@ mod tests {
         for round in 0..5_i64 {
             let mut manifest = fx.manifest_with_real_chunks(rich());
             fresh_id(&mut manifest);
-            manifest.created = Timestamp { secs: 1_000 + round, nanos: 0 };
+            manifest.created = Timestamp {
+                secs: 1_000 + round,
+                nanos: 0,
+            };
             fx.snapshots.commit(&manifest).expect("commit");
             ids.push(manifest.id.clone());
         }
@@ -369,7 +392,10 @@ mod tests {
         let err = fx.snapshots.commit(&changed).expect_err("must fail");
         assert!(matches!(err, Error::SnapshotExists(_)), "{err}");
         assert_eq!(fs::read(fx.path_of(&manifest.id)).expect("read"), before);
-        assert_eq!(fx.snapshots.load(&manifest.id).expect("load").host, "workstation");
+        assert_eq!(
+            fx.snapshots.load(&manifest.id).expect("load").host,
+            "workstation"
+        );
     }
 
     #[test]
@@ -383,8 +409,14 @@ mod tests {
             other => panic!("expected IncompleteSnapshot, got {other}"),
         }
         assert!(fx.snapshots.ids().expect("ids").is_empty());
-        assert!(fs::read_dir(fx.dir.path().join("snapshots")).expect("read_dir").next().is_none());
-        assert!(matches!(fx.snapshots.load(&manifest.id), Err(Error::SnapshotNotFound(_))));
+        assert!(fs::read_dir(fx.dir.path().join("snapshots"))
+            .expect("read_dir")
+            .next()
+            .is_none());
+        assert!(matches!(
+            fx.snapshots.load(&manifest.id),
+            Err(Error::SnapshotNotFound(_))
+        ));
     }
 
     #[test]
@@ -394,7 +426,11 @@ mod tests {
         let missing = fx.snapshots.missing_chunks(&manifest).expect("check");
         assert_eq!(missing.len(), 3, "{missing:?}");
         let ready = fx.manifest_with_real_chunks(rich());
-        assert!(fx.snapshots.missing_chunks(&ready).expect("check").is_empty());
+        assert!(fx
+            .snapshots
+            .missing_chunks(&ready)
+            .expect("check")
+            .is_empty());
     }
 
     #[test]
@@ -402,11 +438,17 @@ mod tests {
         let fx = Fixture::new();
         let mut invalid = fx.manifest_with_real_chunks(minimal());
         invalid.stats.files = 5;
-        assert!(matches!(fx.snapshots.commit(&invalid), Err(Error::InvalidManifest(_))));
+        assert!(matches!(
+            fx.snapshots.commit(&invalid),
+            Err(Error::InvalidManifest(_))
+        ));
 
         let mut foreign = fx.manifest_with_real_chunks(minimal());
         foreign.repository_id = "fedcba9876543210fedcba9876543210".to_owned();
-        assert!(matches!(fx.snapshots.commit(&foreign), Err(Error::InvalidManifest(_))));
+        assert!(matches!(
+            fx.snapshots.commit(&foreign),
+            Err(Error::InvalidManifest(_))
+        ));
 
         let mut future = fx.manifest_with_real_chunks(minimal());
         future.format_version = 2;
@@ -424,16 +466,26 @@ mod tests {
         let manifest = fx.manifest_with_real_chunks(rich());
         let body = codec::encode(&manifest).expect("encode");
         let complete = object::seal(&fx.snapshots.key, &manifest.id, &body).expect("seal");
-        let stray = fx.dir.path().join("snapshots").join(".tmp-0123456789abcdef");
+        let stray = fx
+            .dir
+            .path()
+            .join("snapshots")
+            .join(".tmp-0123456789abcdef");
         fs::write(&stray, &complete[..complete.len() / 2]).expect("write partial file");
 
         assert!(fx.snapshots.ids().expect("ids").is_empty());
         assert!(fx.snapshots.list().expect("list").is_empty());
-        assert!(matches!(fx.snapshots.load(&manifest.id), Err(Error::SnapshotNotFound(_))));
+        assert!(matches!(
+            fx.snapshots.load(&manifest.id),
+            Err(Error::SnapshotNotFound(_))
+        ));
 
         // The same snapshot can then be committed normally, next to the leftover.
         fx.snapshots.commit(&manifest).expect("commit");
-        assert_eq!(fx.snapshots.ids().expect("ids"), [manifest.id.clone()]);
+        assert_eq!(
+            fx.snapshots.ids().expect("ids"),
+            std::slice::from_ref(&manifest.id)
+        );
         assert!(stray.exists(), "leftovers are not touched");
     }
 
@@ -482,8 +534,14 @@ mod tests {
             let listing = fx.snapshots.list().expect("list still works");
             assert_eq!(listing.len(), 2, "{label}: both snapshots are listed");
             let by_id = |id: &SnapshotId| listing.iter().find(|l| &l.id == id).expect("listed");
-            assert!(by_id(&good.id).summary.is_ok(), "{label}: the good one is unaffected");
-            assert!(by_id(&other.id).summary.is_err(), "{label}: the damaged one is flagged");
+            assert!(
+                by_id(&good.id).summary.is_ok(),
+                "{label}: the good one is unaffected"
+            );
+            assert!(
+                by_id(&other.id).summary.is_err(),
+                "{label}: the damaged one is flagged"
+            );
         }
         fs::write(&path, &original).expect("restore");
         fx.snapshots.load(&other.id).expect("healthy again");
@@ -498,7 +556,10 @@ mod tests {
         fx.snapshots.commit(&b).expect("commit");
         // Swap B's file in under A's name, as a malicious or confused storage layer might.
         fs::copy(fx.path_of(&b.id), fx.path_of(&a.id)).expect("copy over");
-        assert!(matches!(fx.snapshots.load(&a.id), Err(Error::CorruptSnapshot { .. })));
+        assert!(matches!(
+            fx.snapshots.load(&a.id),
+            Err(Error::CorruptSnapshot { .. })
+        ));
         assert_eq!(fx.snapshots.load(&b.id).expect("load").id, b.id);
     }
 
@@ -509,7 +570,10 @@ mod tests {
         let intruder_keys = RepositoryKeys::generate().expect("generate");
         let intruder = SnapshotStore::new(Store::local(fx.dir.path()), &intruder_keys, REPO_ID)
             .expect("store");
-        assert!(matches!(intruder.load(&manifest.id), Err(Error::CorruptSnapshot { .. })));
+        assert!(matches!(
+            intruder.load(&manifest.id),
+            Err(Error::CorruptSnapshot { .. })
+        ));
     }
 
     #[test]
@@ -520,7 +584,10 @@ mod tests {
         let body = codec::encode(&manifest).expect("encode");
         let file = object::seal(&fx.snapshots.key, &manifest.id, &body).expect("seal");
         fs::write(fx.path_of(&manifest.id), file).expect("plant");
-        assert!(matches!(fx.snapshots.load(&manifest.id), Err(Error::CorruptSnapshot { .. })));
+        assert!(matches!(
+            fx.snapshots.load(&manifest.id),
+            Err(Error::CorruptSnapshot { .. })
+        ));
     }
 
     #[test]
@@ -544,7 +611,16 @@ mod tests {
         let file = object::seal(&fx.snapshots.key, &manifest.id, &body).expect("seal");
         fs::write(fx.path_of(&manifest.id), file).expect("plant");
         let err = fx.snapshots.load(&manifest.id).expect_err("must fail");
-        assert!(matches!(err, Error::UnsupportedManifestVersion { found: 2, supported: 1 }), "{err}");
+        assert!(
+            matches!(
+                err,
+                Error::UnsupportedManifestVersion {
+                    found: 2,
+                    supported: 1
+                }
+            ),
+            "{err}"
+        );
         let listing = fx.snapshots.list().expect("list");
         assert!(matches!(
             listing[0].summary,
@@ -561,7 +637,16 @@ mod tests {
         file[4] = 2;
         fs::write(&path, file).expect("write");
         let err = fx.snapshots.load(&manifest.id).expect_err("must fail");
-        assert!(matches!(err, Error::UnsupportedSnapshotVersion { found: 2, supported: 1 }), "{err}");
+        assert!(
+            matches!(
+                err,
+                Error::UnsupportedSnapshotVersion {
+                    found: 2,
+                    supported: 1
+                }
+            ),
+            "{err}"
+        );
     }
 
     #[test]
@@ -585,7 +670,10 @@ mod tests {
         fs::write(dir.join("not-an-id"), b"hello").expect("write");
         fs::write(dir.join("ABCDEF".repeat(11)), b"hello").expect("write");
         fs::write(dir.join(".tmp-abc"), b"hello").expect("write");
-        assert_eq!(fx.snapshots.ids().expect("ids"), [manifest.id.clone()]);
+        assert_eq!(
+            fx.snapshots.ids().expect("ids"),
+            std::slice::from_ref(&manifest.id)
+        );
         assert_eq!(fx.snapshots.list().expect("list").len(), 1);
     }
 
@@ -597,9 +685,13 @@ mod tests {
             let mut manifest = fx.manifest_with_real_chunks(minimal());
             fresh_id(&mut manifest);
             fx.snapshots.commit(&manifest).expect("commit");
-            let file = fs::File::options().write(true).open(fx.path_of(&manifest.id)).expect("open");
+            let file = fs::File::options()
+                .write(true)
+                .open(fx.path_of(&manifest.id))
+                .expect("open");
             let age = std::time::Duration::from_secs(1000 * (committed.len() as u64 + 1));
-            file.set_modified(std::time::SystemTime::now() - age).expect("set mtime");
+            file.set_modified(std::time::SystemTime::now() - age)
+                .expect("set mtime");
             committed.push(manifest.id);
         }
         // The first commit was given the smallest age, so it is the newest.
@@ -613,10 +705,20 @@ mod tests {
         let second = commit_with_id(&fx, &"bb".repeat(32));
         fx.snapshots.remove(&first).expect("remove");
         fx.snapshots.sync_removals().expect("sync");
-        assert_eq!(fx.snapshots.ids().expect("ids"), [second.clone()]);
-        assert!(matches!(fx.snapshots.load(&first), Err(Error::SnapshotNotFound(_))));
+        assert_eq!(
+            fx.snapshots.ids().expect("ids"),
+            std::slice::from_ref(&second)
+        );
+        assert!(matches!(
+            fx.snapshots.load(&first),
+            Err(Error::SnapshotNotFound(_))
+        ));
         assert!(fx.snapshots.load(&second).is_ok());
-        assert!(fx.snapshots.remove(&first).expect_err("already gone").is_not_found());
+        assert!(fx
+            .snapshots
+            .remove(&first)
+            .expect_err("already gone")
+            .is_not_found());
     }
 
     fn commit_with_id(fx: &Fixture, id: &str) -> SnapshotId {
@@ -636,7 +738,10 @@ mod tests {
         assert_eq!(resolve("aaaa").expect("unique"), first);
         assert_eq!(resolve(&"aa".repeat(32)).expect("full id"), first);
         assert_eq!(resolve("abcc").expect("unique"), second);
-        assert_eq!(resolve(&format!("ab{}", "c".repeat(30))).expect("unique"), second);
+        assert_eq!(
+            resolve(&format!("ab{}", "c".repeat(30))).expect("unique"),
+            second
+        );
     }
 
     #[test]
@@ -661,15 +766,24 @@ mod tests {
     fn a_full_reference_is_only_checked_against_the_repository_when_loaded() {
         let fx = Fixture::new();
         let unknown = "0f".repeat(32);
-        let id = fx.snapshots.resolve(&unknown.parse().expect("syntax")).expect("full id");
-        assert!(matches!(fx.snapshots.load(&id), Err(Error::SnapshotNotFound(_))));
+        let id = fx
+            .snapshots
+            .resolve(&unknown.parse().expect("syntax"))
+            .expect("full id");
+        assert!(matches!(
+            fx.snapshots.load(&id),
+            Err(Error::SnapshotNotFound(_))
+        ));
     }
 
     #[test]
     fn unknown_ids_are_reported_as_not_found() {
         let fx = Fixture::new();
         let id = SnapshotId::generate().expect("randomness");
-        assert!(matches!(fx.snapshots.load(&id), Err(Error::SnapshotNotFound(_))));
+        assert!(matches!(
+            fx.snapshots.load(&id),
+            Err(Error::SnapshotNotFound(_))
+        ));
     }
 
     #[test]
@@ -688,12 +802,20 @@ mod tests {
                     })
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().expect("thread panicked")).collect()
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("thread panicked"))
+                .collect()
         });
         let mut expected = ids;
         expected.sort();
         assert_eq!(fx.snapshots.ids().expect("ids"), expected);
-        assert!(fx.snapshots.list().expect("list").iter().all(|l| l.summary.is_ok()));
+        assert!(fx
+            .snapshots
+            .list()
+            .expect("list")
+            .iter()
+            .all(|l| l.summary.is_ok()));
     }
 
     #[test]
@@ -707,14 +829,23 @@ mod tests {
                     scope.spawn(move || store.commit(manifest))
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().expect("thread panicked")).collect()
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("thread panicked"))
+                .collect()
         });
-        assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1, "{results:?}");
+        assert_eq!(
+            results.iter().filter(|r| r.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
         for result in results.iter().filter_map(|r| r.as_ref().err()) {
             assert!(matches!(result, Error::SnapshotExists(_)), "{result}");
         }
         assert_eq!(fx.snapshots.load(&manifest.id).expect("load"), manifest);
-        let names = fs::read_dir(fx.dir.path().join("snapshots")).expect("read_dir").count();
+        let names = fs::read_dir(fx.dir.path().join("snapshots"))
+            .expect("read_dir")
+            .count();
         assert_eq!(names, 1, "no temporary files remain");
     }
 
@@ -722,8 +853,15 @@ mod tests {
     async fn the_async_wrappers_commit_and_load() {
         let fx = Fixture::new();
         let manifest = fx.manifest_with_real_chunks(rich());
-        fx.snapshots.commit_async(manifest.clone()).await.expect("commit");
-        let loaded = fx.snapshots.load_async(manifest.id.clone()).await.expect("load");
+        fx.snapshots
+            .commit_async(manifest.clone())
+            .await
+            .expect("commit");
+        let loaded = fx
+            .snapshots
+            .load_async(manifest.id.clone())
+            .await
+            .expect("load");
         assert_eq!(loaded, manifest);
     }
 

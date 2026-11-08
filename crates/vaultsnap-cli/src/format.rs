@@ -43,7 +43,11 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_index = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 { month_index + 3 } else { month_index - 9 };
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     (year, month, day)
 }
@@ -153,9 +157,11 @@ pub fn mode_string(kind: EntryType, mode: Option<u32>) -> String {
         out.push_str("?????????");
         return out;
     };
-    for (shift, special, with_exec, without_exec) in
-        [(6_u32, 0o4000, 's', 'S'), (3, 0o2000, 's', 'S'), (0, 0o1000, 't', 'T')]
-    {
+    for (shift, special, with_exec, without_exec) in [
+        (6_u32, 0o4000, 's', 'S'),
+        (3, 0o2000, 's', 'S'),
+        (0, 0o1000, 't', 'T'),
+    ] {
         let bits = (mode >> shift) & 0o7;
         out.push(if bits & 4 != 0 { 'r' } else { '-' });
         out.push(if bits & 2 != 0 { 'w' } else { '-' });
@@ -224,16 +230,33 @@ mod tests {
 
     #[test]
     fn nanoseconds_have_fixed_width() {
-        let time = Timestamp { secs: 1_750_000_000, nanos: 5 };
+        let time = Timestamp {
+            secs: 1_750_000_000,
+            nanos: 5,
+        };
         assert_eq!(time_nanos(time), "2025-06-15T15:06:40.000000005Z");
-        let time = Timestamp { secs: 1_700_000_000, nanos: 123_456_789 };
+        let time = Timestamp {
+            secs: 1_700_000_000,
+            nanos: 123_456_789,
+        };
         assert_eq!(time_nanos(time), "2023-11-14T22:13:20.123456789Z");
-        assert_eq!(time_seconds(time), "2023-11-14T22:13:20Z", "cut, not rounded");
+        assert_eq!(
+            time_seconds(time),
+            "2023-11-14T22:13:20Z",
+            "cut, not rounded"
+        );
     }
 
     #[test]
     fn ordinary_names_are_left_alone() {
-        let names = ["plain.txt", "with space", "ünïcödé 日本語", "emoji-😀", "-dash", "a/b/c"];
+        let names = [
+            "plain.txt",
+            "with space",
+            "ünïcödé 日本語",
+            "emoji-😀",
+            "-dash",
+            "a/b/c",
+        ];
         for name in names.into_iter().chain(["'\"*?"]) {
             assert_eq!(escape(name.as_bytes()), name);
         }
@@ -249,13 +272,22 @@ mod tests {
         assert_eq!(escape(b"bad-\xff\xfe-bytes"), "bad-\\xff\\xfe-bytes");
         assert_eq!(escape("c1\u{85}".as_bytes()), "c1\\u{85}");
         assert_eq!(escape("rlo\u{202e}txt".as_bytes()), "rlo\\u{202e}txt");
-        assert_eq!(escape("zero\u{200b}width\u{feff}".as_bytes()), "zero\\u{200b}width\\u{feff}");
+        assert_eq!(
+            escape("zero\u{200b}width\u{feff}".as_bytes()),
+            "zero\\u{200b}width\\u{feff}"
+        );
     }
 
     #[test]
     fn paths_are_escaped_like_names() {
-        assert_eq!(escape_path(Path::new("/out/data/plain.txt")), "/out/data/plain.txt");
-        assert_eq!(escape_path(Path::new("/out/new\nline\x1b[2J")), "/out/new\\nline\\x1b[2J");
+        assert_eq!(
+            escape_path(Path::new("/out/data/plain.txt")),
+            "/out/data/plain.txt"
+        );
+        assert_eq!(
+            escape_path(Path::new("/out/new\nline\x1b[2J")),
+            "/out/new\\nline\\x1b[2J"
+        );
     }
 
     #[test]
@@ -270,7 +302,10 @@ mod tests {
         let mut bytes: Vec<u8> = (0..=255).collect();
         bytes.extend("\u{85}\u{202e}\u{2066}\u{200f}\u{2028}\u{feff}é日".as_bytes());
         let text = escape(&bytes);
-        assert!(!text.chars().any(|c| c.is_control() || is_invisible(c)), "{text:?}");
+        assert!(
+            !text.chars().any(|c| c.is_control() || is_invisible(c)),
+            "{text:?}"
+        );
         assert!(!text.contains('\n'));
     }
 
@@ -284,7 +319,10 @@ mod tests {
         assert_eq!(file(0o4644), "-rwSr--r--");
         assert_eq!(file(0o2755), "-rwxr-sr-x");
         assert_eq!(file(0o1666), "-rw-rw-rwT");
-        assert_eq!(mode_string(EntryType::Directory, Some(0o1777)), "drwxrwxrwt");
+        assert_eq!(
+            mode_string(EntryType::Directory, Some(0o1777)),
+            "drwxrwxrwt"
+        );
         assert_eq!(mode_string(EntryType::Symlink, Some(0o777)), "lrwxrwxrwx");
         assert_eq!(mode_string(EntryType::Fifo, None), "p?????????");
         assert_eq!(mode_string(EntryType::HardLink, Some(0o600)), "-rw-------");

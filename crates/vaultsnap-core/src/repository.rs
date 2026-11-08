@@ -284,16 +284,25 @@ mod tests {
         )
         .expect("rewrite config");
         let err = repo.load_config().await.expect_err("must fail");
-        assert!(matches!(err, Error::UnsupportedVersion { found: 7, .. }), "{err}");
+        assert!(
+            matches!(err, Error::UnsupportedVersion { found: 7, .. }),
+            "{err}"
+        );
         let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
-        assert!(matches!(err, Error::UnsupportedVersion { found: 7, .. }), "{err}");
+        assert!(
+            matches!(err, Error::UnsupportedVersion { found: 7, .. }),
+            "{err}"
+        );
     }
 
     #[test]
     fn a_repository_can_live_in_any_backend_and_its_paths_are_then_labels() {
         let repo = Repository::with_backend(Arc::new(MemoryBackend::new()));
         assert_eq!(repo.layout().root(), Path::new("memory://repository"));
-        assert_eq!(repo.layout().config_file(), Path::new("memory://repository/config"));
+        assert_eq!(
+            repo.layout().config_file(),
+            Path::new("memory://repository/config")
+        );
         assert_eq!(repo.store().root(), repo.layout().root());
         assert!(Arc::ptr_eq(repo.backend(), repo.store().backend()));
     }

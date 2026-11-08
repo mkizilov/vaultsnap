@@ -138,8 +138,9 @@ Cancelling takes effect before the next deletion, never in the middle of one.
 
 ## Verification status
 
-The prune and its tests were written without a Rust toolchain or network access, so none of them
-has been compiled or run (see the README). The behavior above is what the code and tests state:
+The prune and its tests pass on macOS with Rust 1.94.1 ([`RELIABILITY.md`](RELIABILITY.md)); the
+crash tests also kill a prune at every storage call it makes and show that the repository stays
+consistent. The behavior above is what the code and tests state:
 
 * Unit tests for the retention rules (calendar boundaries, ISO weeks, leap years, ties, the newest
   snapshot) in `crates/vaultsnap-core/src/retention.rs`, and for the pipeline (shared chunks,

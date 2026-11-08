@@ -50,23 +50,44 @@ fn a_location_is_a_bucket_and_a_folder_without_slashes_at_the_ends() {
     ];
     for (location, bucket, prefix) in cases {
         let (got_bucket, got_prefix) = parse_location(location).expect(location);
-        assert_eq!((got_bucket.as_str(), got_prefix.as_str()), (bucket, prefix), "{location}");
+        assert_eq!(
+            (got_bucket.as_str(), got_prefix.as_str()),
+            (bucket, prefix),
+            "{location}"
+        );
     }
     let config = S3Config::from_location("bucket/a/b").expect("valid");
-    assert_eq!((config.bucket.as_str(), config.prefix.as_str()), ("bucket", "a/b"));
+    assert_eq!(
+        (config.bucket.as_str(), config.prefix.as_str()),
+        ("bucket", "a/b")
+    );
 }
 
 #[test]
 fn locations_that_cannot_name_a_bucket_and_a_folder_are_refused() {
     let bad = [
-        "", "/", "ab", "UPPER/x", "bucket/../x", "bucket/./x", "bucket/a//b", "bucket/a b",
-        "-bucket/x", "bucket-/x", "buck_et/x", "bucket/a?b", "bucket/caf\u{e9}",
+        "",
+        "/",
+        "ab",
+        "UPPER/x",
+        "bucket/../x",
+        "bucket/./x",
+        "bucket/a//b",
+        "bucket/a b",
+        "-bucket/x",
+        "bucket-/x",
+        "buck_et/x",
+        "bucket/a?b",
+        "bucket/caf\u{e9}",
     ];
     for location in bad {
         let err = parse_location(location).expect_err(location);
         assert!(matches!(err, Error::InvalidPath(_)), "{location:?}: {err}");
     }
-    assert!(parse_location(&"a".repeat(64)).is_err(), "63 characters at most");
+    assert!(
+        parse_location(&"a".repeat(64)).is_err(),
+        "63 characters at most"
+    );
     assert!(parse_location(&"a".repeat(63)).is_ok());
 }
 
@@ -83,12 +104,25 @@ fn endpoints_must_be_https_unless_they_are_on_this_machine_or_explicitly_allowed
     ] {
         assert!(validate_endpoint(ok, false).is_ok(), "{ok}");
     }
-    for plain in ["http://s3.example.com", "http://10.0.0.5:9000", "http://[2001:db8::1]:9000"] {
+    for plain in [
+        "http://s3.example.com",
+        "http://10.0.0.5:9000",
+        "http://[2001:db8::1]:9000",
+    ] {
         let err = validate_endpoint(plain, false).expect_err(plain);
         assert!(err.to_string().contains("plain HTTP"), "{plain}: {err}");
-        assert!(validate_endpoint(plain, true).is_ok(), "{plain} when allowed");
+        assert!(
+            validate_endpoint(plain, true).is_ok(),
+            "{plain} when allowed"
+        );
     }
-    for bad in ["s3.example.com", "ftp://s3.example.com", "https://", "https:///path", "file:///x"] {
+    for bad in [
+        "s3.example.com",
+        "ftp://s3.example.com",
+        "https://",
+        "https:///path",
+        "file:///x",
+    ] {
         assert!(validate_endpoint(bad, true).is_err(), "{bad}");
     }
 }
@@ -102,14 +136,20 @@ fn credentials_in_an_endpoint_are_refused_and_never_echoed() {
     ] {
         let err = validate_endpoint(url, true).expect_err(url);
         let text = err.to_string();
-        assert!(!text.contains("hunter2") && !text.contains("wJalrXUtnFEMI"), "{text}");
+        assert!(
+            !text.contains("hunter2") && !text.contains("wJalrXUtnFEMI"),
+            "{text}"
+        );
         assert!(!text.contains("AKIA"), "{text}");
     }
 }
 
 #[test]
 fn an_endpoint_is_shown_without_what_stands_before_the_at_sign() {
-    assert_eq!(redact_endpoint("https://user:pw@host:9000/x?y#z"), "https://host:9000/x?y#z");
+    assert_eq!(
+        redact_endpoint("https://user:pw@host:9000/x?y#z"),
+        "https://host:9000/x?y#z"
+    );
     assert_eq!(redact_endpoint("https://host:9000"), "https://host:9000");
     assert_eq!(redact_endpoint("not a url"), "<invalid endpoint>");
 }
@@ -121,9 +161,15 @@ fn a_configuration_shows_nothing_secret_when_printed() {
         ..config()
     };
     let shown = format!("{config:?}");
-    assert!(!shown.contains("secretpass") && !shown.contains("AKIA"), "{shown}");
+    assert!(
+        !shown.contains("secretpass") && !shown.contains("AKIA"),
+        "{shown}"
+    );
     assert!(shown.contains("https://s3.example.com"), "{shown}");
-    assert!(shown.contains("test-bucket") && shown.contains("repo/one"), "{shown}");
+    assert!(
+        shown.contains("test-bucket") && shown.contains("repo/one"),
+        "{shown}"
+    );
 }
 
 #[test]
@@ -146,7 +192,12 @@ fn limits_and_timeouts_are_validated() {
         ..config()
     };
     assert!(plain.validate().is_err());
-    assert!(S3Config { allow_insecure_http: true, ..plain }.validate().is_ok());
+    assert!(S3Config {
+        allow_insecure_http: true,
+        ..plain
+    }
+    .validate()
+    .is_ok());
 }
 
 #[test]
@@ -157,7 +208,10 @@ fn messages_from_the_network_lose_key_ids_control_characters_and_length() {
     assert!(!text.contains('\n') && !text.contains('\t'), "{text:?}");
     assert!(text.contains("and more stuff"), "{text}");
     // Ordinary words that merely start alike are left alone.
-    assert_eq!(redact("AKIAWORD and AKIAIOSFODNN7EXAMPL"), "AKIAWORD and AKIAIOSFODNN7EXAMPL");
+    assert_eq!(
+        redact("AKIAWORD and AKIAIOSFODNN7EXAMPL"),
+        "AKIAWORD and AKIAIOSFODNN7EXAMPL"
+    );
     let long = redact(&"x ".repeat(2000));
     assert!(long.len() <= 610 && long.ends_with("..."), "{}", long.len());
     assert_eq!(redact(""), "");
@@ -166,7 +220,7 @@ fn messages_from_the_network_lose_key_ids_control_characters_and_length() {
 #[test]
 fn without_the_client_feature_or_with_it_a_bad_configuration_is_refused_before_connecting() {
     let bad = S3Config::new("ab");
-    let err = S3Backend::connect(bad).err().expect("refused");
+    let err = S3Backend::connect(bad).expect_err("refused");
     assert!(matches!(err, Error::InvalidPath(_)), "{err}");
 }
 
@@ -203,9 +257,16 @@ fn objects_live_under_the_prefix_and_neighbors_are_invisible() {
     fake.insert("repo/one/", b"");
     let backend = connect(&fake, &config()).expect("open");
 
-    backend.put("config", b"mine", PutMode::Create).expect("create");
-    backend.put("data/ab/obj", b"x", PutMode::Create).expect("create");
-    assert_eq!(fake.object("repo/one/config").as_deref(), Some(b"mine".as_slice()));
+    backend
+        .put("config", b"mine", PutMode::Create)
+        .expect("create");
+    backend
+        .put("data/ab/obj", b"x", PutMode::Create)
+        .expect("create");
+    assert_eq!(
+        fake.object("repo/one/config").as_deref(),
+        Some(b"mine".as_slice())
+    );
     assert!(fake.object("config").is_none());
 
     let root: Vec<(String, DirEntryKind)> = backend
@@ -236,17 +297,35 @@ fn a_big_directory_is_listed_completely_across_pages() {
             .put(&format!("data/ab/{index:02}"), &[b'x'; 7], PutMode::Create)
             .expect("create");
     }
-    backend.put("data/cd/00", b"y", PutMode::Create).expect("create");
+    backend
+        .put("data/cd/00", b"y", PutMode::Create)
+        .expect("create");
     let shard = backend.list_dir("data/ab").expect("list");
     let names: Vec<&str> = shard.iter().map(|entry| entry.name.as_str()).collect();
     let expected: Vec<String> = (0..25).map(|index| format!("{index:02}")).collect();
-    assert_eq!(names, expected.iter().map(String::as_str).collect::<Vec<_>>());
-    assert!(shard.iter().all(|entry| entry.kind == DirEntryKind::File && entry.len == 7));
+    assert_eq!(
+        names,
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert!(shard
+        .iter()
+        .all(|entry| entry.kind == DirEntryKind::File && entry.len == 7));
     let data: Vec<&str> = ["ab", "cd"].to_vec();
     let shards = backend.list_dir("data").expect("list");
-    assert_eq!(shards.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), data);
-    assert!(shards.iter().all(|entry| entry.kind == DirEntryKind::Directory));
-    assert!(fake.calls("list") >= 9, "25 entries in pages of 3 took several calls");
+    assert_eq!(
+        shards
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        data
+    );
+    assert!(shards
+        .iter()
+        .all(|entry| entry.kind == DirEntryKind::Directory));
+    assert!(
+        fake.calls("list") >= 9,
+        "25 entries in pages of 3 took several calls"
+    );
 }
 
 #[test]
@@ -269,7 +348,12 @@ fn a_listing_that_never_advances_is_an_error_not_an_endless_loop() {
         fn delete(&self, _key: &str) -> ApiResult<()> {
             Ok(())
         }
-        fn list(&self, _prefix: &str, _delimiter: bool, _token: Option<&str>) -> ApiResult<ListPage> {
+        fn list(
+            &self,
+            _prefix: &str,
+            _delimiter: bool,
+            _token: Option<&str>,
+        ) -> ApiResult<ListPage> {
             Ok(ListPage {
                 next_token: Some("same".to_owned()),
                 ..ListPage::default()
@@ -286,13 +370,33 @@ fn prefix_reads_handle_empty_objects_and_the_limit_is_enforced_by_the_service_ca
     let fake = Arc::new(FakeS3::new());
     let backend = connect(&fake, &config()).expect("open");
     backend.put("empty", b"", PutMode::Create).expect("create");
-    backend.put("ten", b"0123456789", PutMode::Create).expect("create");
-    assert_eq!(backend.get_prefix("empty", 12).expect("prefix"), (Vec::new(), 0));
-    assert_eq!(backend.get_prefix("ten", 4).expect("prefix"), (b"0123".to_vec(), 10));
-    assert_eq!(backend.get_prefix("ten", 0).expect("prefix"), (Vec::new(), 10));
-    assert_eq!(backend.get_prefix("ten", 99).expect("prefix"), (b"0123456789".to_vec(), 10));
-    assert!(matches!(backend.get("ten", 9), Err(Error::TooLarge { max_len: 9, .. })));
-    assert_eq!(backend.get("ten", 10).expect("at the limit").data, b"0123456789");
+    backend
+        .put("ten", b"0123456789", PutMode::Create)
+        .expect("create");
+    assert_eq!(
+        backend.get_prefix("empty", 12).expect("prefix"),
+        (Vec::new(), 0)
+    );
+    assert_eq!(
+        backend.get_prefix("ten", 4).expect("prefix"),
+        (b"0123".to_vec(), 10)
+    );
+    assert_eq!(
+        backend.get_prefix("ten", 0).expect("prefix"),
+        (Vec::new(), 10)
+    );
+    assert_eq!(
+        backend.get_prefix("ten", 99).expect("prefix"),
+        (b"0123456789".to_vec(), 10)
+    );
+    assert!(matches!(
+        backend.get("ten", 9),
+        Err(Error::TooLarge { max_len: 9, .. })
+    ));
+    assert_eq!(
+        backend.get("ten", 10).expect("at the limit").data,
+        b"0123456789"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -321,7 +425,13 @@ fn service_errors_become_the_errors_the_repository_acts_on() {
     fake.fail_next("get", 1, &refused);
     let err = backend.get("x", 10).expect_err("denied");
     assert!(
-        matches!(err, Error::Backend { kind: BackendErrorKind::Permission, .. }),
+        matches!(
+            err,
+            Error::Backend {
+                kind: BackendErrorKind::Permission,
+                ..
+            }
+        ),
         "{err}"
     );
     let text = err.to_string();
@@ -338,12 +448,16 @@ fn service_errors_become_the_errors_the_repository_acts_on() {
 #[test]
 fn a_missing_bucket_is_reported_as_such_and_not_retried() {
     let fake = Arc::new(FakeS3::new().without_bucket());
-    let err = connect(&fake, &config()).err().expect("no bucket");
+    let err = connect(&fake, &config()).expect_err("no bucket");
     let text = err.to_string();
     assert!(text.contains("bucket does not exist"), "{text}");
     assert!(text.contains("test-bucket"), "{text}");
     assert!(!err.is_transient());
-    assert_eq!(fake.calls("head_bucket"), 1, "waiting will not create a bucket");
+    assert_eq!(
+        fake.calls("head_bucket"),
+        1,
+        "waiting will not create a bucket"
+    );
 }
 
 #[test]
@@ -362,9 +476,13 @@ fn transient_failures_while_connecting_are_retried_and_then_given_up_on() {
         },
         ..config()
     };
-    let err = connect(&down, &short).err().expect("the service stays down");
+    let err = connect(&down, &short).expect_err("the service stays down");
     assert!(err.is_transient(), "{err}");
-    assert_eq!(down.calls("head_bucket"), 3, "exactly the allowed number of attempts");
+    assert_eq!(
+        down.calls("head_bucket"),
+        3,
+        "exactly the allowed number of attempts"
+    );
 }
 
 #[test]
@@ -376,10 +494,25 @@ fn read_only_credentials_connect_and_read_but_cannot_write_and_are_not_retried()
     assert!(backend.capabilities().require_repository_support().is_ok());
 
     let puts = fake.calls("put");
-    let err = backend.put("new", b"x", PutMode::Create).expect_err("denied");
-    assert!(matches!(err, Error::Backend { kind: BackendErrorKind::Permission, .. }), "{err}");
+    let err = backend
+        .put("new", b"x", PutMode::Create)
+        .expect_err("denied");
+    assert!(
+        matches!(
+            err,
+            Error::Backend {
+                kind: BackendErrorKind::Permission,
+                ..
+            }
+        ),
+        "{err}"
+    );
     assert_eq!(fake.calls("put"), puts + 1, "a refusal is not retried");
-    assert_eq!(fake.keys(), ["repo/one/config"], "the probe left nothing behind either");
+    assert_eq!(
+        fake.keys(),
+        ["repo/one/config"],
+        "the probe left nothing behind either"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -393,8 +526,15 @@ fn connecting_proves_that_conditions_work_and_leaves_no_trace() {
     let caps = backend.capabilities();
     assert_eq!(caps.create_if_absent, Guarantee::Global);
     assert_eq!(caps.replace_if_unchanged, Guarantee::Global);
-    assert!(fake.keys().is_empty(), "the probe object was removed: {:?}", fake.keys());
-    assert!(fake.calls("put") >= 4, "the probe wrote and tried the conditions");
+    assert!(
+        fake.keys().is_empty(),
+        "the probe object was removed: {:?}",
+        fake.keys()
+    );
+    assert!(
+        fake.calls("put") >= 4,
+        "the probe wrote and tried the conditions"
+    );
 }
 
 #[tokio::test]
@@ -405,7 +545,9 @@ async fn a_service_that_ignores_if_none_match_cannot_hold_a_repository() {
     assert!(fake.keys().is_empty(), "the probe object was removed");
 
     let repo = Repository::with_backend(backend);
-    let err = crate::testing::init(&repo).await.expect_err("must be refused");
+    let err = crate::testing::init(&repo)
+        .await
+        .expect_err("must be refused");
     assert!(matches!(err, Error::UnsupportedBackend(_)), "{err}");
     assert!(err.to_string().contains("conditional create"), "{err}");
     assert!(fake.keys().is_empty(), "nothing was written");
@@ -416,26 +558,59 @@ async fn a_service_that_ignores_if_match_can_hold_a_repository_but_not_transacti
     let fake = Arc::new(FakeS3::new().ignoring_if_match());
     let backend = connect(&fake, &config()).expect("open");
     let caps = backend.capabilities();
-    assert_eq!((caps.create_if_absent, caps.replace_if_unchanged), (Guarantee::Global, Guarantee::None));
+    assert_eq!(
+        (caps.create_if_absent, caps.replace_if_unchanged),
+        (Guarantee::Global, Guarantee::None)
+    );
 
     let repo = Repository::with_backend(backend.clone());
-    crate::testing::init(&repo).await.expect("a repository needs only conditional create");
+    crate::testing::init(&repo)
+        .await
+        .expect("a repository needs only conditional create");
     let err = Store::new(backend)
         .update("notes", 100, |_| Ok(b"x".to_vec()))
         .expect_err("no compare-and-swap");
     assert!(matches!(err, Error::UnsupportedBackend(_)), "{err}");
 }
 
+#[tokio::test]
+async fn a_service_that_creates_on_if_match_of_a_missing_object_gets_no_conditional_replace() {
+    // MinIO of April 2025 does this; the storage contract found it. Nothing in a repository uses
+    // a conditional replace, so the repository is still accepted, but the guarantee is not
+    // declared and the probe leaves nothing behind.
+    let fake = Arc::new(FakeS3::new().creating_on_if_match());
+    let backend = connect(&fake, &config()).expect("open");
+    let caps = backend.capabilities();
+    assert_eq!(
+        (caps.create_if_absent, caps.replace_if_unchanged),
+        (Guarantee::Global, Guarantee::None)
+    );
+    assert!(
+        fake.keys().is_empty(),
+        "the probe objects were removed: {:?}",
+        fake.keys()
+    );
+
+    let repo = Repository::with_backend(backend);
+    crate::testing::init(&repo)
+        .await
+        .expect("a repository needs only conditional create");
+}
+
 #[test]
 fn conditions_go_out_as_the_headers_s3_expects() {
     let fake = Arc::new(FakeS3::new());
     let backend = connect(&fake, &config()).expect("open");
-    let first = backend.put("meta", b"one", PutMode::Create).expect("create");
+    let first = backend
+        .put("meta", b"one", PutMode::Create)
+        .expect("create");
     assert!(matches!(
         backend.put("meta", b"two", PutMode::Create),
         Err(Error::AlreadyExists { .. })
     ));
-    let second = backend.put("meta", b"two", PutMode::Update(first.clone())).expect("update");
+    let second = backend
+        .put("meta", b"two", PutMode::Update(first.clone()))
+        .expect("update");
     assert_ne!(first, second);
     assert!(matches!(
         backend.put("meta", b"three", PutMode::Update(first)),
@@ -457,16 +632,26 @@ fn conditions_go_out_as_the_headers_s3_expects() {
 fn a_failing_service_is_retried_with_the_attempts_the_policy_allows() {
     let fake = Arc::new(FakeS3::new());
     let backend = connect(&fake, &config()).expect("open");
-    backend.put("obj", b"data", PutMode::Create).expect("create");
+    backend
+        .put("obj", b"data", PutMode::Create)
+        .expect("create");
 
     fake.fail_next("get", 3, &transient());
     let before = fake.calls("get");
-    assert_eq!(backend.get("obj", 100).expect("the fourth attempt works").data, b"data");
+    assert_eq!(
+        backend
+            .get("obj", 100)
+            .expect("the fourth attempt works")
+            .data,
+        b"data"
+    );
     assert_eq!(fake.calls("get") - before, 4);
 
     fake.fail_next("get", 100, &transient());
     let before = fake.calls("get");
-    let err = backend.get("obj", 100).expect_err("five attempts are not enough");
+    let err = backend
+        .get("obj", 100)
+        .expect_err("five attempts are not enough");
     assert!(err.is_transient(), "{err}");
     assert_eq!(fake.calls("get") - before, 5);
 }
@@ -477,15 +662,25 @@ fn a_create_whose_answer_was_lost_is_a_success_and_a_lost_race_is_still_a_confli
     let backend = connect(&fake, &config()).expect("open");
 
     fake.lose_answer_next("put", 1, &transient());
-    let version = backend.put("snapshot", b"mine", PutMode::Create).expect("it landed");
+    let version = backend
+        .put("snapshot", b"mine", PutMode::Create)
+        .expect("it landed");
     assert_eq!(backend.stat("snapshot").expect("stat").version, version);
-    assert_eq!(fake.object("repo/one/snapshot").as_deref(), Some(b"mine".as_slice()));
+    assert_eq!(
+        fake.object("repo/one/snapshot").as_deref(),
+        Some(b"mine".as_slice())
+    );
 
     fake.insert("repo/one/taken", b"theirs");
     fake.fail_next("put", 1, &transient());
-    let err = backend.put("taken", b"mine", PutMode::Create).expect_err("lost the race");
+    let err = backend
+        .put("taken", b"mine", PutMode::Create)
+        .expect_err("lost the race");
     assert!(matches!(err, Error::AlreadyExists { .. }), "{err}");
-    assert_eq!(fake.object("repo/one/taken").as_deref(), Some(b"theirs".as_slice()));
+    assert_eq!(
+        fake.object("repo/one/taken").as_deref(),
+        Some(b"theirs".as_slice())
+    );
 }
 
 #[test]
@@ -496,7 +691,9 @@ fn a_delete_whose_answer_was_lost_is_a_success() {
     fake.lose_answer_next("delete", 1, &transient());
     backend.delete("gone").expect("it was deleted");
     assert!(!backend.exists("gone").expect("exists"));
-    backend.delete("never-there").expect("deleting nothing is fine");
+    backend
+        .delete("never-there")
+        .expect("deleting nothing is fine");
 }
 
 #[test]
@@ -516,8 +713,16 @@ fn concurrent_uploads_of_the_same_chunk_store_it_once_and_a_second_run_uploads_n
             .map(|handle| handle.join().expect("a worker panicked"))
             .collect()
     });
-    assert_eq!(outcomes.iter().filter(|new| **new).count(), 1, "exactly one upload counts");
-    let objects: Vec<String> = fake.keys().into_iter().filter(|key| key.contains("/data/")).collect();
+    assert_eq!(
+        outcomes.iter().filter(|new| **new).count(),
+        1,
+        "exactly one upload counts"
+    );
+    let objects: Vec<String> = fake
+        .keys()
+        .into_iter()
+        .filter(|key| key.contains("/data/"))
+        .collect();
     assert_eq!(objects.len(), 1, "{objects:?}");
 
     // The same chunk again, as when an interrupted backup is run once more: found, not uploaded.
@@ -549,7 +754,11 @@ fn requests_in_flight_never_exceed_the_configured_limit() {
     });
     assert_eq!(fake.calls("head"), 48);
     assert!(fake.max_in_flight() <= 3, "{}", fake.max_in_flight());
-    assert!(fake.max_in_flight() >= 2, "the calls should have overlapped: {}", fake.max_in_flight());
+    assert!(
+        fake.max_in_flight() >= 2,
+        "the calls should have overlapped: {}",
+        fake.max_in_flight()
+    );
 }
 
 #[test]

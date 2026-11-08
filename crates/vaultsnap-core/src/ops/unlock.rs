@@ -80,9 +80,14 @@ mod tests {
         fs::remove_dir_all(repo.layout().snapshots_dir()).expect("remove");
         fs::remove_dir_all(repo.layout().data_dir()).expect("remove");
 
-        let err = repo.unlock(&passphrase()).await.expect_err("the strict unlock refuses");
+        let err = repo
+            .unlock(&passphrase())
+            .await
+            .expect_err("the strict unlock refuses");
         assert!(matches!(err, Error::Corrupt(_)), "{err}");
-        repo.unlock_for_check(&passphrase()).await.expect("the relaxed unlock does not");
+        repo.unlock_for_check(&passphrase())
+            .await
+            .expect("the relaxed unlock does not");
 
         let wrong = Passphrase::new(b"not the passphrase".to_vec()).expect("valid");
         let err = repo.unlock_for_check(&wrong).await.expect_err("must fail");
@@ -93,7 +98,10 @@ mod tests {
     async fn unlocking_for_a_check_still_requires_a_repository() {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let repo = Repository::at(dir.path().join("missing"));
-        let err = repo.unlock_for_check(&passphrase()).await.expect_err("must fail");
+        let err = repo
+            .unlock_for_check(&passphrase())
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::NotARepository { .. }), "{err}");
     }
 
@@ -132,7 +140,10 @@ mod tests {
         fs::write(&path, text.replace("key_version=1", "key_version=2")).expect("write");
 
         let err = repo.unlock(&passphrase()).await.expect_err("must fail");
-        assert!(matches!(err, Error::UnsupportedKeyVersion { found: 2, .. }), "{err}");
+        assert!(
+            matches!(err, Error::UnsupportedKeyVersion { found: 2, .. }),
+            "{err}"
+        );
     }
 
     #[tokio::test]

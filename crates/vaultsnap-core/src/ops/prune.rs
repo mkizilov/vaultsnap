@@ -7,7 +7,7 @@ use crate::repository::Repository;
 
 impl Repository {
     /// Applies a retention policy: removes the snapshots it does not keep and then the chunk
-    /// objects that no kept snapshot needs. See the [`prune`](crate::prune) module for the
+    /// objects that no kept snapshot needs. See the [`prune`] module for the
     /// algorithm and the guarantees.
     ///
     /// **Nothing is deleted unless [`PruneOptions::mode`] says so**: the default,
@@ -83,7 +83,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let keys = RepositoryKeys::generate().expect("generate");
         let repo = Repository::at(dir.path().join("nope"));
-        let err = repo.prune(&keys, keep_last(1)).await.expect_err("must fail");
+        let err = repo
+            .prune(&keys, keep_last(1))
+            .await
+            .expect_err("must fail");
         assert!(matches!(err, Error::NotARepository { .. }), "{err}");
     }
 
@@ -99,7 +102,10 @@ mod tests {
             assert!(report.is_noop());
             assert_eq!(report.executed, mode == PruneMode::Unattended);
         }
-        assert!(repo.store().list("locks").expect("list").is_empty(), "the locks were released");
+        assert!(
+            repo.store().list("locks").expect("list").is_empty(),
+            "the locks were released"
+        );
     }
 
     #[tokio::test]
@@ -107,17 +113,25 @@ mod tests {
         let (_dir, repo, keys) = repository().await;
 
         let shared = repo.lock(LockKind::Shared).await.expect("lock");
-        repo.prune(&keys, keep_last(1)).await.expect("a dry run runs next to a shared lock");
+        repo.prune(&keys, keep_last(1))
+            .await
+            .expect("a dry run runs next to a shared lock");
         let deleting = PruneOptions {
             mode: PruneMode::Unattended,
             ..keep_last(1)
         };
-        let err = repo.prune(&keys, deleting.clone()).await.expect_err("must refuse");
+        let err = repo
+            .prune(&keys, deleting.clone())
+            .await
+            .expect_err("must refuse");
         assert!(matches!(err, Error::Locked { .. }), "{err}");
         drop(shared);
 
         let exclusive = repo.lock(LockKind::Exclusive).await.expect("lock");
-        let err = repo.prune(&keys, keep_last(1)).await.expect_err("even a dry run waits for it");
+        let err = repo
+            .prune(&keys, keep_last(1))
+            .await
+            .expect_err("even a dry run waits for it");
         assert!(matches!(err, Error::Locked { .. }), "{err}");
         drop(exclusive);
 

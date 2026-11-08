@@ -66,11 +66,18 @@ impl RetryPolicy {
     /// to 1 that picks a point in the jitter range; it is ignored without jitter.
     pub fn delay(&self, retry: u32, unit: f64) -> Duration {
         let factor = 1_u32 << retry.min(16);
-        let capped = self.initial_delay.saturating_mul(factor).min(self.max_delay);
+        let capped = self
+            .initial_delay
+            .saturating_mul(factor)
+            .min(self.max_delay);
         if !self.jitter {
             return capped;
         }
-        let unit = if unit.is_finite() { unit.clamp(0.0, 1.0) } else { 0.0 };
+        let unit = if unit.is_finite() {
+            unit.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         capped.mul_f64(0.5 + 0.5 * unit)
     }
 }
@@ -142,11 +149,7 @@ impl RetryingBackend {
 
     /// Calls `call` with the number of the attempt (0 for the first) until it succeeds, fails in
     /// a way that is not transient, or the attempts are used up; the last error is returned.
-    fn run<T>(
-        &self,
-        operation: &'static str,
-        mut call: impl FnMut(u32) -> Result<T>,
-    ) -> Result<T> {
+    fn run<T>(&self, operation: &'static str, mut call: impl FnMut(u32) -> Result<T>) -> Result<T> {
         let mut attempt = 0;
         loop {
             match call(attempt) {
@@ -293,7 +296,8 @@ mod tests {
         let inner = Arc::new(MemoryBackend::new());
         let flaky = Arc::new(FlakyBackend::scripted(inner.clone(), faults));
         let recorder = Arc::new(Recorder::default());
-        let retrying = RetryingBackend::with_sleeper(flaky.clone(), policy(attempts), recorder.clone());
+        let retrying =
+            RetryingBackend::with_sleeper(flaky.clone(), policy(attempts), recorder.clone());
         Rig {
             inner,
             flaky,
@@ -306,8 +310,14 @@ mod tests {
     fn delays_double_up_to_the_cap_and_never_overflow() {
         let policy = policy(10);
         let millis = |retry| policy.delay(retry, 0.9).as_millis();
-        assert_eq!([millis(0), millis(1), millis(2), millis(3)], [100, 200, 400, 800]);
-        assert_eq!([millis(4), millis(5), millis(20), millis(u32::MAX)], [1000, 1000, 1000, 1000]);
+        assert_eq!(
+            [millis(0), millis(1), millis(2), millis(3)],
+            [100, 200, 400, 800]
+        );
+        assert_eq!(
+            [millis(4), millis(5), millis(20), millis(u32::MAX)],
+            [1000, 1000, 1000, 1000]
+        );
     }
 
     #[test]
@@ -321,7 +331,11 @@ mod tests {
         assert_eq!(policy.delay(1, 0.5), Duration::from_millis(150));
         assert_eq!(policy.delay(1, 7.0), Duration::from_millis(200), "clamped");
         assert_eq!(policy.delay(1, -3.0), Duration::from_millis(100), "clamped");
-        assert_eq!(policy.delay(1, f64::NAN), Duration::from_millis(100), "not a number");
+        assert_eq!(
+            policy.delay(1, f64::NAN),
+            Duration::from_millis(100),
+            "not a number"
+        );
     }
 
     #[test]
@@ -338,7 +352,13 @@ mod tests {
     fn transient_failures_are_retried_with_growing_waits_until_the_call_succeeds() {
         let rig = rig([Fault::Before, Fault::Before], 5);
         rig.inner.put("x", b"1", PutMode::Create).expect("create");
-        assert_eq!(rig.retrying.get("x", 10).expect("succeeds on the third try").data, b"1");
+        assert_eq!(
+            rig.retrying
+                .get("x", 10)
+                .expect("succeeds on the third try")
+                .data,
+            b"1"
+        );
         assert_eq!(rig.flaky.calls(), 3);
         assert_eq!(
             rig.recorder.waits(),
@@ -351,8 +371,16 @@ mod tests {
         let rig = rig([Fault::Before; 10], 3);
         let err = rig.retrying.stat("x").expect_err("never succeeds");
         assert!(err.is_transient(), "{err}");
-        assert_eq!(rig.flaky.calls(), 3, "exactly the allowed number of attempts");
-        assert_eq!(rig.recorder.waits().len(), 2, "no wait after the last attempt");
+        assert_eq!(
+            rig.flaky.calls(),
+            3,
+            "exactly the allowed number of attempts"
+        );
+        assert_eq!(
+            rig.recorder.waits().len(),
+            2,
+            "no wait after the last attempt"
+        );
     }
 
     #[test]
@@ -370,8 +398,13 @@ mod tests {
         assert!(err.is_not_found());
         let err = rig.retrying.get("../bad", 10).expect_err("invalid");
         assert!(matches!(err, Error::InvalidName(_)));
-        rig.retrying.put("x", b"1", PutMode::Create).expect("create");
-        let err = rig.retrying.put("x", b"2", PutMode::Create).expect_err("exists");
+        rig.retrying
+            .put("x", b"1", PutMode::Create)
+            .expect("create");
+        let err = rig
+            .retrying
+            .put("x", b"2", PutMode::Create)
+            .expect_err("exists");
         assert!(matches!(err, Error::AlreadyExists { .. }), "{err}");
         assert_eq!(rig.flaky.calls(), 4, "one attempt each");
         assert!(rig.recorder.waits().is_empty());
@@ -380,7 +413,10 @@ mod tests {
     #[test]
     fn a_create_whose_answer_was_lost_is_reported_as_done() {
         let rig = rig([Fault::After], 5);
-        let version = rig.retrying.put("x", b"mine", PutMode::Create).expect("it landed");
+        let version = rig
+            .retrying
+            .put("x", b"mine", PutMode::Create)
+            .expect("it landed");
         assert_eq!(rig.inner.stat("x").expect("stat").version, version);
         assert_eq!(rig.inner.get("x", 10).expect("get").data, b"mine");
     }
@@ -388,20 +424,38 @@ mod tests {
     #[test]
     fn a_create_that_lost_to_someone_else_stays_a_conflict_after_a_retry() {
         let rig = rig([Fault::Before], 5);
-        rig.inner.put("x", b"theirs", PutMode::Create).expect("someone else creates it");
-        let err = rig.retrying.put("x", b"mine", PutMode::Create).expect_err("conflict");
+        rig.inner
+            .put("x", b"theirs", PutMode::Create)
+            .expect("someone else creates it");
+        let err = rig
+            .retrying
+            .put("x", b"mine", PutMode::Create)
+            .expect_err("conflict");
         assert!(matches!(err, Error::AlreadyExists { .. }), "{err}");
         assert_eq!(rig.inner.get("x", 10).expect("get").data, b"theirs");
-        assert_eq!(rig.flaky.calls(), 3, "tried again, looked at what is there, took the refusal");
+        assert_eq!(
+            rig.flaky.calls(),
+            3,
+            "tried again, looked at what is there, took the refusal"
+        );
     }
 
     #[test]
     fn an_update_whose_answer_was_lost_is_reported_as_done() {
         let rig = rig([], 5);
-        let v1 = rig.inner.put("meta", b"one", PutMode::Create).expect("create");
-        let flaky = Arc::new(FlakyBackend::scripted_for(rig.inner.clone(), &["put"], [Fault::After]));
+        let v1 = rig
+            .inner
+            .put("meta", b"one", PutMode::Create)
+            .expect("create");
+        let flaky = Arc::new(FlakyBackend::scripted_for(
+            rig.inner.clone(),
+            &["put"],
+            [Fault::After],
+        ));
         let retrying = RetryingBackend::with_sleeper(flaky, policy(5), Arc::new(ImmediateSleeper));
-        let version = retrying.put("meta", b"two", PutMode::Update(v1)).expect("it landed");
+        let version = retrying
+            .put("meta", b"two", PutMode::Update(v1))
+            .expect("it landed");
         assert_eq!(rig.inner.stat("meta").expect("stat").version, version);
         assert_eq!(rig.inner.get("meta", 10).expect("get").data, b"two");
     }
@@ -409,11 +463,22 @@ mod tests {
     #[test]
     fn a_stale_update_stays_refused_after_a_retry() {
         let rig = rig([], 5);
-        let v1 = rig.inner.put("meta", b"one", PutMode::Create).expect("create");
-        rig.inner.put("meta", b"theirs", PutMode::Overwrite).expect("someone else updates it");
-        let flaky = Arc::new(FlakyBackend::scripted_for(rig.inner.clone(), &["put"], [Fault::Before]));
+        let v1 = rig
+            .inner
+            .put("meta", b"one", PutMode::Create)
+            .expect("create");
+        rig.inner
+            .put("meta", b"theirs", PutMode::Overwrite)
+            .expect("someone else updates it");
+        let flaky = Arc::new(FlakyBackend::scripted_for(
+            rig.inner.clone(),
+            &["put"],
+            [Fault::Before],
+        ));
         let retrying = RetryingBackend::with_sleeper(flaky, policy(5), Arc::new(ImmediateSleeper));
-        let err = retrying.put("meta", b"mine", PutMode::Update(v1)).expect_err("stale");
+        let err = retrying
+            .put("meta", b"mine", PutMode::Update(v1))
+            .expect_err("stale");
         assert!(matches!(err, Error::PreconditionFailed { .. }), "{err}");
         assert_eq!(rig.inner.get("meta", 10).expect("get").data, b"theirs");
     }
@@ -424,11 +489,19 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let local = Arc::new(LocalBackend::new(dir.path()));
         local.put("x", b"1", PutMode::Create).expect("create");
-        let flaky = Arc::new(FlakyBackend::scripted_for(local.clone(), &["delete"], [Fault::After]));
+        let flaky = Arc::new(FlakyBackend::scripted_for(
+            local.clone(),
+            &["delete"],
+            [Fault::After],
+        ));
         let retrying = RetryingBackend::with_sleeper(flaky, policy(5), Arc::new(ImmediateSleeper));
-        retrying.delete("x").expect("it was deleted by the first attempt");
+        retrying
+            .delete("x")
+            .expect("it was deleted by the first attempt");
         assert!(!local.exists("x").expect("exists"));
-        let err = retrying.delete("x").expect_err("a plain second delete is still not found");
+        let err = retrying
+            .delete("x")
+            .expect_err("a plain second delete is still not found");
         assert!(err.is_not_found(), "{err}");
     }
 
@@ -445,7 +518,8 @@ mod tests {
         contract::run(&|| {
             let inner = Arc::new(MemoryBackend::new());
             let flaky = Arc::new(FlakyBackend::periodic(inner, 3));
-            let retrying = RetryingBackend::with_sleeper(flaky, policy(12), Arc::new(ImmediateSleeper));
+            let retrying =
+                RetryingBackend::with_sleeper(flaky, policy(12), Arc::new(ImmediateSleeper));
             Fixture::new(Arc::new(retrying))
         });
     }
@@ -460,6 +534,9 @@ mod tests {
                 Arc::new(ImmediateSleeper),
             )))
         });
-        assert!(!failures.is_empty(), "the injected failures must be felt without retries");
+        assert!(
+            !failures.is_empty(),
+            "the injected failures must be felt without retries"
+        );
     }
 }

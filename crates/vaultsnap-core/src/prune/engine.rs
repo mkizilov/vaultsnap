@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use super::{
-    PlanDigest, PruneEvent, PruneFailure, PruneMode, PruneOptions, PruneReport, PrunePhase,
+    PlanDigest, PruneEvent, PruneFailure, PruneMode, PruneOptions, PrunePhase, PruneReport,
     MAX_LISTED_FAILURES,
 };
 use crate::chunk_store::{ChunkId, ChunkStore};
@@ -77,7 +77,12 @@ pub(crate) fn run(subject: &Subject<'_>, options: &PruneOptions) -> Result<Prune
             Err(Error::SnapshotNotFound(_)) => {}
             Err(err) => unreadable.push((id, err.to_string())),
         }
-        notify(options, PruneEvent::Step { phase: PrunePhase::Reading });
+        notify(
+            options,
+            PruneEvent::Step {
+                phase: PrunePhase::Reading,
+            },
+        );
     }
     if let Some((first, reason)) = unreadable.first() {
         return Err(Error::UnreadableSnapshots {
@@ -91,7 +96,9 @@ pub(crate) fn run(subject: &Subject<'_>, options: &PruneOptions) -> Result<Prune
     // and must not be acted on.
     let decisions = options.policy.select(&candidates)?;
     if decisions.last().is_some_and(|newest| !newest.is_kept()) {
-        return Err(Error::InvalidRetention("the newest snapshot would be removed"));
+        return Err(Error::InvalidRetention(
+            "the newest snapshot would be removed",
+        ));
     }
     let digest = PlanDigest::of(&decisions);
     if let PruneMode::Confirmed(confirmed) = options.mode {
@@ -111,7 +118,11 @@ pub(crate) fn run(subject: &Subject<'_>, options: &PruneOptions) -> Result<Prune
     let objects = chunks.objects()?;
     let mut missing: Vec<ChunkId> = needed
         .iter()
-        .filter(|id| objects.binary_search_by_key(*id, |(object, _)| *object).is_err())
+        .filter(|id| {
+            objects
+                .binary_search_by_key(*id, |(object, _)| *object)
+                .is_err()
+        })
         .copied()
         .collect();
     if !missing.is_empty() {
@@ -149,7 +160,10 @@ pub(crate) fn run(subject: &Subject<'_>, options: &PruneOptions) -> Result<Prune
 
     // Sweep, part one: snapshot files, oldest first. Each deletion leaves a consistent
     // repository, and a failed one stops everything before any chunk is touched.
-    let doomed: Vec<SnapshotId> = report.to_remove().map(|decision| decision.id.clone()).collect();
+    let doomed: Vec<SnapshotId> = report
+        .to_remove()
+        .map(|decision| decision.id.clone())
+        .collect();
     notify(
         options,
         PruneEvent::Started {
@@ -161,7 +175,12 @@ pub(crate) fn run(subject: &Subject<'_>, options: &PruneOptions) -> Result<Prune
         stop_if_cancelled(options)?;
         snapshots.remove(id)?;
         report.snapshots_removed += 1;
-        notify(options, PruneEvent::Step { phase: PrunePhase::RemovingSnapshots });
+        notify(
+            options,
+            PruneEvent::Step {
+                phase: PrunePhase::RemovingSnapshots,
+            },
+        );
     }
     if !doomed.is_empty() {
         // The barrier: the removals are on disk before any chunk goes, so a crash cannot bring
@@ -197,7 +216,12 @@ pub(crate) fn run(subject: &Subject<'_>, options: &PruneOptions) -> Result<Prune
                 }
             }
         }
-        notify(options, PruneEvent::Step { phase: PrunePhase::RemovingChunks });
+        notify(
+            options,
+            PruneEvent::Step {
+                phase: PrunePhase::RemovingChunks,
+            },
+        );
     }
 
     // Verify: everything a kept snapshot needs is still there.
@@ -205,9 +229,7 @@ pub(crate) fn run(subject: &Subject<'_>, options: &PruneOptions) -> Result<Prune
     in_use.sort();
     for id in in_use {
         if !chunks.contains(id)? {
-            return Err(Error::RetainedChunkLost {
-                first: id.to_hex(),
-            });
+            return Err(Error::RetainedChunkLost { first: id.to_hex() });
         }
         report.chunks_verified += 1;
     }
@@ -279,14 +301,19 @@ mod tests {
         /// file per seed. Returns its id.
         fn snapshot(&mut self, secs: i64, seeds: &[u64]) -> SnapshotId {
             let mut manifest = minimal();
-            manifest.id = format!("{:02x}", self.next_id).repeat(32).parse().expect("valid id");
+            manifest.id = format!("{:02x}", self.next_id)
+                .repeat(32)
+                .parse()
+                .expect("valid id");
             self.next_id += 1;
             manifest.created = Timestamp { secs, nanos: 0 };
             for (index, seed) in seeds.iter().enumerate() {
                 let chunk = self.chunk(*seed);
-                manifest.roots[0]
-                    .entries
-                    .push(file(0, format!("f{index}").as_bytes(), vec![chunk]));
+                manifest.roots[0].entries.push(file(
+                    0,
+                    format!("f{index}").as_bytes(),
+                    vec![chunk],
+                ));
             }
             manifest.stats = manifest.compute_stats();
             self.snapshots.commit(&manifest).expect("commit");
@@ -360,15 +387,36 @@ mod tests {
         let newest = fx.snapshot(3 * DAY, &[1, 4]);
         assert_eq!(fx.object_count(), 4);
 
-        let report = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
+        let report =
+            run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
         assert!(report.executed && report.is_complete());
-        assert_eq!(fx.ids(), [newest.clone()]);
-        assert_eq!(fx.object_count(), 2, "chunks 1 and 4 remain; 2 and 3 were only in removed snapshots");
-        assert_eq!((report.snapshots_removed, report.chunks_removed, report.chunks_unreferenced), (2, 2, 2));
-        assert_eq!((report.chunks_in_use, report.chunks_verified, report.objects), (2, 2, 4));
+        assert_eq!(fx.ids(), std::slice::from_ref(&newest));
+        assert_eq!(
+            fx.object_count(),
+            2,
+            "chunks 1 and 4 remain; 2 and 3 were only in removed snapshots"
+        );
+        assert_eq!(
+            (
+                report.snapshots_removed,
+                report.chunks_removed,
+                report.chunks_unreferenced
+            ),
+            (2, 2, 2)
+        );
+        assert_eq!(
+            (report.chunks_in_use, report.chunks_verified, report.objects),
+            (2, 2, 4)
+        );
         assert!(fx.restorable(&newest));
-        assert!(matches!(fx.snapshots.load(&oldest), Err(Error::SnapshotNotFound(_))));
-        assert!(matches!(fx.snapshots.load(&middle), Err(Error::SnapshotNotFound(_))));
+        assert!(matches!(
+            fx.snapshots.load(&oldest),
+            Err(Error::SnapshotNotFound(_))
+        ));
+        assert!(matches!(
+            fx.snapshots.load(&middle),
+            Err(Error::SnapshotNotFound(_))
+        ));
     }
 
     #[test]
@@ -407,18 +455,32 @@ mod tests {
         let plan = run(&fx.subject(), &options(keep_last(1), PruneMode::DryRun)).expect("plan");
         assert!(!plan.executed);
         assert_eq!(fx.dump(), before, "not a byte changed");
-        assert_eq!((plan.snapshots_to_remove(), plan.chunks_unreferenced), (2, 3));
-        assert_eq!((plan.snapshots_removed, plan.chunks_removed, plan.bytes_removed), (0, 0, 0));
+        assert_eq!(
+            (plan.snapshots_to_remove(), plan.chunks_unreferenced),
+            (2, 3)
+        );
+        assert_eq!(
+            (
+                plan.snapshots_removed,
+                plan.chunks_removed,
+                plan.bytes_removed
+            ),
+            (0, 0, 0)
+        );
         assert!(plan.bytes_unreferenced > 0);
         assert!(fx.chunks.contains(&orphan.id).expect("contains"));
 
-        let done = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
+        let done =
+            run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
         assert!(done.executed);
         assert_eq!(done.digest, plan.digest);
         assert_eq!(done.snapshots_removed, plan.snapshots_to_remove());
         assert_eq!(done.chunks_removed, plan.chunks_unreferenced);
         assert_eq!(done.bytes_removed, plan.bytes_unreferenced);
-        assert!(!fx.chunks.contains(&orphan.id).expect("contains"), "unreferenced objects are swept too");
+        assert!(
+            !fx.chunks.contains(&orphan.id).expect("contains"),
+            "unreferenced objects are swept too"
+        );
     }
 
     #[test]
@@ -431,16 +493,22 @@ mod tests {
         // A new snapshot arrives after the plan was shown: keep-last 1 would now remove another.
         fx.snapshot(3 * DAY, &[3]);
         let before = fx.dump();
-        let err = run(&fx.subject(), &options(keep_last(1), PruneMode::Confirmed(plan.digest)))
-            .expect_err("the plan changed");
+        let err = run(
+            &fx.subject(),
+            &options(keep_last(1), PruneMode::Confirmed(plan.digest)),
+        )
+        .expect_err("the plan changed");
         assert!(matches!(err, Error::PlanChanged), "{err}");
         assert_eq!(fx.dump(), before, "nothing was deleted");
 
         // The new plan, confirmed, is executed.
         let new_plan = run(&fx.subject(), &options(keep_last(1), PruneMode::DryRun)).expect("plan");
         assert_ne!(new_plan.digest, plan.digest);
-        let done = run(&fx.subject(), &options(keep_last(1), PruneMode::Confirmed(new_plan.digest)))
-            .expect("prune");
+        let done = run(
+            &fx.subject(),
+            &options(keep_last(1), PruneMode::Confirmed(new_plan.digest)),
+        )
+        .expect("prune");
         assert_eq!(done.snapshots_removed, 2);
     }
 
@@ -451,8 +519,11 @@ mod tests {
         fx.snapshot(2 * DAY, &[2]);
         fx.snapshot(3 * DAY, &[3]);
         let plan = run(&fx.subject(), &options(keep_last(2), PruneMode::DryRun)).expect("plan");
-        let err = run(&fx.subject(), &options(keep_last(1), PruneMode::Confirmed(plan.digest)))
-            .expect_err("a different policy removes different snapshots");
+        let err = run(
+            &fx.subject(),
+            &options(keep_last(1), PruneMode::Confirmed(plan.digest)),
+        )
+        .expect_err("a different policy removes different snapshots");
         assert!(matches!(err, Error::PlanChanged));
         assert_eq!(fx.ids().len(), 3);
     }
@@ -464,23 +535,31 @@ mod tests {
         let orphans = [fx.chunk(50), fx.chunk(51)];
         assert_eq!(fx.object_count(), 4);
 
-        let report = run(&fx.subject(), &options(keep_last(10), PruneMode::Unattended)).expect("prune");
+        let report = run(
+            &fx.subject(),
+            &options(keep_last(10), PruneMode::Unattended),
+        )
+        .expect("prune");
         assert_eq!((report.snapshots_removed, report.chunks_removed), (0, 2));
-        assert_eq!(fx.ids(), [only.clone()]);
-        assert!(orphans.iter().all(|c| !fx.chunks.contains(&c.id).expect("contains")));
+        assert_eq!(fx.ids(), std::slice::from_ref(&only));
+        assert!(orphans
+            .iter()
+            .all(|c| !fx.chunks.contains(&c.id).expect("contains")));
         assert!(fx.restorable(&only));
     }
 
     #[test]
     fn an_empty_repository_and_a_repeated_prune_have_nothing_to_do() {
         let mut fx = Fx::new();
-        let report = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
+        let report =
+            run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
         assert!(report.is_noop() && report.executed && report.decisions.is_empty());
 
         fx.snapshot(DAY, &[1]);
         fx.snapshot(2 * DAY, &[2]);
         run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
-        let again = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
+        let again =
+            run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
         assert!(again.is_noop(), "pruning twice is the same as pruning once");
         assert_eq!((again.snapshots_removed, again.chunks_removed), (0, 0));
     }
@@ -543,7 +622,8 @@ mod tests {
         fs::remove_file(fx.dir.path().join(lost.id.object_name())).expect("remove");
         let before = fx.dump();
 
-        let err = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect_err("refused");
+        let err =
+            run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect_err("refused");
         match err {
             Error::KeptSnapshotsDamaged { count, first } => {
                 assert_eq!((count, first), (1, lost.id.to_hex()));
@@ -563,9 +643,13 @@ mod tests {
         let lost = fx.chunk(1);
         fs::remove_file(fx.dir.path().join(lost.id.object_name())).expect("remove");
 
-        let report = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
+        let report =
+            run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune");
         assert_eq!(report.snapshots_removed, 1);
-        assert!(matches!(fx.snapshots.load(&doomed), Err(Error::SnapshotNotFound(_))));
+        assert!(matches!(
+            fx.snapshots.load(&doomed),
+            Err(Error::SnapshotNotFound(_))
+        ));
         assert!(fx.restorable(&kept));
         assert_eq!(fx.object_count(), 1);
     }
@@ -576,7 +660,8 @@ mod tests {
         fx.snapshot(DAY, &[1]);
         let before = fx.dump();
         for policy in [RetentionPolicy::default(), keep_last(0)] {
-            let err = run(&fx.subject(), &options(policy, PruneMode::Unattended)).expect_err("invalid");
+            let err =
+                run(&fx.subject(), &options(policy, PruneMode::Unattended)).expect_err("invalid");
             assert!(matches!(err, Error::InvalidRetention(_)), "{err}");
         }
         assert_eq!(fx.dump(), before);
@@ -647,26 +732,48 @@ mod tests {
         let policy = keep_last(1);
         let total = {
             let fx = build();
-            let report = run(&fx.subject(), &options(policy.clone(), PruneMode::Unattended)).expect("prune");
+            let report = run(
+                &fx.subject(),
+                &options(policy.clone(), PruneMode::Unattended),
+            )
+            .expect("prune");
             (report.snapshots_removed + report.chunks_removed) as usize
         };
-        assert_eq!(total, 3 + 5, "three snapshots; chunks 1 to 4 and the orphan 77 are unreferenced");
+        assert_eq!(
+            total,
+            3 + 5,
+            "three snapshots; chunks 1 to 4 and the orphan 77 are unreferenced"
+        );
 
         for deletions in 0..=total {
             let fx = build();
             let result = interrupted(&fx, &policy, deletions);
             if deletions < total {
-                assert!(matches!(result, Err(Error::PruneCancelled)), "after {deletions}: {result:?}");
+                assert!(
+                    matches!(result, Err(Error::PruneCancelled)),
+                    "after {deletions}: {result:?}"
+                );
             }
             // Whatever was done, every snapshot that still exists can be restored in full.
             for id in fx.ids() {
-                assert!(fx.restorable(&id), "after {deletions} deletions, {id} lost a chunk");
+                assert!(
+                    fx.restorable(&id),
+                    "after {deletions} deletions, {id} lost a chunk"
+                );
             }
             // And running the prune again reaches the same end state as an uninterrupted one.
-            let finished = run(&fx.subject(), &options(policy.clone(), PruneMode::Unattended)).expect("rerun");
+            let finished = run(
+                &fx.subject(),
+                &options(policy.clone(), PruneMode::Unattended),
+            )
+            .expect("rerun");
             assert!(finished.is_complete());
             assert_eq!(fx.ids().len(), 1, "after {deletions}");
-            assert_eq!(fx.object_count(), 2, "after {deletions}: chunks 5 and 6 only");
+            assert_eq!(
+                fx.object_count(),
+                2,
+                "after {deletions}: chunks 5 and 6 only"
+            );
             assert!(fx.restorable(&fx.ids()[0]));
         }
     }
@@ -694,16 +801,23 @@ mod tests {
         let (s, c) = (Arc::clone(&snapshots), Arc::clone(&chunks));
         let mut options = options(keep_last(1), PruneMode::Unattended);
         options.observer = Some(Arc::new(move |event: &PruneEvent| match event {
-            PruneEvent::Step { phase: PrunePhase::RemovingSnapshots } => {
+            PruneEvent::Step {
+                phase: PrunePhase::RemovingSnapshots,
+            } => {
                 s.fetch_add(1, Ordering::SeqCst);
             }
-            PruneEvent::Step { phase: PrunePhase::RemovingChunks } => {
+            PruneEvent::Step {
+                phase: PrunePhase::RemovingChunks,
+            } => {
                 c.fetch_add(1, Ordering::SeqCst);
             }
             _ => {}
         }));
         let report = run(&fx.subject(), &options).expect("prune");
-        assert_eq!(snapshots.load(Ordering::SeqCst) as u64, report.snapshots_removed);
+        assert_eq!(
+            snapshots.load(Ordering::SeqCst) as u64,
+            report.snapshots_removed
+        );
         assert_eq!(chunks.load(Ordering::SeqCst) as u64, report.chunks_removed);
     }
 
@@ -735,12 +849,20 @@ mod tests {
             return;
         }
 
-        let report = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended)).expect("prune goes on");
+        let report = run(&fx.subject(), &options(keep_last(1), PruneMode::Unattended))
+            .expect("prune goes on");
         assert!(report.executed && !report.is_complete());
         assert!(report.failure_count >= 1 && report.failures.len() as u64 == report.failure_count);
-        assert!(report.failures[0].subject.starts_with("data/"), "{:?}", report.failures[0]);
+        assert!(
+            report.failures[0].subject.starts_with("data/"),
+            "{:?}",
+            report.failures[0]
+        );
         assert_eq!(report.snapshots_removed, 1, "the snapshot is gone");
-        assert_eq!(report.chunks_removed + report.failure_count, report.chunks_unreferenced);
+        assert_eq!(
+            report.chunks_removed + report.failure_count,
+            report.chunks_unreferenced
+        );
         assert!(fx.restorable(&kept), "the kept snapshot is untouched");
         assert_eq!(report.chunks_verified, report.chunks_in_use);
     }
@@ -752,10 +874,22 @@ mod tests {
         let newest = fx.snapshot(400 * DAY, &[2]);
         for policy in [
             keep_last(1),
-            RetentionPolicy { keep_daily: Some(1), ..Default::default() },
-            RetentionPolicy { keep_weekly: Some(1), ..Default::default() },
-            RetentionPolicy { keep_monthly: Some(1), ..Default::default() },
-            RetentionPolicy { keep_yearly: Some(1), ..Default::default() },
+            RetentionPolicy {
+                keep_daily: Some(1),
+                ..Default::default()
+            },
+            RetentionPolicy {
+                keep_weekly: Some(1),
+                ..Default::default()
+            },
+            RetentionPolicy {
+                keep_monthly: Some(1),
+                ..Default::default()
+            },
+            RetentionPolicy {
+                keep_yearly: Some(1),
+                ..Default::default()
+            },
         ] {
             let plan = run(&fx.subject(), &options(policy, PruneMode::DryRun)).expect("plan");
             let removed: Vec<&SnapshotId> = plan.to_remove().map(|d| &d.id).collect();

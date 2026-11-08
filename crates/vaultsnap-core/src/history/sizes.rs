@@ -109,8 +109,9 @@ impl SizeLedger {
             };
             let stored = usage.stored.unwrap_or(0);
             sizes.chunks += 1;
-            sizes.deduplicated_bytes =
-                sizes.deduplicated_bytes.saturating_add(u64::from(usage.plain));
+            sizes.deduplicated_bytes = sizes
+                .deduplicated_bytes
+                .saturating_add(u64::from(usage.plain));
             sizes.stored_bytes = sizes.stored_bytes.saturating_add(stored);
             if usage.stored.is_none() {
                 sizes.missing_chunks += 1;
@@ -125,7 +126,10 @@ impl SizeLedger {
 
     /// How many distinct chunks have no object. Meaningful after [`measure`](Self::measure).
     pub(crate) fn missing(&self) -> u64 {
-        self.chunks.values().filter(|usage| usage.stored.is_none()).count() as u64
+        self.chunks
+            .values()
+            .filter(|usage| usage.stored.is_none())
+            .count() as u64
     }
 
     /// The number of distinct chunks added so far and the size of their objects.
@@ -180,7 +184,10 @@ mod tests {
         measured(&mut ledger, &[(1, 40), (2, 70)]);
 
         let sizes = ledger.sizes_of(&manifest);
-        assert_eq!(sizes.logical_bytes, 400, "four chunk references of 100 bytes each");
+        assert_eq!(
+            sizes.logical_bytes, 400,
+            "four chunk references of 100 bytes each"
+        );
         assert_eq!(sizes.chunks, 2);
         assert_eq!(sizes.deduplicated_bytes, 200);
         assert_eq!(sizes.stored_bytes, 110);
@@ -199,10 +206,16 @@ mod tests {
         measured(&mut ledger, &[(1, 10), (2, 20), (3, 30)]);
 
         let older_sizes = ledger.sizes_of(&older);
-        assert_eq!((older_sizes.stored_bytes, older_sizes.unique_stored_bytes), (30, 10));
+        assert_eq!(
+            (older_sizes.stored_bytes, older_sizes.unique_stored_bytes),
+            (30, 10)
+        );
         assert_eq!(older_sizes.unique_chunks, 1);
         let newer_sizes = ledger.sizes_of(&newer);
-        assert_eq!((newer_sizes.stored_bytes, newer_sizes.unique_stored_bytes), (50, 30));
+        assert_eq!(
+            (newer_sizes.stored_bytes, newer_sizes.unique_stored_bytes),
+            (50, 30)
+        );
         assert_eq!(ledger.totals(), (3, 60), "the shared chunk is stored once");
     }
 
@@ -220,7 +233,9 @@ mod tests {
     #[test]
     fn hard_links_and_empty_files_add_no_chunks() {
         let mut manifest = manifest_of(&[&[1]]);
-        manifest.roots[0].entries.push(file(0, b"empty", Vec::new()));
+        manifest.roots[0]
+            .entries
+            .push(file(0, b"empty", Vec::new()));
         manifest.roots[0].entries.push(ManifestEntry {
             parent: Some(0),
             name: b"alias".to_vec(),
@@ -234,7 +249,10 @@ mod tests {
         ledger.add(&manifest);
         measured(&mut ledger, &[(1, 10)]);
         let sizes = ledger.sizes_of(&manifest);
-        assert_eq!(sizes.logical_bytes, 100, "the hard link is not a second copy");
+        assert_eq!(
+            sizes.logical_bytes, 100,
+            "the hard link is not a second copy"
+        );
         assert_eq!((sizes.chunks, sizes.stored_bytes), (1, 10));
     }
 
@@ -266,8 +284,14 @@ mod tests {
             panic!("a file");
         };
         chunks.clear();
-        chunks.push(crate::snapshot::ChunkRef { id: put.id, len: 3000 });
-        chunks.push(crate::snapshot::ChunkRef { id: missing, len: 100 });
+        chunks.push(crate::snapshot::ChunkRef {
+            id: put.id,
+            len: 3000,
+        });
+        chunks.push(crate::snapshot::ChunkRef {
+            id: missing,
+            len: 100,
+        });
         manifest.roots[0].entries[1].attributes.size = 3100;
         manifest.stats = manifest.compute_stats();
 

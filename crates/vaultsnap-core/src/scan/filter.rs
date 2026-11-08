@@ -36,7 +36,9 @@ impl Pattern {
         let directories_only = text.ends_with('/');
         if directories_only {
             if !allow_directories_only {
-                return Err(invalid("include patterns cannot end with `/`; use `dir/**`"));
+                return Err(invalid(
+                    "include patterns cannot end with `/`; use `dir/**`",
+                ));
             }
             text = &text[..text.len() - 1];
         }
@@ -189,7 +191,10 @@ mod tests {
     fn invalid_patterns_are_rejected() {
         for pattern in ["", "/", "//", "[", "a[", "[z-a]"] {
             let result = Filter::new(&[], &[pattern.to_owned()]);
-            assert!(matches!(result, Err(Error::InvalidPattern { .. })), "{pattern:?}");
+            assert!(
+                matches!(result, Err(Error::InvalidPattern { .. })),
+                "{pattern:?}"
+            );
         }
         let include_dir = Filter::new(&["src/".to_owned()], &[]);
         assert!(matches!(include_dir, Err(Error::InvalidPattern { .. })));

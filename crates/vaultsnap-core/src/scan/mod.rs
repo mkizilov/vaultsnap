@@ -38,9 +38,7 @@ mod options;
 mod reader;
 mod walker;
 
-pub use entry::{
-    Entry, EntryKind, Metadata, ScanItem, ScanStats, SkipReason, Skipped, Timestamp,
-};
+pub use entry::{Entry, EntryKind, Metadata, ScanItem, ScanStats, SkipReason, Skipped, Timestamp};
 pub use options::{
     ChangePolicy, ErrorPolicy, HardLinkPolicy, ScanOptions, SpecialFilePolicy, SymlinkPolicy,
 };

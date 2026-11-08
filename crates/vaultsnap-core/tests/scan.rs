@@ -177,7 +177,11 @@ fn the_order_matches_an_independent_walk_of_a_larger_tree() {
         write(root, &format!("d{a}/top.txt"), b"t");
         for b in 0..4 {
             for c in 0..6 {
-                write(root, &format!("d{a}/e{b}/f{c}"), format!("{a}{b}{c}").as_bytes());
+                write(
+                    root,
+                    &format!("d{a}/e{b}/f{c}"),
+                    format!("{a}{b}{c}").as_bytes(),
+                );
             }
         }
     }
@@ -187,7 +191,11 @@ fn the_order_matches_an_independent_walk_of_a_larger_tree() {
     let scanner = default_scanner(root);
     let items = scan(&scanner);
     assert_eq!(render(&items), want);
-    assert_eq!(scanner.scan().stats().entries, 0, "a new walk starts from zero");
+    assert_eq!(
+        scanner.scan().stats().entries,
+        0,
+        "a new walk starts from zero"
+    );
 
     let mut walk = scanner.scan();
     let count = walk.by_ref().count() as u64;
@@ -200,7 +208,11 @@ fn the_order_matches_an_independent_walk_of_a_larger_tree() {
 fn scanning_twice_gives_identical_results() {
     let dir = temp();
     for index in 0..30 {
-        write(dir.path(), &format!("dir{}/file{index}", index % 5), b"content");
+        write(
+            dir.path(),
+            &format!("dir{}/file{index}", index % 5),
+            b"content",
+        );
     }
     let scanner = default_scanner(dir.path());
     let project = |items: &[ScanItem]| -> Vec<(String, u64, Option<_>)> {
@@ -273,7 +285,11 @@ fn empty_files_and_empty_directories_are_recorded() {
 
     let scanner = default_scanner(dir.path());
     let items = scan(&scanner);
-    assert_eq!(render(&items), strings(&["d .", "d empty_dir", "f empty.txt"]));
+    // Names are in ascending byte order, not directories first: `.` (0x2e) sorts before `_` (0x5f).
+    assert_eq!(
+        render(&items),
+        strings(&["d .", "f empty.txt", "d empty_dir"])
+    );
     let file = find(&items, "empty.txt");
     assert_eq!(file.metadata.size, 0);
     assert!(read_all(&scanner, file).is_empty());
@@ -338,7 +354,10 @@ fn names_that_are_not_utf8_are_preserved_byte_for_byte() {
         .into_iter()
         .find(|entry| entry.path.as_os_str().as_bytes() == b"bad-\xff\xfe-name")
         .expect("the entry keeps its exact bytes");
-    assert_eq!(entry.path.clone().into_os_string().into_vec(), b"bad-\xff\xfe-name");
+    assert_eq!(
+        entry.path.clone().into_os_string().into_vec(),
+        b"bad-\xff\xfe-name"
+    );
     assert_eq!(read_all(&scanner, entry), b"payload");
 }
 
@@ -425,7 +444,8 @@ fn symbolic_links_are_recorded_not_followed_by_default() {
     assert!(entries(&items).iter().all(|entry| !entry.followed_symlink));
 
     // Nothing from outside the root is ever reached.
-    let below_link = |e: &&Entry| e.path.starts_with("link_abs_dir") && e.path != Path::new("link_abs_dir");
+    let below_link =
+        |e: &&Entry| e.path.starts_with("link_abs_dir") && e.path != Path::new("link_abs_dir");
     assert!(!entries(&items).iter().any(below_link));
     let link = find(&items, "link_file");
     assert!(matches!(scanner.open(link), Err(Error::InvalidArgument(_))));
@@ -436,7 +456,10 @@ fn symbolic_links_are_recorded_not_followed_by_default() {
 fn following_inside_the_root_never_leaves_it() {
     let fx = link_fixture();
     let out = fx.outside.path().display().to_string();
-    let scanner = scanner(fx.root.path(), with_symlinks(SymlinkPolicy::FollowInsideRoot));
+    let scanner = scanner(
+        fx.root.path(),
+        with_symlinks(SymlinkPolicy::FollowInsideRoot),
+    );
     let items = scan(&scanner);
 
     let mut expected = strings(&["d .", "l dangling -> missing/nowhere"]);
@@ -481,9 +504,15 @@ fn following_everything_is_an_explicit_choice_and_still_stops_at_loops() {
         "l up -> .",
         "l dangling -> missing/nowhere",
     ] {
-        assert!(lines.iter().any(|line| line == wanted), "missing {wanted:?} in {lines:#?}");
+        assert!(
+            lines.iter().any(|line| line == wanted),
+            "missing {wanted:?} in {lines:#?}"
+        );
     }
-    assert_eq!(read_all(&scanner, find(&items, "link_abs_file")), b"top secret");
+    assert_eq!(
+        read_all(&scanner, find(&items, "link_abs_file")),
+        b"top secret"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -512,7 +541,15 @@ fn hard_links_are_recorded_once_and_linked_by_default() {
     let items = drain(&mut walk);
     assert_eq!(
         render(&items),
-        strings(&["d .", "f a", "h b -> a", "h c -> a", "f d", "d sub", "h sub/x -> a"])
+        strings(&[
+            "d .",
+            "f a",
+            "h b -> a",
+            "h c -> a",
+            "f d",
+            "d sub",
+            "h sub/x -> a"
+        ])
     );
     assert_eq!(find(&items, "a").metadata.links, Some(4));
     assert_eq!(walk.stats().hard_links, 3);
@@ -596,7 +633,9 @@ fn unreadable_paths_are_reported_and_the_rest_is_still_scanned() {
     assert_eq!(skipped.len(), 1);
     assert_eq!(skipped[0].path, Path::new("locked"));
     match &skipped[0].reason {
-        SkipReason::Unreadable { operation, kind, .. } => {
+        SkipReason::Unreadable {
+            operation, kind, ..
+        } => {
             assert_eq!(*operation, "read directory");
             assert_eq!(*kind, std::io::ErrorKind::PermissionDenied);
         }
@@ -624,9 +663,24 @@ fn the_fail_policy_stops_at_the_first_unreadable_path() {
     };
     let scanner = scanner(dir.path(), options);
     let mut walk = scanner.scan();
-    assert!(matches!(walk.next(), Some(Ok(ScanItem::Entry(_)))), "the root comes first");
-    let err = walk.next().expect("an item").expect_err("the unreadable directory fails");
-    assert!(matches!(err, Error::Io { operation: "read directory", .. }), "{err}");
+    assert!(
+        matches!(walk.next(), Some(Ok(ScanItem::Entry(_)))),
+        "the root comes first"
+    );
+    let err = walk
+        .next()
+        .expect("an item")
+        .expect_err("the unreadable directory fails");
+    assert!(
+        matches!(
+            err,
+            Error::Io {
+                operation: "read directory",
+                ..
+            }
+        ),
+        "{err}"
+    );
     assert!(walk.next().is_none(), "the stream ends after an error");
 }
 
@@ -700,11 +754,14 @@ fn growth_during_the_read_is_detected_at_the_end() {
         .append(true)
         .open(dir.path().join("data.bin"))
         .expect("open for append");
-    file.write_all(b"appended while backing up").expect("append");
+    file.write_all(b"appended while backing up")
+        .expect("append");
     file.sync_all().expect("sync");
 
     let mut rest = Vec::new();
-    let err = reader.read_to_end(&mut rest).expect_err("the change must be reported");
+    let err = reader
+        .read_to_end(&mut rest)
+        .expect_err("the change must be reported");
     assert!(changed_error(&err), "{err}");
     assert!(reader.changed());
 }
@@ -723,7 +780,9 @@ fn truncation_during_the_read_is_detected_at_the_end() {
     file.set_len(32).expect("truncate");
 
     let mut rest = Vec::new();
-    let err = reader.read_to_end(&mut rest).expect_err("the change must be reported");
+    let err = reader
+        .read_to_end(&mut rest)
+        .expect_err("the change must be reported");
     assert!(changed_error(&err), "{err}");
 }
 
@@ -770,7 +829,10 @@ fn a_file_replaced_after_the_scan_is_refused() {
 fn a_file_removed_after_the_scan_is_reported_as_changed() {
     let (dir, scanner, entry) = one_file(b"original", ScanOptions::default());
     fs::remove_file(dir.path().join("data.bin")).expect("remove");
-    assert!(matches!(scanner.open(&entry), Err(Error::FileChanged { .. })));
+    assert!(matches!(
+        scanner.open(&entry),
+        Err(Error::FileChanged { .. })
+    ));
 }
 
 #[cfg(unix)]
@@ -796,7 +858,11 @@ fn a_symlink_swapped_in_after_the_scan_is_never_followed() {
 // ---------------------------------------------------------------------------------------------
 
 #[cfg(unix)]
-fn special_tree() -> (TempDir, Vec<&'static str>, Option<std::os::unix::net::UnixListener>) {
+fn special_tree() -> (
+    TempDir,
+    Vec<&'static str>,
+    Option<std::os::unix::net::UnixListener>,
+) {
     let dir = temp();
     let root = dir.path();
     write(root, "file", b"regular");
@@ -842,7 +908,10 @@ fn special_files_are_recorded_without_being_opened() {
     assert_eq!(walk.stats().special_files as usize, kinds.len() - 1);
     for entry in entries(&items) {
         if !matches!(entry.kind, EntryKind::Directory | EntryKind::File) {
-            assert!(matches!(scanner.open(entry), Err(Error::InvalidArgument(_))));
+            assert!(matches!(
+                scanner.open(entry),
+                Err(Error::InvalidArgument(_))
+            ));
         }
     }
 }
@@ -857,12 +926,11 @@ fn special_files_can_be_skipped_by_policy() {
     };
     let items = scan(&scanner(dir.path(), options));
     assert_eq!(render(&items), strings(&["d .", "f file"]));
-    let reasons: Vec<_> = skipped(&items)
-        .iter()
-        .map(|s| s.reason.clone())
-        .collect();
+    let reasons: Vec<_> = skipped(&items).iter().map(|s| s.reason.clone()).collect();
     assert_eq!(reasons.len(), kinds.len() - 1);
-    assert!(reasons.iter().all(|r| matches!(r, SkipReason::SpecialFile(_))));
+    assert!(reasons
+        .iter()
+        .all(|r| matches!(r, SkipReason::SpecialFile(_))));
 }
 
 #[cfg(unix)]
@@ -938,7 +1006,11 @@ fn excluded_directories_are_pruned_with_everything_below_them() {
             "f src/main.rs",
         ])
     );
-    assert_eq!(walk.stats().excluded, 3, "a.log, d/b.log, and target/ (once)");
+    assert_eq!(
+        walk.stats().excluded,
+        3,
+        "a.log, d/b.log, and target/ (once)"
+    );
 }
 
 #[test]
@@ -964,10 +1036,16 @@ fn include_patterns_filter_files_but_directories_stay_traversable() {
 #[test]
 fn anchored_patterns_match_only_from_the_root() {
     let dir = pattern_tree();
-    let items = scan(&scanner(dir.path(), patterns(&[], &["/notes.txt", "src/gen"])));
+    let items = scan(&scanner(
+        dir.path(),
+        patterns(&[], &["/notes.txt", "src/gen"]),
+    ));
     let lines = render(&items);
     assert!(!lines.contains(&"f notes.txt".to_owned()));
-    assert!(lines.contains(&"f d/notes.txt".to_owned()), "only the top-level file is excluded");
+    assert!(
+        lines.contains(&"f d/notes.txt".to_owned()),
+        "only the top-level file is excluded"
+    );
     assert!(lines.iter().all(|line| !line.contains("src/gen")));
     assert!(lines.contains(&"f src/lib.rs".to_owned()));
 }
@@ -977,7 +1055,9 @@ fn a_directory_only_pattern_does_not_match_a_file_of_the_same_name() {
     let dir = pattern_tree();
     let items = scan(&scanner(dir.path(), patterns(&[], &["cache/"])));
     let lines = render(&items);
-    assert!(!lines.iter().any(|line| line.contains("cache/") || line == "d cache"));
+    assert!(!lines
+        .iter()
+        .any(|line| line.contains("cache/") || line == "d cache"));
     assert!(lines.contains(&"f file_named_cache".to_owned()));
 }
 
@@ -989,7 +1069,10 @@ fn includes_with_a_directory_glob_select_everything_below_it() {
         .into_iter()
         .filter(|line| line.starts_with("f "))
         .collect();
-    assert_eq!(files, strings(&["f src/gen/out.rs", "f src/lib.rs", "f src/main.rs"]));
+    assert_eq!(
+        files,
+        strings(&["f src/gen/out.rs", "f src/lib.rs", "f src/main.rs"])
+    );
 }
 
 #[test]
@@ -1018,7 +1101,10 @@ fn invalid_patterns_and_roots_are_rejected_up_front() {
     let dir = temp();
     for bad in ["[", "", "/"] {
         let result = Scanner::new(dir.path(), patterns(&[], &[bad]));
-        assert!(matches!(result, Err(Error::InvalidPattern { .. })), "{bad:?}");
+        assert!(
+            matches!(result, Err(Error::InvalidPattern { .. })),
+            "{bad:?}"
+        );
     }
     let result = Scanner::new(dir.path(), patterns(&["dir/"], &[]));
     assert!(matches!(result, Err(Error::InvalidPattern { .. })));
