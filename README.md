@@ -15,13 +15,13 @@ A reliable encrypted incremental backup utility written in Rust.
 | `ls`        | Implemented: the files of a snapshot, text or JSON                     |
 | `diff`      | Implemented: added, deleted, and modified files between two snapshots   |
 | `restore`   | Implemented: safe restore of a snapshot or selected paths (see below)  |
-| `check`     | Not implemented                                                        |
+| `check`     | Implemented: quick or full verification; reports, never repairs        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
 Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
 filesystem scanner, encrypted snapshot manifests, the `backup` command that connects them, the
-commands that inspect snapshot history, and `restore` are in place. **None of this code has been
-compiled or run** (see "Known gaps"). Do not rely on it for real data.
+commands that inspect snapshot history, `restore`, and `check` are in place. **None of this code
+has been compiled or run** (see "Known gaps"). Do not rely on it for real data.
 
 ### Chunking
 
@@ -201,6 +201,28 @@ vaultsnap --repo REPO restore 3f2a91c4 --target /mnt/restore --symlinks as-recor
 Specification and limits: [`docs/RESTORE.md`](docs/RESTORE.md); options and exit statuses:
 [`docs/CLI.md`](docs/CLI.md#restore).
 
+### Verifying: `check`
+
+```sh
+vaultsnap --repo REPO check                   # quick: seconds to minutes
+vaultsnap --repo REPO check --read-data       # full: reads and authenticates every chunk
+vaultsnap --repo REPO check --read-data --json | jq '.ok, .affected_snapshots'
+```
+
+- **Reports, never repairs.** Nothing is moved, rewritten, or deleted; the only file written is the
+  check's own lock. The repository is byte-for-byte the same afterwards.
+- **Authenticated.** Every snapshot is authenticated and validated; every chunk a snapshot needs
+  must exist; every object in `data/` is examined, referenced or not; unreferenced objects
+  (orphans), stray files, leftovers, and lock files are reported.
+- **Two depths, honestly labelled.** A quick check examines the structure of each chunk object
+  without reading its payload, so it finds missing, truncated, or extended objects but **not**
+  flipped bits inside a chunk; `--read-data` reads and authenticates everything. Both say which
+  they were.
+- **Text or JSON**; exit status 0 (no errors; warnings allowed), 3 (errors found), 1 (could not
+  run).
+- **What to do about each failure** is documented per kind of finding in
+  [`docs/CHECK.md`](docs/CHECK.md), and the report prints a short version of it.
+
 The design is specified before the code that implements it:
 
 - [`docs/FORMAT.md`](docs/FORMAT.md): repository layout, identifiers, key files and encryption,
@@ -209,6 +231,8 @@ The design is specified before the code that implements it:
   cancellation behavior.
 - [`docs/RESTORE.md`](docs/RESTORE.md): what a restore does and guarantees: paths, conflicts,
   links, atomicity, interruption.
+- [`docs/CHECK.md`](docs/CHECK.md): what `check` examines, what each mode can and cannot find,
+  the report, and how to respond to each failure.
 - [`docs/CLI.md`](docs/CLI.md): every command with examples, exit statuses, size definitions,
   and the JSON output.
 - [`docs/SECURITY.md`](docs/SECURITY.md): threat model, secrets handling, restore safety.
@@ -314,6 +338,15 @@ Tests:
   permissions and times) with the originals, selected paths, conflicts, damaged and tampered data,
   and interrupted restores are in `crates/vaultsnap-core/tests/restore.rs` and
   `crates/vaultsnap-cli/tests/restore.rs`.
+- Check tests damage repositories on purpose: `crates/vaultsnap-core/tests/check.rs` deletes,
+  truncates, extends, flips, swaps, and link-replaces chunk objects, tampers with, cuts, empties,
+  swaps, and replaces snapshot files with a foreign one, removes directories, and adds strays,
+  leftovers, stale locks, and bad key files, then asserts which mode finds what (including what
+  the quick mode cannot see), the exact counts, the affected snapshots, determinism across thread
+  counts, and that the repository is unchanged afterwards. The same is run through the binary in
+  `crates/vaultsnap-cli/tests/check.rs`; the exact text and JSON for fixed reports are unit tests
+  in `crates/vaultsnap-cli/src/check/tests.rs`; the keyless object inspection, the directory walk,
+  and the verification pool have unit tests beside the code in `crates/vaultsnap-core/src/`.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -354,7 +387,14 @@ is compiled by `clippy --all-targets` but not run).
   permissions or links are skipped on other platforms. There is no `fsync` on restored files, no
   restoration of owners, and no way yet to strip the leading source path.
 - `restore` has no CLI test for Ctrl-C/SIGTERM either; cancellation is tested in the library
-  through the cancel token only.
+  through the cancel token only. The same holds for `check`.
+- `check` is unverified like everything else. Specifically: its behavior next to a *running*
+  backup is by design (snapshot files are listed before objects) but has no test with real
+  concurrency; the premises of some tests (that a given chunk is stored compressed or not, that
+  a file has at least N chunks) rest on the chunker's behavior on generated data, which was
+  reasoned about but not observed; on non-Unix platforms the link-related tests are skipped. A
+  quick check cannot see damage inside a chunk's payload, and nothing can see a deleted snapshot
+  (`docs/CHECK.md`).
 - Several lines are longer than rustfmt's limit because nothing could be formatted; the first
   toolchain run needs `cargo fmt --all`, and `clippy` may report lints that were not seen.
 - Scanner behavior on real mount points, on Windows, and on network filesystems is unverified;

@@ -13,8 +13,8 @@ vaultsnap [--repo PATH] [--password-file FILE] [-v...] <COMMAND>
 | [`ls`](#ls) | List the files in a snapshot | implemented |
 | [`diff`](#diff) | Compare two snapshots | implemented |
 | [`restore`](#restore) | Restore a snapshot, or selected paths, into a directory | implemented |
-| [`check`](#check-and-prune) | Verify repository integrity | not implemented |
-| [`prune`](#check-and-prune) | Remove snapshots outside a retention policy | not implemented |
+| [`check`](#check) | Verify repository integrity, quick or full; report only, never repairs | implemented |
+| [`prune`](#prune) | Remove snapshots outside a retention policy | not implemented |
 
 ## Global options
 
@@ -38,8 +38,8 @@ terminal, they fail with *no terminal available to ask for a passphrase*.
 | 0 | Success. For `diff`, success does **not** mean "no differences": differences are normal output. |
 | 1 | The command failed. The repository was not changed. `backup` created no snapshot; `restore` normally restored nothing (see [`restore`](#restore) for the one exception). |
 | 2 | Usage error: unknown option, missing argument, or a malformed snapshot reference. Nothing ran. |
-| 3 | The command finished, but its result has a problem. `backup`: the snapshot was created but some paths could not be read. `snapshots`: some snapshots are damaged and are not shown. `restore`: everything that could be restored was, but some paths could not be (a damaged or missing chunk, a refused write). |
-| 130 | `backup` or `restore` was cancelled with Ctrl-C or SIGTERM. |
+| 3 | The command finished, but its result has a problem. `backup`: the snapshot was created but some paths could not be read. `snapshots`: some snapshots are damaged and are not shown. `restore`: everything that could be restored was, but some paths could not be (a damaged or missing chunk, a refused write). `check`: the check ran and found **errors** (damage or loss); warnings alone give status 0. |
+| 130 | `backup`, `restore`, or `check` was cancelled with Ctrl-C or SIGTERM. |
 
 Standard output carries the result; warnings and errors go to standard error. If the reader of
 standard output goes away (`vaultsnap ls … | head`), the output simply ends.
@@ -416,20 +416,91 @@ the affected paths listed, never as silently wrong files.
 
 ---
 
-## check and prune
-
-These commands exist on the command line and validate their arguments, but do nothing yet: they
-fail with status 1 and *… is not implemented yet*.
+## check
 
 ```sh
+# Quick: metadata, snapshots authenticated, objects examined by structure (seconds to minutes)
 vaultsnap --repo ~/backups check
+
+# Full: also read, authenticate, and decrypt every chunk (reads the whole repository)
 vaultsnap --repo ~/backups check --read-data
+
+# For scripts and monitoring
+vaultsnap --repo ~/backups check --read-data --json
+vaultsnap --repo ~/backups check --json | jq '.counts, .affected_snapshots'
+
+# Fewer threads, or every finding listed
+vaultsnap --repo ~/backups check --read-data --jobs 2 --max-findings 0
+```
+
+Verifies the repository and **reports**; it never repairs, moves, or deletes anything (the one
+file it writes is its own lock, which it removes). It asks for the passphrase because it
+authenticates snapshots and chunks.
+
+| Option | Meaning |
+|--------|---------|
+| `--read-data` | Full check: every chunk object is read, authenticated, and decrypted. Without it only the structure of the objects is examined. |
+| `--json` | One JSON document on one line instead of text. |
+| `--jobs N` | Threads for reading objects (default: the number of CPUs, at most 4). The report does not depend on it. |
+| `--max-findings N` | List at most N findings, errors first (default 1000; 0 lists all). Counts stay exact. |
+
+What each mode finds, every kind of finding, **what to do about each failure**, and the JSON
+fields are in [`CHECK.md`](CHECK.md). In short:
+
+* A **clean quick check does not prove the data is intact**: it never reads the payload of a chunk.
+  Damage inside a chunk is found only with `--read-data`.
+* Errors (exit status 3): a missing or damaged directory, snapshot, or chunk object; an
+  unsupported version; a read the system refused. The report lists which snapshots can no longer
+  be restored completely.
+* Warnings (status 0): orphaned objects, stray files, leftovers of interrupted writes, lock files,
+  key files that do not parse.
+* The check cannot run, and says why, when the location is not a repository, `config` is damaged,
+  the passphrase is wrong, `keys/` is gone, or another process holds an exclusive lock (status 1).
+
+Output for a repository with a missing chunk (quick mode; the numbers are illustrative, the layout
+is what the command prints and `crates/vaultsnap-cli/src/check/tests.rs` asserts):
+
+```
+Repository 0123456789abcdef0123456789abcdef (format version 1)
+Mode         quick: snapshots authenticated, chunk objects examined by structure only
+
+Snapshots    2 readable, 0 damaged
+Chunks       10 referenced by snapshots, 1 missing
+Objects      9 in data/ (49.1 KiB), 0 damaged
+Unreferenced 0 objects (0 B)
+Key files    1
+Took         0.1s
+
+ERRORS (1)
+  chunk_missing  data/ab/ab…(64 hex digits)
+      no object exists for a chunk that snapshots refer to
+
+AFFECTED SNAPSHOTS (cannot be restored completely)
+  3f2a91c4  1 file affected (1 damaged or missing chunk)
+
+WHAT TO DO (the check changed nothing; see docs/CHECK.md)
+  chunk_missing: Snapshots that refer to it cannot be restored completely (see the affected …
+
+Result: 1 error found, 0 warnings. The repository was not changed.
+Quick mode does not read chunk contents: damage inside the encrypted data is found only with --read-data.
+```
+
+`check --json` has the fields `repository_id`, `format_version`, `mode`, `ok`, `errors`,
+`warnings`, `suppressed`, `counts`, `stats`, `affected_snapshots`, `findings`, in that order,
+described in [`CHECK.md`](CHECK.md#json-output). Like the other `--json` outputs it is one line, and
+there is no time in it, so the same repository gives the same bytes.
+
+## prune
+
+The command exists and validates its arguments, but does nothing yet: it fails with status 1 and
+*… is not implemented yet*.
+
+```sh
 vaultsnap --repo ~/backups prune --keep-last 7 --keep-monthly 12 --dry-run
 ```
 
-`check` takes `--read-data` to authenticate all stored data. `prune` takes `--keep-last`,
-`--keep-daily`, `--keep-weekly`, `--keep-monthly`, `--keep-yearly` (at least one is required) and
-`--dry-run`.
+`prune` takes `--keep-last`, `--keep-daily`, `--keep-weekly`, `--keep-monthly`, `--keep-yearly` (at
+least one is required) and `--dry-run`.
 
 ---
 

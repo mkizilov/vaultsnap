@@ -12,7 +12,7 @@ use crate::store::LocalStore;
 use crate::util::{random_hex, unix_now};
 
 const LOCK_SUFFIX: &str = ".lock";
-const MAX_LOCK_BYTES: u64 = 1024;
+pub(crate) const MAX_LOCK_BYTES: u64 = 1024;
 
 /// How a lock may be shared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +30,36 @@ impl LockKind {
             Self::Exclusive => "exclusive",
         }
     }
+}
+
+/// What a lock file says about the process that made it. Fields that are missing or cannot be
+/// read are `None`: a stale or damaged lock file is described as far as it can be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LockInfo {
+    pub kind: Option<LockKind>,
+    pub pid: Option<u32>,
+    pub created_at_unix: Option<u64>,
+}
+
+/// Reads the `key=value` lines of a lock file leniently, since this is used on files that may be
+/// leftovers or damaged.
+pub(crate) fn describe_lock(data: &[u8]) -> LockInfo {
+    let text = String::from_utf8_lossy(data);
+    let mut info = LockInfo {
+        kind: None,
+        pid: None,
+        created_at_unix: None,
+    };
+    for line in text.lines() {
+        match line.split_once('=') {
+            Some(("kind", "shared")) => info.kind = Some(LockKind::Shared),
+            Some(("kind", "exclusive")) => info.kind = Some(LockKind::Exclusive),
+            Some(("pid", value)) => info.pid = value.parse().ok(),
+            Some(("created_at_unix", value)) => info.created_at_unix = value.parse().ok(),
+            _ => {}
+        }
+    }
+    info
 }
 
 /// A held repository lock; the lock file is removed when this value is dropped.
@@ -78,6 +108,11 @@ impl RepositoryLock {
     pub fn kind(&self) -> LockKind {
         self.kind
     }
+
+    /// The repository-relative name of the lock file, `locks/<random>.lock`.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 impl Drop for RepositoryLock {
@@ -109,6 +144,34 @@ mod tests {
 
     fn lock_files(store: &LocalStore) -> usize {
         store.list(RepositoryLayout::LOCKS_DIR).expect("list").len()
+    }
+
+    #[test]
+    fn a_lock_file_is_described_as_far_as_it_can_be_read() {
+        let written = "kind=exclusive\npid=4242\ncreated_at_unix=1700000000\n";
+        let info = describe_lock(written.as_bytes());
+        assert_eq!(info.kind, Some(LockKind::Exclusive));
+        assert_eq!((info.pid, info.created_at_unix), (Some(4242), Some(1_700_000_000)));
+
+        let shared = describe_lock(b"kind=shared\n");
+        assert_eq!(shared.kind, Some(LockKind::Shared));
+        assert_eq!((shared.pid, shared.created_at_unix), (None, None));
+
+        let nonsense = describe_lock(b"\xff\xfe kind=shared pid=x\nkind=other\npid=-3\n=\n");
+        assert_eq!((nonsense.kind, nonsense.pid, nonsense.created_at_unix), (None, None, None));
+        assert_eq!(describe_lock(b""), nonsense);
+    }
+
+    #[test]
+    fn the_describe_function_reads_what_acquire_writes() {
+        let (_dir, store) = store();
+        let lock = RepositoryLock::acquire(&store, LockKind::Shared).expect("lock");
+        let data = store.read(lock.name(), MAX_LOCK_BYTES).expect("read");
+        let info = describe_lock(&data);
+        assert_eq!(info.kind, Some(LockKind::Shared));
+        assert_eq!(info.pid, Some(std::process::id()));
+        assert!(info.created_at_unix.is_some());
+        assert!(lock.name().starts_with("locks/") && lock.name().ends_with(".lock"));
     }
 
     #[test]

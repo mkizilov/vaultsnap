@@ -224,7 +224,9 @@ pub(crate) fn run(services: &Services, options: &BackupOptions) -> Result<Backup
     })
 }
 
-fn effective_jobs(requested: usize) -> usize {
+/// How many worker threads to use for a request of `requested` (0 = a default), shared by the
+/// operations that run a pool.
+pub(crate) fn effective_jobs(requested: usize) -> usize {
     let jobs = if requested == 0 {
         std::thread::available_parallelism().map_or(2, std::num::NonZeroUsize::get).min(4)
     } else {

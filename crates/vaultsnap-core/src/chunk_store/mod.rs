@@ -25,5 +25,5 @@ mod object;
 mod store;
 
 pub use id::ChunkId;
-pub use object::{Compression, MAX_CHUNK_BYTES, OBJECT_FORMAT_VERSION};
+pub use object::{Compression, ObjectInfo, MAX_CHUNK_BYTES, OBJECT_FORMAT_VERSION};
 pub use store::{ChunkStore, PutOutcome, PutResult};

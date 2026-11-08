@@ -4,7 +4,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::id::ChunkId;
-use super::object::{self, ChunkKeys, Compression, MAX_CHUNK_BYTES, MAX_OBJECT_BYTES};
+use super::object::{
+    self, ChunkKeys, Compression, ObjectInfo, HEADER_LEN, MAX_CHUNK_BYTES, MAX_OBJECT_BYTES,
+};
 use crate::blocking::blocking;
 use crate::error::{Error, Result};
 use crate::keys::RepositoryKeys;
@@ -95,6 +97,23 @@ impl ChunkStore {
         match self.store.file_len(&id.object_name()) {
             Err(err) if err.is_not_found() => Err(Error::ChunkNotFound(id.to_hex())),
             other => other,
+        }
+    }
+
+    /// Examines the object stored for `id` without opening it: reads at most its first 12 bytes
+    /// and checks everything that can be checked without a key (magic, version, header fields,
+    /// and that the size of the file is possible for what the header declares). Cheap, and it
+    /// reads no payload.
+    ///
+    /// It cannot see damage inside the encrypted payload, or a truncated compressed object that
+    /// is still larger than the minimum; only [`ChunkStore::get`] can. Fails with
+    /// [`Error::ChunkNotFound`] if there is no object, [`Error::CorruptObject`] if its structure is
+    /// wrong, and [`Error::UnsupportedObjectVersion`] for a version this build does not read.
+    pub fn peek(&self, id: &ChunkId) -> Result<ObjectInfo> {
+        match self.store.read_prefix(&id.object_name(), HEADER_LEN) {
+            Ok((prefix, len)) => object::inspect(id, &prefix, len),
+            Err(err) if err.is_not_found() => Err(Error::ChunkNotFound(id.to_hex())),
+            Err(err) => Err(err),
         }
     }
 
@@ -258,6 +277,45 @@ mod tests {
         assert_eq!(fx.chunks.stored_len(&put.id).expect("length"), object_len);
         let on_disk = fs::metadata(fx.path_of(&put.id)).expect("metadata").len();
         assert_eq!(on_disk, object_len);
+    }
+
+    #[test]
+    fn peeking_reads_the_header_and_agrees_with_the_stored_length() {
+        let fx = Fixture::new();
+        let data = pseudo_random(5000, 9);
+        let put = fx.chunks.put(&data).expect("put");
+        let info = fx.chunks.peek(&put.id).expect("peek");
+        assert_eq!(info.plaintext_len, 5000);
+        assert_eq!(info.stored_len, fx.chunks.stored_len(&put.id).expect("length"));
+        assert_eq!(info.compression, Compression::Uncompressed);
+    }
+
+    #[test]
+    fn peeking_sees_a_missing_truncated_or_unsupported_object_but_not_a_flipped_bit() {
+        let fx = Fixture::new();
+        let id = fx.chunks.chunk_id(b"never stored");
+        assert!(matches!(fx.chunks.peek(&id), Err(Error::ChunkNotFound(_))));
+
+        let put = fx.chunks.put(&pseudo_random(5000, 10)).expect("put");
+        let path = fx.path_of(&put.id);
+        let original = fs::read(&path).expect("read");
+
+        let mut flipped = original.clone();
+        flipped[original.len() / 2] ^= 1;
+        fs::write(&path, flipped).expect("write");
+        assert!(fx.chunks.peek(&put.id).is_ok(), "a flipped payload bit needs the full read");
+        assert!(matches!(fx.chunks.get(&put.id), Err(Error::CorruptObject { .. })));
+
+        fs::write(&path, &original[..original.len() - 1]).expect("write");
+        assert!(matches!(fx.chunks.peek(&put.id), Err(Error::CorruptObject { .. })));
+
+        let mut newer = original;
+        newer[4] = 9;
+        fs::write(&path, newer).expect("write");
+        assert!(matches!(
+            fx.chunks.peek(&put.id),
+            Err(Error::UnsupportedObjectVersion { found: 9, .. })
+        ));
     }
 
     #[test]

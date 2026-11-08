@@ -165,9 +165,25 @@ pub enum SymlinkArg {
 
 #[derive(Debug, Args)]
 pub struct CheckArgs {
-    /// Also read and authenticate all stored data
+    /// Also read, authenticate, and decrypt every chunk object (reads the whole repository)
     #[arg(long)]
     pub read_data: bool,
+
+    /// Print JSON instead of text
+    #[arg(long)]
+    pub json: bool,
+
+    /// Threads for reading chunk objects (default: the number of CPUs, at most 4)
+    #[arg(long, value_name = "N")]
+    pub jobs: Option<usize>,
+
+    /// List at most N findings, errors first; the counts stay exact (0 lists all)
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = vaultsnap_core::check::DEFAULT_MAX_FINDINGS
+    )]
+    pub max_findings: usize,
 }
 
 #[derive(Debug, Args)]
@@ -342,6 +358,39 @@ mod tests {
             assert!(parse(&args).is_err(), "{extra:?}");
         }
         assert!(parse(&["restore", id]).is_err(), "--target is required");
+    }
+
+    #[test]
+    fn check_is_quick_and_bounded_by_default() {
+        let Command::Check(args) = parse(&["check"]).expect("valid arguments").command else {
+            panic!("expected check");
+        };
+        assert!(!args.read_data && !args.json);
+        assert_eq!((args.jobs, args.max_findings), (None, 1000));
+    }
+
+    #[test]
+    fn check_takes_its_options() {
+        let cli = parse(&[
+            "check",
+            "--read-data",
+            "--json",
+            "--jobs",
+            "3",
+            "--max-findings",
+            "0",
+        ])
+        .expect("valid arguments");
+        let Command::Check(args) = cli.command else {
+            panic!("expected check");
+        };
+        assert!(args.read_data && args.json);
+        assert_eq!((args.jobs, args.max_findings), (Some(3), 0));
+        for bad in [["--jobs", "-1"], ["--jobs", "many"], ["--max-findings", "-5"]] {
+            let mut args = vec!["check"];
+            args.extend(bad);
+            assert!(parse(&args).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

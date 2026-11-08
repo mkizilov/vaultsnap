@@ -147,7 +147,10 @@ impl Repository {
     }
 }
 
-pub(crate) fn open_repository(store: &LocalStore) -> Result<RepositoryConfig> {
+/// Checks that the location is a directory with a valid `config` and returns it. Nothing else
+/// about the repository is required, which is what `check` needs to describe a repository whose
+/// other parts are damaged.
+pub(crate) fn read_config(store: &LocalStore) -> Result<RepositoryConfig> {
     let root = store.root();
     let not_a_repository = || Error::NotARepository {
         path: root.to_path_buf(),
@@ -158,13 +161,17 @@ pub(crate) fn open_repository(store: &LocalStore) -> Result<RepositoryConfig> {
         Err(err) if err.kind() == ErrorKind::NotFound => return Err(not_a_repository()),
         Err(err) => return Err(Error::io("inspect", root, err)),
     }
-    let config = RepositoryConfig::load(store).map_err(|err| {
+    RepositoryConfig::load(store).map_err(|err| {
         if err.is_not_found() {
             not_a_repository()
         } else {
             err
         }
-    })?;
+    })
+}
+
+pub(crate) fn open_repository(store: &LocalStore) -> Result<RepositoryConfig> {
+    let config = read_config(store)?;
     for dir in REQUIRED_DIRS {
         if !store.resolve(dir)?.is_dir() {
             return Err(Error::Corrupt(format!("missing directory `{dir}`")));

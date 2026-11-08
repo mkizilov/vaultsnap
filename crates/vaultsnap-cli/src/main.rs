@@ -1,6 +1,7 @@
 //! `vaultsnap`: command-line interface for the VaultSnap encrypted backup utility.
 
 mod backup;
+mod check;
 mod cli;
 mod commands;
 mod format;

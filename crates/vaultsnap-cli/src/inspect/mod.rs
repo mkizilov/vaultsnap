@@ -29,7 +29,9 @@ fn finish(result: io::Result<()>) -> Result<(), CliError> {
 }
 
 /// Renders to standard output through a buffer.
-fn output(render: impl FnOnce(&mut dyn Write) -> io::Result<()>) -> Result<(), CliError> {
+pub(crate) fn output(
+    render: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+) -> Result<(), CliError> {
     let mut out = BufWriter::new(io::stdout().lock());
     finish(render(&mut out).and_then(|()| out.flush()))
 }

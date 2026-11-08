@@ -150,9 +150,12 @@ not been run (see the README, "Known gaps").
 
 ## Limitations
 
-- No `check` or `prune` yet. The snapshots a backup creates can be listed, shown, and compared
-  with `snapshots`, `show`, `ls`, and `diff`, and restored with `restore` ([`CLI.md`](CLI.md),
-  [`RESTORE.md`](RESTORE.md)).
+- No `prune` yet. The snapshots a backup creates can be listed, shown, and compared with
+  `snapshots`, `show`, `ls`, and `diff`, restored with `restore`, and verified with `check`
+  ([`CLI.md`](CLI.md), [`RESTORE.md`](RESTORE.md), [`CHECK.md`](CHECK.md)).
+- A backup trusts an object that exists: it never re-reads it. So a damaged chunk object that is
+  left in place is reused by later backups. `check --read-data` finds such objects; the response
+  to each is in [`CHECK.md`](CHECK.md) (move the damaged object out, then back up again).
 - The command line exposes no scan policy: symbolic links are never followed, and there is no
   `--one-file-system` or `--include`. The library supports them (`BackupOptions::scan`).
 - The two-second margin is fixed on the command line.

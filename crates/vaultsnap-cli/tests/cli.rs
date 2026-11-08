@@ -57,7 +57,7 @@ fn prune_without_keep_rules_is_rejected() {
 #[test]
 fn unfinished_commands_report_not_implemented_without_touching_the_repository() {
     let env = TestEnv::default();
-    let invocations: [&[&str]; 2] = [&["check"], &["prune", "--keep-last", "1"]];
+    let invocations: [&[&str]; 1] = [&["prune", "--keep-last", "1"]];
     for args in invocations {
         let output = env.run(args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");

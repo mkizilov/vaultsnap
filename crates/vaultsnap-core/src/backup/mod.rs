@@ -33,7 +33,7 @@ use crate::chunking::ChunkerConfig;
 use crate::scan::{ScanOptions, Timestamp};
 use crate::snapshot::{ManifestStats, SnapshotId};
 
-pub(crate) use engine::{run, Services};
+pub(crate) use engine::{effective_jobs, run, Services};
 
 /// Which earlier snapshot an incremental backup compares against.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

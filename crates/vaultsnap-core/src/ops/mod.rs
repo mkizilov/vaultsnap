@@ -8,5 +8,4 @@ mod restore;
 mod snapshots;
 mod unlock;
 
-pub use check::{CheckOptions, CheckReport};
 pub use prune::{PruneOptions, PruneReport};

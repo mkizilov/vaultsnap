@@ -42,6 +42,16 @@ pub async fn unlock(
     Ok(repo.unlock(&passphrase).await?)
 }
 
+/// Like [`unlock`], for `check`: only a valid `config` and the key files are needed, so a
+/// repository with damaged or missing parts can still be checked and described.
+pub async fn unlock_for_check(
+    repo: &Repository,
+    password_file: Option<&Path>,
+) -> Result<RepositoryKeys, CliError> {
+    let passphrase = read_existing(password_file)?;
+    Ok(repo.unlock_for_check(&passphrase).await?)
+}
+
 fn from_file(path: &Path) -> Result<Passphrase, CliError> {
     let io_error = |source: std::io::Error| CliError::PasswordFile {
         path: path.to_path_buf(),

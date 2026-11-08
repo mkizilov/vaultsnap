@@ -9,10 +9,12 @@
 //! incremental backup that ties them together ([`backup`], [`Repository::backup`]), and the
 //! inspection of snapshot history: listing, details, file listings, and comparison ([`history`]),
 //! and the safe restore of snapshots into a directory ([`restore`], [`Repository::restore`]).
-//! Check and prune validate their arguments and then return [`Error::NotImplemented`].
+//! The repository check ([`check`], [`Repository::check`]) reports damage without ever changing
+//! anything. Prune validates its arguments and then returns [`Error::NotImplemented`].
 
 pub mod backup;
 mod blocking;
+pub mod check;
 pub mod chunk_store;
 pub mod chunking;
 pub mod config;
@@ -37,6 +39,10 @@ mod util;
 pub use backup::{
     BackupEvent, BackupObserver, BackupOptions, BackupReport, CancelToken, ParentPolicy,
 };
+pub use check::{
+    AffectedSnapshot, CheckEvent, CheckMode, CheckObserver, CheckOptions, CheckPhase, CheckReport,
+    CheckStats, Finding, FindingKind, Severity,
+};
 pub use chunk_store::{ChunkId, ChunkStore, Compression, PutOutcome, PutResult};
 pub use chunking::{Chunker, ChunkerConfig};
 pub use config::RepositoryConfig;
@@ -45,7 +51,7 @@ pub use error::{Error, Result};
 pub use history::{Diff, SnapshotDetails, SnapshotList, SnapshotSizes};
 pub use keys::RepositoryKeys;
 pub use lock::{LockKind, RepositoryLock};
-pub use ops::{CheckOptions, CheckReport, PruneOptions, PruneReport};
+pub use ops::{PruneOptions, PruneReport};
 pub use repository::{Repository, RepositoryLayout};
 pub use restore::{
     ConflictPolicy, RestoreEvent, RestoreObserver, RestoreOptions, RestoreProblem, RestoreReport,

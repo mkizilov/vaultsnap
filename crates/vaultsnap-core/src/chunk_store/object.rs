@@ -32,7 +32,7 @@ pub const MAX_CHUNK_BYTES: usize = ChunkerConfig::MAX_SIZE_LIMIT;
 
 const MAGIC: [u8; 4] = *b"VSCO";
 const KIND_CHUNK: u8 = 1;
-const HEADER_LEN: usize = 12;
+pub(super) const HEADER_LEN: usize = 12;
 const AAD_LEN: usize = HEADER_LEN + ChunkId::LEN;
 const ZSTD_LEVEL: i32 = 3;
 /// Bigger than this cannot be a valid object, so it is never read into memory.
@@ -63,6 +63,18 @@ impl Compression {
             _ => None,
         }
     }
+}
+
+/// What the structure of an object says about it, established without any key: see
+/// [`ChunkStore::peek`](super::ChunkStore::peek).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectInfo {
+    /// Size of the object file in bytes.
+    pub stored_len: u64,
+    /// How the payload is stored.
+    pub compression: Compression,
+    /// Length of the original chunk, as the (authenticated, but here unchecked) header says.
+    pub plaintext_len: u32,
 }
 
 /// The two secrets chunk storage needs, both derived from the master key.
@@ -135,62 +147,89 @@ pub(super) fn encode(
     Ok((object, compression))
 }
 
+/// Checks everything about an object that can be checked without a key: magic, version, header
+/// fields, and that the size of the file is possible for what the header declares. `prefix` holds
+/// at least the first `min(object_len, 12)` bytes of the object.
+///
+/// This is the first half of [`decode`], so the cheap check and the full verification agree on
+/// what is structurally valid. It cannot see damage inside the encrypted payload, or a truncated
+/// compressed object that is still larger than the minimum.
+pub(super) fn inspect(id: &ChunkId, prefix: &[u8], object_len: u64) -> Result<ObjectInfo> {
+    let corrupt = |reason: &str| Error::CorruptObject {
+        id: id.to_hex(),
+        reason: reason.to_owned(),
+    };
+    let header_len = HEADER_LEN as u64;
+
+    if object_len < 5 {
+        return Err(corrupt("truncated before the end of the header"));
+    }
+    if (prefix.len() as u64) < object_len.min(header_len) {
+        return Err(corrupt("changed while it was being read"));
+    }
+    if prefix[..4] != MAGIC {
+        return Err(corrupt("not a VaultSnap chunk object (bad magic)"));
+    }
+    if prefix[4] != OBJECT_FORMAT_VERSION {
+        return Err(Error::UnsupportedObjectVersion {
+            found: prefix[4],
+            supported: OBJECT_FORMAT_VERSION,
+        });
+    }
+    if object_len < header_len + (NONCE_LEN + TAG_LEN) as u64 {
+        return Err(corrupt("truncated"));
+    }
+    if prefix[5] != KIND_CHUNK {
+        return Err(corrupt("unknown object kind"));
+    }
+    let compression = Compression::from_code(prefix[6])
+        .ok_or_else(|| corrupt("unknown compression method"))?;
+    if prefix[7] != 0 {
+        return Err(corrupt("unknown flags"));
+    }
+    let plaintext_len = u32::from_le_bytes([prefix[8], prefix[9], prefix[10], prefix[11]]);
+    if usize::try_from(plaintext_len).map_or(true, |len| len > MAX_CHUNK_BYTES) {
+        return Err(corrupt("declared length exceeds the maximum chunk size"));
+    }
+
+    let body_len = object_len - header_len;
+    let largest_body = (NONCE_LEN + TAG_LEN) as u64 + u64::from(plaintext_len);
+    match compression {
+        Compression::Uncompressed if body_len != largest_body => {
+            return Err(corrupt("length does not match the header (truncated or extended)"));
+        }
+        Compression::Zstd if body_len > largest_body => {
+            return Err(corrupt("compressed payload is larger than the original"));
+        }
+        _ => {}
+    }
+    Ok(ObjectInfo {
+        stored_len: object_len,
+        compression,
+        plaintext_len,
+    })
+}
+
 /// Verifies and decodes the object stored under `id`.
 ///
-/// In order: magic and version, structure and lengths, authentication of the header, id and
-/// ciphertext, decompression bounded by the authenticated length, the exact length, and finally
-/// that the keyed hash of the result is `id`. Nothing is returned unless every step passes.
+/// In order: magic and version, structure and lengths (see [`inspect`]), authentication of the
+/// header, id and ciphertext, decompression bounded by the authenticated length, the exact
+/// length, and finally that the keyed hash of the result is `id`. Nothing is returned unless
+/// every step passes.
 pub(super) fn decode(keys: &ChunkKeys, id: &ChunkId, object: &[u8]) -> Result<Vec<u8>> {
     let corrupt = |reason: &str| Error::CorruptObject {
         id: id.to_hex(),
         reason: reason.to_owned(),
     };
 
-    if object.len() < 5 {
-        return Err(corrupt("truncated before the end of the header"));
-    }
-    if object[..4] != MAGIC {
-        return Err(corrupt("not a VaultSnap chunk object (bad magic)"));
-    }
-    if object[4] != OBJECT_FORMAT_VERSION {
-        return Err(Error::UnsupportedObjectVersion {
-            found: object[4],
-            supported: OBJECT_FORMAT_VERSION,
-        });
-    }
-    if object.len() < HEADER_LEN + NONCE_LEN + TAG_LEN {
-        return Err(corrupt("truncated"));
-    }
+    let info = inspect(id, object, object.len() as u64)?;
+    let compression = info.compression;
+    let plaintext_len = usize::try_from(info.plaintext_len)
+        .map_err(|_| corrupt("length does not fit in memory"))?;
     let (header, body) = object.split_at(HEADER_LEN);
     let header: &[u8; HEADER_LEN] = header
         .try_into()
         .map_err(|_| corrupt("header has the wrong size"))?;
-    if header[5] != KIND_CHUNK {
-        return Err(corrupt("unknown object kind"));
-    }
-    let compression = Compression::from_code(header[6])
-        .ok_or_else(|| corrupt("unknown compression method"))?;
-    if header[7] != 0 {
-        return Err(corrupt("unknown flags"));
-    }
-    let plaintext_len = usize::try_from(u32::from_le_bytes([
-        header[8], header[9], header[10], header[11],
-    ]))
-    .map_err(|_| corrupt("length does not fit in memory"))?;
-    if plaintext_len > MAX_CHUNK_BYTES {
-        return Err(corrupt("declared length exceeds the maximum chunk size"));
-    }
-
-    let largest_body = NONCE_LEN + plaintext_len + TAG_LEN;
-    match compression {
-        Compression::Uncompressed if body.len() != largest_body => {
-            return Err(corrupt("length does not match the header (truncated or extended)"));
-        }
-        Compression::Zstd if body.len() > largest_body => {
-            return Err(corrupt("compressed payload is larger than the original"));
-        }
-        _ => {}
-    }
 
     let opened = crypto::open(&keys.data, &aad(header, id), body).map_err(|err| match err {
         Error::Decryption => corrupt(
@@ -449,5 +488,95 @@ mod tests {
         let id = keys.chunk_id(b"unused");
         let result = encode(&keys, &id, &big);
         assert!(matches!(result, Err(Error::ChunkTooLarge { .. })));
+    }
+
+    fn inspected(id: &ChunkId, object: &[u8]) -> Result<ObjectInfo> {
+        let prefix = &object[..object.len().min(HEADER_LEN)];
+        inspect(id, prefix, object.len() as u64)
+    }
+
+    #[test]
+    fn inspection_reports_what_the_header_declares_without_a_key() {
+        let keys = keys();
+        let data = pseudo_random(5000, 4);
+        let (id, object, compression) = encode_chunk(&keys, &data);
+        let info = inspected(&id, &object).expect("valid");
+        assert_eq!(info.stored_len, object.len() as u64);
+        assert_eq!(info.plaintext_len, 5000);
+        assert_eq!(info.compression, compression);
+        assert_eq!(compression, Compression::Uncompressed);
+
+        let text = compressible(70_000);
+        let (id, object, compression) = encode_chunk(&keys, &text);
+        assert_eq!(compression, Compression::Zstd);
+        let info = inspected(&id, &object).expect("valid");
+        assert_eq!((info.plaintext_len, info.compression), (70_000, Compression::Zstd));
+        assert!(info.stored_len < 70_000);
+    }
+
+    #[test]
+    fn inspection_catches_what_can_be_seen_without_a_key() {
+        let keys = keys();
+        let (id, object, _) = encode_chunk(&keys, &pseudo_random(5000, 5));
+
+        // Every truncation of an uncompressed object changes its size.
+        for length in 0..object.len() {
+            let result = inspected(&id, &object[..length]);
+            assert!(matches!(result, Err(Error::CorruptObject { .. })), "length {length}");
+        }
+        // So does appending.
+        let mut longer = object.clone();
+        longer.push(0);
+        assert!(matches!(inspected(&id, &longer), Err(Error::CorruptObject { .. })));
+
+        // Header fields: magic, kind, compression, flags, declared length.
+        for (position, value) in [(0, b'X'), (5, 9), (6, 7), (7, 1)] {
+            let mut damaged = object.clone();
+            damaged[position] = value;
+            let result = inspected(&id, &damaged);
+            assert!(matches!(result, Err(Error::CorruptObject { .. })), "byte {position}");
+        }
+        let mut damaged = object.clone();
+        damaged[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(inspected(&id, &damaged), Err(Error::CorruptObject { .. })));
+        let mut damaged = object;
+        damaged[8] ^= 1;
+        assert!(
+            matches!(inspected(&id, &damaged), Err(Error::CorruptObject { .. })),
+            "a wrong declared length contradicts the size of an uncompressed object"
+        );
+    }
+
+    #[test]
+    fn inspection_reports_unsupported_versions_before_anything_else() {
+        let keys = keys();
+        let (id, mut object, _) = encode_chunk(&keys, &pseudo_random(100, 6));
+        object[4] = 2;
+        let result = inspected(&id, &object);
+        assert!(matches!(result, Err(Error::UnsupportedObjectVersion { found: 2, .. })), "{result:?}");
+    }
+
+    #[test]
+    fn inspection_is_blind_to_damage_inside_the_payload_and_a_cut_compressed_object() {
+        let keys = keys();
+        let (id, mut object, _) = encode_chunk(&keys, &pseudo_random(5000, 7));
+        let middle = object.len() / 2;
+        object[middle] ^= 1;
+        assert!(inspected(&id, &object).is_ok(), "only the full verification can see this");
+        assert_rejected(decode(&keys, &id, &object), "the full verification does");
+
+        let (id, object, compression) = encode_chunk(&keys, &compressible(70_000));
+        assert_eq!(compression, Compression::Zstd);
+        let cut = &object[..object.len() - 1];
+        assert!(inspected(&id, cut).is_ok(), "a shorter compressed object is still possible");
+        assert_rejected(decode(&keys, &id, cut), "but it does not authenticate");
+    }
+
+    #[test]
+    fn inspection_notices_a_file_that_changed_while_it_was_read() {
+        let keys = keys();
+        let (id, object, _) = encode_chunk(&keys, &pseudo_random(100, 8));
+        let result = inspect(&id, &object[..4], object.len() as u64);
+        assert!(matches!(result, Err(Error::CorruptObject { .. })), "{result:?}");
     }
 }

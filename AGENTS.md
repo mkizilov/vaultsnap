@@ -78,7 +78,13 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   `Repository::restore` entry point is `ops/restore.rs`; the specification is `docs/RESTORE.md`).
   No CLI or terminal concerns here. All repository file access goes through `LocalStore`; do not
   use `std::fs` directly on repository paths elsewhere. (The restore writes to the *target*, not
-  the repository, and uses `std::fs` in `restore/dest.rs` for that on purpose.)
+  the repository, and uses `std::fs` in `restore/dest.rs` for that on purpose.) `check`
+  (`CheckOptions`, `CheckReport`, `Finding`, `FindingKind`; `scan` = the directory walk and
+  inventory, `engine` = snapshots, chunk comparison, the verification pool, affected snapshots;
+  `Repository::check` is in `ops/check.rs`, `Repository::unlock_for_check` in `ops/unlock.rs`;
+  `ChunkStore::peek` and `chunk_store::object::inspect` are the keyless structural examination
+  that quick mode and `decode` share; the specification, every finding kind, and the advice for
+  each are in `docs/CHECK.md`).
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
   through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
   print `<redacted>`; never format a secret into a log, error, or `Debug` output; any change to
@@ -113,10 +119,21 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   restored; the default link policy is `contained`; paths printed by the CLI go through
   `format::escape`/`escape_path`. Directories are finished (attributes) last, also on
   cancellation.
+- Check invariants (do not break them without updating `docs/CHECK.md`, `docs/SECURITY.md`, and
+  the tests): a check **never repairs, moves, rewrites, or deletes** anything: it uses only
+  `LocalStore` read operations and its own lock file; damage is a `Finding`, never an `Err`
+  (an `Err` means the check could not run); `FindingKind` names, the order of its variants, and
+  the JSON `counts` fields are a contract (add a kind in all of: the enum, `ALL`, `name`,
+  `severity`, `advice`, the JSON `CountsView`, `docs/CHECK.md`, and the tests that list them);
+  quick mode must stay keyless and payload-free and must say so, and every claim about what it
+  can or cannot find is pinned by a test; snapshot files are listed before objects so a
+  concurrent backup can only produce orphans; counts are exact even when the listing is limited,
+  and the report is deterministic whatever the thread count; no name from the backed-up data
+  appears in a finding (stray entries are the one exception and are escaped on output).
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
-  manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, and `restore`.
-  `check` and `prune` are stubs.
+  manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, `restore`, and
+  `check`. Only `prune` is a stub.
 - Tests that need privileges or special files must detect their absence at run time and say so
   (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
   any test that changes permissions must restore them with a guard so temporary directories can
@@ -133,14 +150,16 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   backup, damaged snapshots), 130 cancelled, clap's 2 for usage), `backup` (the `backup` command:
   unlock, progress line on a terminal only, SIGINT/SIGTERM to a `CancelToken`, summary),
   `restore` (the `restore` command: policies, progress, report, problems listed on stderr,
-  exit 3 when some paths failed), `interrupt` and `progress` (shared by `backup` and `restore`),
+  exit 3 when some paths failed), `check` (the `check` command: lenient unlock, progress, `human`
+  and `json` renderers, golden tests; exit 3 when errors were found), `interrupt` and `progress`
+  (shared by `backup`, `restore`, and `check`),
   `inspect` (`snapshots`/`show`/`ls`/`diff`: `human` = text, `json` = one JSON document built
   from explicit `serde` structs, `tests` = golden output), `format` (sizes, UTC times, `escape`
   for names, `ls`-style modes), `passphrase` (including `unlock`), `logging` (tracing setup,
   stderr only). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
-- `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, and `CLI.md` (the
-  command reference; every new or changed command, option, or output goes there with an
-  example).
+- `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, `CHECK.md`, and
+  `CLI.md` (the command reference; every new or changed command, option, or output goes there
+  with an example).
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors
 are typed in core and converted at the CLI boundary; user-supplied identifiers are validated

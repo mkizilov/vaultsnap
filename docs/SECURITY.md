@@ -280,7 +280,7 @@ metadata, which is the most sensitive thing the repository protects.
 - **Sizes are not authenticated.** Logical sizes come from manifests. Stored sizes and "unique"
   sizes use the length of the chunk object files, i.e. file metadata, without reading the content;
   they say how much space is used, not that the content is intact. Verifying content is the job of
-  `check`.
+  `check --read-data`.
 - **Printing hostile names.** File names, link targets, host names, tags, patterns, and messages
   come from the machine that was backed up, which may have been compromised, and are shown in the
   terminal of the person inspecting the backup. Text output escapes backslashes, every control
@@ -294,6 +294,35 @@ metadata, which is the most sensitive thing the repository protects.
 - **Read-only, bounded.** The commands hold a shared lock and change nothing. They decrypt every
   snapshot for a listing, with memory bounded by the largest manifest plus one small record per
   distinct chunk.
+
+## Verifying the repository (built)
+
+`vaultsnap check` ([`CHECK.md`](CHECK.md)) is the tool for finding out whether a repository still
+holds what it should. Its security-relevant properties:
+
+- **It never changes anything.** Everything is opened read-only; the only write is its own shared
+  lock file, removed at the end. A check cannot be turned into a way of deleting or overwriting
+  data, whatever the repository contains, and it never follows a symbolic link inside the
+  repository (one is reported as an unexpected entry).
+- **Authenticated, not merely present.** Every snapshot is read through authenticated decryption
+  before anything is believed about it. A full check authenticates every chunk object (AEAD over
+  header, chunk id, and ciphertext) and checks that its content hashes to its id, so an object
+  swapped for another authentic object, or copied from another repository, is detected.
+- **What a quick check does not give.** Its object examination uses no key and reads no payload:
+  a modified payload is invisible to it. The report and the command say so.
+- **What no check can give.** A deleted snapshot, or a rollback of the whole repository to an
+  older consistent copy, leaves nothing to compare with (see "Information that is not hidden" and
+  the limits in `CHECK.md`). Keep an external record of what the snapshot list should be.
+- **Findings contain no backed-up names.** Subjects are repository paths (ids and random names);
+  details are fixed phrases or errors that name entries by index. The one exception is a stray
+  entry in the repository, whose name anyone with write access chose: text output escapes it (no
+  terminal control sequences, one record per line), and JSON keeps it as an exact string.
+- **The report is sensitive in the same way `snapshots` output is:** it shows how many snapshots,
+  objects, and bytes exist, and which snapshots are damaged. Nothing in it is a key.
+- **Cost and resources are bounded:** memory is one manifest plus one small record per distinct
+  chunk (plus one per object for the inventory), and a chunk is read whole but one at a time per
+  thread (at most 64 MiB each). A hostile repository cannot make the check allocate more than
+  the format's own limits allow.
 
 ## Concurrency
 

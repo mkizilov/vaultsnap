@@ -187,6 +187,17 @@ pub(crate) fn write_key_slot(
     Ok(name)
 }
 
+/// Parses the key file `name` (a file in `keys/`) without trying to open it, which would need a
+/// passphrase, and describes what is wrong with it, if anything. The description never contains
+/// key material.
+pub(crate) fn key_file_problem(store: &LocalStore, name: &str) -> Option<String> {
+    let path = format!("{}/{name}", RepositoryLayout::KEYS_DIR);
+    match store.read(&path, MAX_KEY_FILE_BYTES) {
+        Ok(bytes) => KeySlot::parse(&bytes).err().map(|err| err.to_string()),
+        Err(err) => Some(err.to_string()),
+    }
+}
+
 /// Opens the master key of the repository `repository_id` with `passphrase`.
 ///
 /// Every slot is tried. A slot that does not authenticate is skipped, which also ignores slots
@@ -458,6 +469,21 @@ mod tests {
     fn debug_output_hides_key_material() {
         let f = fixture();
         assert_eq!(format!("{:?}", f.keys), "RepositoryKeys(<redacted>)");
+    }
+
+    #[test]
+    fn key_files_are_inspected_without_a_passphrase() {
+        let f = fixture();
+        let name = f.store.list(RepositoryLayout::KEYS_DIR).expect("list").remove(0);
+        assert_eq!(key_file_problem(&f.store, &name), None);
+
+        overwrite(&f, "vaultsnap-key\nkey_version=1\n");
+        let problem = key_file_problem(&f.store, &name).expect("a problem");
+        assert!(!problem.is_empty());
+        assert!(!problem.contains("sealed="), "{problem}");
+
+        let missing = key_file_problem(&f.store, "0123456789abcdef0123456789abcdef");
+        assert!(missing.is_some());
     }
 
     #[test]

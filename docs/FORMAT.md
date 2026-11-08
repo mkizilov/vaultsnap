@@ -5,7 +5,7 @@ management (master key, key files, derived keys, authenticated encryption) exist
 *built*, as are chunking, the encrypted, deduplicated chunk store, the filesystem scanner, and
 encrypted snapshot manifests. Packs and indexes are still *planned*. `backup`, the commands
 that inspect snapshots (`snapshots`, `show`, `ls`, `diff`), and `restore` are built on top of
-these; `check` and `prune` return "not implemented". Code that lands later must follow this
+these, as is `check`; only `prune` returns "not implemented". Code that lands later must follow this
 document, and changes to the format must update it first and bump `FORMAT_VERSION`
 (`crates/vaultsnap-core/src/repository.rs`).
 
@@ -526,10 +526,22 @@ targets. Fields it does not use yet: owners, the creation, change, and device/in
 | `backup`    | snapshots (parent) | chunks (new ones only), then one snapshot |
 | `snapshots`, `show`, `ls`, `diff` | snapshots, chunk object sizes | nothing              |
 | `restore`   | snapshot, chunks   | files under the target directory only    |
-| `check`     | everything*        | nothing                                  |
+| `check`     | everything*        | nothing (its own lock file, removed)     |
 | `prune`     | snapshots, index   | removes snapshots, rewrites packs/index  |
 
-\* `check` reads metadata only unless `--read-data` is given, which authenticates every pack.
+\* `check` reads every snapshot (authenticating it) and the first 12 bytes of every chunk object;
+with `--read-data` it reads every chunk object completely and authenticates it. It never repairs
+or removes anything. What it examines, what each mode can and cannot find, and what to do about
+what it reports are in [`CHECK.md`](CHECK.md).
+
+A check relies on these facts about the format and adds nothing to it: a snapshot is a 64-digit
+hexadecimal file name in `snapshots/`; a chunk object is a 64-digit hexadecimal file in the
+`data/xx/` directory named by its first two digits; key files and lock files are 32-digit names
+(lock files with the suffix `.lock`); `.tmp-` marks the store's temporary files. An entry that fits
+none of these is "unexpected". The structural part of the chunk object format that a check can
+verify without a key is: magic, version, kind, compression, flags, and a file size that is possible
+for the declared length (exactly header + nonce + length + tag for an uncompressed object, at most
+that for a compressed one).
 
 `prune` keeps a snapshot if any retention rule selects it, refuses an empty policy, and supports
 `--dry-run`. Pruning uses mark-and-sweep: mark every chunk reachable from kept snapshots, then

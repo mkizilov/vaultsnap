@@ -248,6 +248,9 @@ pub enum Error {
         /// The first affected path.
         first: PathBuf,
     },
+    /// A repository check was cancelled.
+    #[error("cancelled: the check was stopped before it finished, so there is no report; nothing was changed")]
+    CheckCancelled,
     /// A restore was cancelled.
     #[error(
         "cancelled: the restore was stopped; the files restored so far are complete and \

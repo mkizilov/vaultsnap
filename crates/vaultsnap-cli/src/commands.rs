@@ -1,9 +1,9 @@
 //! Maps parsed arguments onto `vaultsnap-core` operations and prints results.
 
-use vaultsnap_core::{CheckOptions, Error, PruneOptions, Repository, RetentionPolicy};
+use vaultsnap_core::{Error, PruneOptions, Repository, RetentionPolicy};
 
 use crate::cli::{Cli, Command};
-use crate::{backup, inspect, passphrase, restore};
+use crate::{backup, check, inspect, passphrase, restore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -25,7 +25,9 @@ pub enum CliError {
     PassphraseMismatch,
     #[error("cannot read the passphrase from the terminal: {0}")]
     Terminal(std::io::Error),
-    #[error("repository check found {0} problem(s)")]
+    #[error(
+        "the check found {0} error(s) (listed above); nothing in the repository was changed"
+    )]
     CheckFailed(usize),
     #[error(
         "the snapshot was created but is incomplete: {failed} path(s) could not be read and are \
@@ -62,8 +64,9 @@ impl CliError {
         match self {
             Self::BackupIncomplete { .. }
             | Self::DamagedSnapshots { .. }
-            | Self::RestoreIncomplete { .. } => 3,
-            Self::Core(Error::Cancelled | Error::RestoreCancelled) => 130,
+            | Self::RestoreIncomplete { .. }
+            | Self::CheckFailed(_) => 3,
+            Self::Core(Error::Cancelled | Error::RestoreCancelled | Error::CheckCancelled) => 130,
             _ => 1,
         }
     }
@@ -103,16 +106,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
             restore::run(&repo, cli.password_file.as_deref(), args).await?;
         }
         Command::Check(args) => {
-            let options = CheckOptions {
-                read_data: args.read_data,
-            };
-            let report = repo.check(&options).await?;
-            for problem in &report.problems {
-                eprintln!("problem: {problem}");
-            }
-            if !report.is_ok() {
-                return Err(CliError::CheckFailed(report.problems.len()));
-            }
+            check::run(&repo, cli.password_file.as_deref(), args).await?;
         }
         Command::Prune(args) => {
             let options = PruneOptions {
@@ -143,6 +137,8 @@ mod tests {
         assert_eq!(CliError::BackupIncomplete { failed: 2 }.exit_code(), 3);
         assert_eq!(CliError::DamagedSnapshots { count: 1 }.exit_code(), 3);
         assert_eq!(CliError::RestoreIncomplete { failed: 4 }.exit_code(), 3);
+        assert_eq!(CliError::CheckFailed(2).exit_code(), 3);
+        assert_eq!(CliError::Core(vaultsnap_core::Error::CheckCancelled).exit_code(), 130);
         assert_eq!(CliError::Core(vaultsnap_core::Error::RestoreCancelled).exit_code(), 130);
         let conflict = vaultsnap_core::Error::RestoreConflict {
             count: 1,

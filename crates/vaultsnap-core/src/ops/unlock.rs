@@ -1,7 +1,7 @@
 use crate::blocking::blocking;
 use crate::error::Result;
 use crate::keys::{self, RepositoryKeys};
-use crate::repository::{open_repository, Repository};
+use crate::repository::{open_repository, read_config, Repository};
 use crate::secret::Passphrase;
 
 impl Repository {
@@ -15,6 +15,19 @@ impl Repository {
         let passphrase = passphrase.clone();
         blocking(move || {
             let config = open_repository(&store)?;
+            keys::unlock(&store, &config.repository_id, &passphrase)
+        })
+        .await
+    }
+
+    /// Like [`Repository::unlock`], but needs only a valid `config` and the key files, not the
+    /// other directories. [`Repository::check`] uses it so that a repository with, say, a missing
+    /// `snapshots` directory gets a report that says so instead of failing before it starts.
+    pub async fn unlock_for_check(&self, passphrase: &Passphrase) -> Result<RepositoryKeys> {
+        let store = self.store();
+        let passphrase = passphrase.clone();
+        blocking(move || {
+            let config = read_config(&store)?;
             keys::unlock(&store, &config.repository_id, &passphrase)
         })
         .await
@@ -57,6 +70,31 @@ mod tests {
         let second = fresh.unlock(&passphrase()).await.expect("unlock");
         let opened = second.open(purpose, b"snap", &sealed).expect("open");
         assert_eq!(opened.as_slice(), b"metadata");
+    }
+
+    #[tokio::test]
+    async fn unlocking_for_a_check_works_on_a_repository_with_missing_directories() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let repo = Repository::at(dir.path());
+        init(&repo).await.expect("init");
+        fs::remove_dir_all(repo.layout().snapshots_dir()).expect("remove");
+        fs::remove_dir_all(repo.layout().data_dir()).expect("remove");
+
+        let err = repo.unlock(&passphrase()).await.expect_err("the strict unlock refuses");
+        assert!(matches!(err, Error::Corrupt(_)), "{err}");
+        repo.unlock_for_check(&passphrase()).await.expect("the relaxed unlock does not");
+
+        let wrong = Passphrase::new(b"not the passphrase".to_vec()).expect("valid");
+        let err = repo.unlock_for_check(&wrong).await.expect_err("must fail");
+        assert!(matches!(err, Error::WrongPassphrase), "{err}");
+    }
+
+    #[tokio::test]
+    async fn unlocking_for_a_check_still_requires_a_repository() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let repo = Repository::at(dir.path().join("missing"));
+        let err = repo.unlock_for_check(&passphrase()).await.expect_err("must fail");
+        assert!(matches!(err, Error::NotARepository { .. }), "{err}");
     }
 
     #[tokio::test]

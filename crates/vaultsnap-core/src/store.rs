@@ -16,6 +16,30 @@ use crate::util::random_hex;
 const MAX_NAME_LEN: usize = 255;
 const TEMP_PREFIX: &str = ".tmp-";
 
+/// What a directory entry is, looked at without following symbolic links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirEntryKind {
+    /// A regular file.
+    File,
+    /// A directory.
+    Directory,
+    /// A symbolic link (never followed).
+    Symlink,
+    /// Anything else: a FIFO, a socket, a device.
+    Other,
+}
+
+/// One entry of a directory listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirEntryInfo {
+    /// The entry's name. A name that is not valid UTF-8 is converted lossily.
+    pub name: String,
+    /// What it is.
+    pub kind: DirEntryKind,
+    /// Size in bytes for a regular file, 0 for anything else.
+    pub len: u64,
+}
+
 /// A directory on the local filesystem used as repository storage.
 #[derive(Debug, Clone)]
 pub struct LocalStore {
@@ -89,6 +113,59 @@ impl LocalStore {
             return Err(Error::TooLarge { path, max_len });
         }
         Ok(data)
+    }
+
+    /// Lists the entries of the directory `dir` (the empty string is the root) with their kind
+    /// and size, in ascending order of name. Entries that disappear while the directory is read
+    /// are left out. Symbolic links are reported as such, not followed.
+    pub fn list_entries(&self, dir: &str) -> Result<Vec<DirEntryInfo>> {
+        let path = if dir.is_empty() {
+            self.root.clone()
+        } else {
+            self.resolve(dir)?
+        };
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&path).map_err(|err| Error::io("list", &path, err))? {
+            let entry = entry.map_err(|err| Error::io("list", &path, err))?;
+            let meta = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(err) if err.kind() == ErrorKind::NotFound => continue,
+                Err(err) => return Err(Error::io("inspect", &entry.path(), err)),
+            };
+            let file_type = meta.file_type();
+            let kind = if file_type.is_symlink() {
+                DirEntryKind::Symlink
+            } else if file_type.is_dir() {
+                DirEntryKind::Directory
+            } else if file_type.is_file() {
+                DirEntryKind::File
+            } else {
+                DirEntryKind::Other
+            };
+            entries.push(DirEntryInfo {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                kind,
+                len: if kind == DirEntryKind::File { meta.len() } else { 0 },
+            });
+        }
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(entries)
+    }
+
+    /// Reads at most the first `max` bytes of the file `name` and returns them with the size of
+    /// the whole file.
+    pub fn read_prefix(&self, name: &str, max: usize) -> Result<(Vec<u8>, u64)> {
+        let path = self.resolve(name)?;
+        let file = File::open(&path).map_err(|err| Error::io("open", &path, err))?;
+        let len = file
+            .metadata()
+            .map_err(|err| Error::io("inspect", &path, err))?
+            .len();
+        let mut prefix = Vec::with_capacity(max);
+        file.take(max as u64)
+            .read_to_end(&mut prefix)
+            .map_err(|err| Error::io("read", &path, err))?;
+        Ok((prefix, len))
     }
 
     /// The size in bytes of the file `name`, from its metadata (the file is not read).
@@ -265,6 +342,43 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let store = LocalStore::new(dir.path());
         (dir, store)
+    }
+
+    #[test]
+    fn entries_are_listed_with_their_kind_and_size_in_name_order() {
+        let (dir, store) = store();
+        store.write_new("config", b"12345").expect("write");
+        store.create_dir("data").expect("mkdir");
+        fs::write(dir.path().join(".hidden"), b"").expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("config", dir.path().join("link")).expect("symlink");
+
+        let entries = store.list_entries("").expect("list");
+        let described: Vec<(&str, DirEntryKind, u64)> = entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.kind, entry.len))
+            .collect();
+        let mut expected = vec![
+            (".hidden", DirEntryKind::File, 0),
+            ("config", DirEntryKind::File, 5),
+            ("data", DirEntryKind::Directory, 0),
+        ];
+        #[cfg(unix)]
+        expected.push(("link", DirEntryKind::Symlink, 0));
+        assert_eq!(described, expected);
+        assert!(store.list_entries("data").expect("list").is_empty());
+        assert!(store.list_entries("missing").is_err());
+    }
+
+    #[test]
+    fn a_prefix_is_read_together_with_the_size_of_the_whole_file() {
+        let (_dir, store) = store();
+        store.write_new("config", b"0123456789").expect("write");
+        assert_eq!(store.read_prefix("config", 4).expect("read"), (b"0123".to_vec(), 10));
+        assert_eq!(store.read_prefix("config", 100).expect("read"), (b"0123456789".to_vec(), 10));
+        assert_eq!(store.read_prefix("config", 0).expect("read"), (Vec::new(), 10));
+        let err = store.read_prefix("absent", 4).expect_err("must fail");
+        assert!(err.is_not_found(), "{err}");
     }
 
     #[test]
