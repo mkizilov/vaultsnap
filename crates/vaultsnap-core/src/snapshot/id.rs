@@ -4,6 +4,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{Error, Result};
+use crate::repository::RepositoryLayout;
 use crate::util::{decode_hex, hex, random_hex};
 
 const ID_LEN: usize = 64;
@@ -38,6 +39,11 @@ impl SnapshotId {
     /// The full identifier.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Repository-relative name of this snapshot's file: `snapshots/<id>`.
+    pub(crate) fn object_name(&self) -> String {
+        format!("{}/{}", RepositoryLayout::SNAPSHOTS_DIR, self.0)
     }
 
     /// An abbreviated form for display; not unique and never valid input.
@@ -94,6 +100,13 @@ mod tests {
         assert_eq!(id.to_string(), text);
         assert_eq!(id.as_str(), text);
         assert_eq!(id.short(), "01234567");
+    }
+
+    #[test]
+    fn the_object_name_is_a_path_inside_the_snapshots_directory() {
+        let text = "0123456789abcdef".repeat(4);
+        let id: SnapshotId = text.parse().expect("valid id");
+        assert_eq!(id.object_name(), format!("snapshots/{text}"));
     }
 
     #[test]
