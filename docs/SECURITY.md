@@ -4,9 +4,10 @@ Status: **partly implemented**. Repository creation, the local store (permission
 refusal, atomic writes), locking, and key management exist: the master key is random, protected by
 an Argon2id-derived key, and per-purpose keys are derived with HKDF. The encrypted chunk store
 exists: chunks are named by a keyed hash, compressed when beneficial, and sealed with
-XChaCha20-Poly1305. Nothing yet feeds file data into it (backup does not exist), and file names,
-directory structure, and snapshot metadata have no storage format yet, so their protection is
-still a requirement, not a fact. The `config` file is plaintext by design and holds no secret. This document defines what the
+XChaCha20-Poly1305, and snapshot manifests (every file name, path, host, tag, attribute, and the
+chunk lists) are encrypted and authenticated together with their snapshot id, and committed
+atomically. Nothing yet connects the scanner to these stores (backup does not exist). The
+`config` file is plaintext by design and holds no secret. This document defines what the
 implementation must guarantee, and what it deliberately does not. See `FORMAT.md` for the data
 layout.
 
@@ -45,6 +46,13 @@ random or already-compressed data yields objects as large as the chunk. This is 
 compress-then-encrypt. It is limited to per-chunk granularity because every chunk is compressed
 on its own, never together with other data, which is what makes the CRIME/BREACH style of attack
 (an attacker injecting guesses next to a secret in one compression context) inapplicable.
+
+**Snapshots reveal their size and timing.** The snapshot file's size shows roughly how many
+entries the backup has and how compressible their names are, its modification time shows when the
+backup ran, and the number of files in `snapshots/` is the number of snapshots. Their contents,
+including the number of roots, host, tags, and every name, are encrypted. A snapshot's list of
+chunk ids is encrypted too, so which chunks a snapshot uses is not visible; only the chunk store
+itself shows what exists.
 
 **Deduplication is visible.** Two chunks with the same content have the same id and share one
 file. Someone who can see the storage can tell which snapshots reuse which chunks and how much
@@ -151,8 +159,34 @@ it:
   not read by accident.
 
 This does not stop an attacker from *reading* what the backup user can read, nor from making a
-file change in a way the checks cannot see (see `SCANNING.md`), and file names and metadata
-of the user's tree are only protected once snapshots exist and are encrypted (not built yet).
+file change in a way the checks cannot see (see `SCANNING.md`).
+
+## Snapshots (manifests; built)
+
+- **Confidentiality and authenticity.** The manifest, including every path, is sealed with
+  XChaCha20-Poly1305 under the `MetadataEncryption` key, and the header and snapshot id are
+  authenticated. A snapshot cannot be edited, truncated, extended, renamed, or swapped with
+  another without failing authentication; it cannot be read without the key.
+- **Untrusted even when authentic.** A manifest that decrypts correctly is still validated before
+  use: names are single safe path components (no `/`, NUL, `.`, `..`, or empty), unique among
+  siblings, parents precede children, chunk lengths add up to sizes, hard links name earlier
+  files. This makes path traversal and loops impossible by construction for a restore, even for
+  a manifest produced by a buggy or future writer. Symlink targets are data and must never be
+  followed during restore.
+- **Bounded work.** Counts and lengths are checked against the bytes left before allocating; the
+  manifest is capped at 1 GiB; decompression is capped at the authenticated length. Malformed
+  and hostile inputs are meant to fail with an error and never panic; tests truncate the
+  encoding at every length and mutate every byte (they have not been run yet).
+- **Atomic, complete-or-absent.** A snapshot is published in one no-overwrite step, only after it
+  validates and all its chunks are confirmed present. Incomplete snapshots are never visible;
+  damaged ones are reported as damaged. Snapshots are never overwritten, so a later bug cannot
+  silently rewrite history.
+- **Not hidden / not defended.** An attacker who can write to the repository can delete a
+  snapshot or roll the whole repository back to an older complete state, and VaultSnap cannot
+  tell (it has no external record of which snapshots should exist). Plaintext manifests and
+  their paths exist in memory while in use and are only partly zeroized (the encoded bytes are;
+  the decoded structure is not).
+- **No names in diagnostics.** Validation errors identify entries by index, never by name.
 
 ## Concurrency
 

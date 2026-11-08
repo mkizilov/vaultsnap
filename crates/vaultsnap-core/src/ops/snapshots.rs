@@ -1,20 +1,13 @@
 use crate::error::{Error, Result};
 use crate::repository::Repository;
-use crate::snapshot::SnapshotId;
-
-/// One row of the snapshot listing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SnapshotSummary {
-    /// Snapshot identifier.
-    pub id: SnapshotId,
-    /// Creation time, seconds since the Unix epoch.
-    pub created_at_unix: i64,
-    /// Labels stored with the snapshot.
-    pub tags: Vec<String>,
-}
+use crate::snapshot::SnapshotSummary;
 
 impl Repository {
     /// Lists the snapshots in the repository, oldest first.
+    ///
+    /// Not implemented yet: reading snapshots needs the repository keys, which the command line
+    /// does not obtain for this command so far. The building blocks exist in
+    /// [`crate::snapshot::SnapshotStore`] (see [`Repository::snapshot_store`]).
     pub async fn snapshots(&self) -> Result<Vec<SnapshotSummary>> {
         Err(Error::not_implemented("snapshots"))
     }

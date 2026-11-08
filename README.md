@@ -15,9 +15,9 @@ A reliable encrypted incremental backup utility written in Rust.
 | `check`     | Not implemented                                                        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
-Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, and
-a filesystem scanner are in place, but **nothing yet connects them**: `backup` does not exist, so
-no files are read into the repository. Do not rely on this tool for real data.
+Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
+filesystem scanner, and encrypted snapshot manifests are in place, but **nothing yet connects them
+into a backup**: `backup` and `restore` do not exist. Do not rely on this tool for real data.
 
 ### Chunking
 
@@ -92,6 +92,38 @@ let bytes = chunks.get(&stored.id)?;           // verified plaintext
 
 The byte-level format and the reasoning behind each cryptographic choice are in
 [`docs/FORMAT.md`](docs/FORMAT.md) ("Chunk objects").
+
+### Snapshots
+
+`vaultsnap_core::snapshot` records one backup as a single immutable file, `snapshots/<id>`:
+
+- **Contents**: a random unique snapshot id, creation time, host and tags, the backed-up roots,
+  each root's directory tree (parent index plus one safe path component per entry), every
+  entry's metadata (type, size, nanosecond timestamps, permissions, ownership, link structure),
+  for every file the ordered list of chunk references, the backup configuration (chunker sizes,
+  scan policies, patterns), a list of skipped paths, totals, and the format version.
+- **Encrypted and authenticated**, including every file name and path: zstd-compressed if smaller,
+  sealed with XChaCha20-Poly1305 with the header and snapshot id as associated data, so a
+  snapshot cannot be edited, truncated, renamed, or swapped undetected.
+- **Atomic**: a snapshot is validated, checked for missing chunks, encrypted, and then published
+  in one no-overwrite step. An interrupted or incomplete backup leaves no snapshot; a damaged
+  one is reported as damaged, never presented as good.
+- **Versioned and validated**: the container and the manifest each carry a version; unknown
+  versions are reported, historical ones stay readable, and every manifest, even an authentic
+  one, must satisfy strict rules before use (no path traversal, no cycles, consistent sizes).
+
+```rust
+let snapshots = repo.snapshot_store(&keys).await?;
+let mut builder = ManifestBuilder::new(repository_id, BackupConfig::new(chunker, &scan_options));
+let root = builder.add_root(scanner.root());
+// for each scanned entry: builder.add_entry(root, &entry, chunk_refs)?;
+let manifest = builder.finish(Timestamp::now())?;
+snapshots.commit(&manifest)?;                 // atomic; refuses if a chunk is missing
+let again = snapshots.load(&manifest.id)?;    // authenticated, decrypted, validated
+```
+
+Restoring is not implemented; loading only reads and verifies manifests. The byte-level format
+and compatibility rules are in [`docs/FORMAT.md`](docs/FORMAT.md) ("Snapshots").
 
 The design is specified before the code that implements it:
 
@@ -172,6 +204,10 @@ Tests:
 - Chunking property tests (`proptest`) and statistical tests are in
   `crates/vaultsnap-core/tests/chunking.rs`. A failing property case is saved under
   `crates/vaultsnap-core/proptest-regressions/`; commit that file with the fix.
+- Snapshot tests: unit tests for the codec (byte-exact layout, every truncation, lying counts,
+  corrupted bytes), the container, validation, the builder, and the store (interrupted writes,
+  corruption, concurrency); end-to-end tests with a real repository, scanner, chunker, and
+  chunk store are in `crates/vaultsnap-core/tests/snapshot.rs`.
 - Scanner tests, which build real directory trees (symlinks, hard links, FIFOs, unreadable
   directories, files changing mid-read), are in `crates/vaultsnap-core/tests/scan.rs`.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use

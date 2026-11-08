@@ -150,6 +150,57 @@ pub enum Error {
         /// What changed.
         reason: String,
     },
+    /// There is no snapshot with this id.
+    #[error("snapshot {0} does not exist")]
+    SnapshotNotFound(String),
+    /// A snapshot with this id was already committed; snapshots are never overwritten.
+    #[error("snapshot {0} already exists")]
+    SnapshotExists(String),
+    /// A snapshot file failed verification: it is damaged, truncated, tampered with, filed under
+    /// the wrong id, or the key is wrong. These cases cannot be told apart reliably.
+    #[error("snapshot {id} is corrupt: {reason}")]
+    CorruptSnapshot {
+        /// The snapshot id it was read for.
+        id: String,
+        /// What failed.
+        reason: String,
+    },
+    /// A snapshot file uses a container format version this build does not understand.
+    #[error(
+        "snapshot file format version {found} is not supported (this build supports version \
+         {supported}); nothing was changed"
+    )]
+    UnsupportedSnapshotVersion {
+        /// Version found in the file.
+        found: u8,
+        /// Version this build reads and writes.
+        supported: u8,
+    },
+    /// A manifest uses a schema version this build does not understand.
+    #[error(
+        "snapshot manifest version {found} is not supported (this build supports version \
+         {supported}); nothing was changed"
+    )]
+    UnsupportedManifestVersion {
+        /// Version found in the manifest.
+        found: u32,
+        /// Version this build reads and writes.
+        supported: u32,
+    },
+    /// A manifest is malformed or breaks the rules of a well-formed manifest.
+    #[error("invalid snapshot manifest: {0}")]
+    InvalidManifest(String),
+    /// A snapshot refers to chunks that are not in the repository, so it cannot be complete.
+    #[error(
+        "snapshot is incomplete: {missing} referenced chunk(s) are missing from the repository \
+         (first: {first}); nothing was committed"
+    )]
+    IncompleteSnapshot {
+        /// How many distinct chunks are missing.
+        missing: usize,
+        /// The first missing chunk id.
+        first: String,
+    },
     /// A passphrase was rejected before use.
     #[error("invalid passphrase: {0}")]
     InvalidPassphrase(&'static str),

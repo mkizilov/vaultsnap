@@ -65,7 +65,7 @@ pub enum ChangePolicy {
 }
 
 /// Everything that controls a scan.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScanOptions {
     /// Symbolic link handling.
     pub symlinks: SymlinkPolicy,

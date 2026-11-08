@@ -61,7 +61,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
                 println!(
                     "{}\t{}\t{}",
                     snapshot.id.short(),
-                    snapshot.created_at_unix,
+                    snapshot.created.secs,
                     snapshot.tags.join(",")
                 );
             }

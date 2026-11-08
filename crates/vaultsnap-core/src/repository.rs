@@ -10,7 +10,7 @@ use crate::config::RepositoryConfig;
 use crate::error::{Error, Result};
 use crate::keys::RepositoryKeys;
 use crate::lock::{LockKind, RepositoryLock};
-use crate::snapshot::SnapshotId;
+use crate::snapshot::{SnapshotId, SnapshotStore};
 use crate::store::LocalStore;
 
 /// Repository format version written to the `config` file.
@@ -118,6 +118,14 @@ impl Repository {
     /// with [`Repository::unlock`]). Performs no I/O; the repository should have been opened.
     pub fn chunk_store(&self, keys: &RepositoryKeys) -> Result<ChunkStore> {
         ChunkStore::new(self.store(), keys)
+    }
+
+    /// The snapshot store of this repository, using keys derived from `keys`. Reads the
+    /// repository configuration to learn the repository id, which every snapshot is bound to,
+    /// and fails if the repository cannot be opened.
+    pub async fn snapshot_store(&self, keys: &RepositoryKeys) -> Result<SnapshotStore> {
+        let config = self.load_config().await?;
+        SnapshotStore::new(self.store(), keys, &config.repository_id)
     }
 
     /// Opens the repository: checks that it exists, that its format version is supported, and

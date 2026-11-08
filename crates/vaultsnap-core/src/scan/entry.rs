@@ -25,6 +25,11 @@ impl Timestamp {
         }
     }
 
+    /// The current time.
+    pub fn now() -> Self {
+        Self::from_system_time(SystemTime::now())
+    }
+
     /// Converts a system time, including times before the epoch.
     pub fn from_system_time(time: SystemTime) -> Self {
         match time.duration_since(UNIX_EPOCH) {

@@ -5,8 +5,9 @@
 //! store, locking, and key management (a random master key protected by an Argon2id-derived key,
 //! per-purpose HKDF keys, XChaCha20-Poly1305 sealing), a streaming content-defined chunker
 //! ([`chunking`]), an encrypted, deduplicating chunk store ([`chunk_store`]), and a filesystem
-//! scanner ([`scan`]). Backup, restore, and the remaining operations validate their arguments and
-//! then return [`Error::NotImplemented`]; nothing yet connects the scanner to the chunk store.
+//! scanner ([`scan`]), and encrypted, atomically committed snapshot manifests ([`snapshot`]).
+//! Backup, restore, and the remaining operations validate their arguments and then return
+//! [`Error::NotImplemented`]; nothing yet connects the scanner and the chunk store to a snapshot.
 
 mod blocking;
 pub mod chunk_store;
@@ -37,11 +38,12 @@ pub use keys::RepositoryKeys;
 pub use lock::{LockKind, RepositoryLock};
 pub use ops::{
     BackupOptions, CheckOptions, CheckReport, PruneOptions, PruneReport, RestoreOptions,
-    SnapshotSummary,
 };
 pub use repository::{Repository, RepositoryLayout};
 pub use retention::RetentionPolicy;
 pub use scan::{ScanOptions, Scanner};
 pub use secret::Passphrase;
-pub use snapshot::SnapshotId;
+pub use snapshot::{
+    Manifest, ManifestBuilder, SnapshotId, SnapshotListing, SnapshotStore, SnapshotSummary,
+};
 pub use store::LocalStore;

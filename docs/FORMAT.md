@@ -2,9 +2,9 @@
 
 Status: **partly implemented**. `init`, the `config` file, the local store, locking, and key
 management (master key, key files, derived keys, authenticated encryption) exist and are marked
-*built*, as are chunking and the encrypted, deduplicated chunk store. Packs, indexes, and snapshot
-objects, and therefore encryption of metadata and the connection from files to chunks, are still
-*planned*; `backup`, `snapshots`, `restore`, `check`, and `prune` return "not
+*built*, as are chunking, the encrypted, deduplicated chunk store, the filesystem scanner, and
+encrypted snapshot manifests. Packs and indexes are still *planned*, and nothing yet performs a
+backup end to end; `backup`, `snapshots`, `restore`, `check`, and `prune` return "not
 implemented". Code that lands later must follow this document, and changes to the format must
 update it first and bump `FORMAT_VERSION` (`crates/vaultsnap-core/src/repository.rs`).
 
@@ -111,8 +111,10 @@ the file so an operator can delete it after confirming no VaultSnap process is r
 
 ## Identifiers
 
-- **Snapshot id**: 256-bit digest of the snapshot object's stored bytes, as 64 lowercase hex
-  characters (`SnapshotId`). Pack and index ids are derived the same way.
+- **Snapshot id** (built): 256 random bits from the OS, as 64 lowercase hex characters
+  (`SnapshotId`), generated when the manifest is built. It is the snapshot's file name, it is
+  stored inside the manifest, and it is authenticated with the file, so a snapshot cannot be
+  renamed or swapped. Pack and index ids (planned) will be digests of their stored bytes.
 - **Chunk id** (built): `BLAKE3-keyed-hash(key = ContentId key, plaintext chunk)`, 256 bits, as 64
   lowercase hex characters (`ChunkId`). The `ContentId` key is derived from the master key (see
   *Keys and encryption*), so ids are specific to one repository and cannot be computed without
@@ -237,20 +239,168 @@ length), to avoid one file per chunk. Packs will be written to a temporary name,
 renamed into `data/`, and will become visible only when an index object that references them is
 written. Until then every chunk is a loose object as described above.
 
-## Snapshot object
+## Snapshots (built)
 
-An encrypted document containing: creation time, host name, tags, source paths, and a reference
-to the root of a tree of directory and file entries. Directory and file entries are stored as
-chunks, so unchanged subtrees are shared between snapshots. Entries record name, type, mode, size,
-modification time, symlink target, and chunk ids.
+A snapshot is one immutable file, `snapshots/<id>`, holding an encrypted *manifest*: everything
+a restore needs to know about one backup. Two version numbers apply and are both checked: the
+**container version** (the encryption envelope, below) and the **manifest schema version** (the
+layout of the plaintext). They are independent so either can evolve alone.
+
+### Container (version 1)
+
+The same shape as a chunk object, with its own magic and kind. Integers are little endian.
+
+```
+offset  size  field
+0       4     magic "VSSN"
+4       1     container format version = 1
+5       1     object kind = 2 (snapshot)
+6       1     compression: 0 = none, 1 = zstd
+7       1     flags, reserved, must be 0
+8       4     length of the manifest bytes in bytes (u32), at most 1 GiB
+12      24    XChaCha20-Poly1305 nonce, random per file
+36      n     ciphertext of the manifest bytes (zstd-compressed first only if strictly smaller)
+36+n    16    Poly1305 tag
+```
+
+- **Key**: the `MetadataEncryption` key. **Associated data**: the 12 header bytes followed by the
+  32 raw bytes of the snapshot id. The header cannot be altered, and a file cannot be renamed to
+  another id, without authentication failing; two snapshots cannot be swapped.
+- **Verification on read**, failing at the first problem: at least 5 bytes and the magic; the
+  container version (an unknown version is reported as such, nothing else is guessed); minimum
+  length, kind, compression code, flags, declared length within the 1 GiB limit, and a body
+  length consistent with it; the AEAD tag; decompression capped at the authenticated declared
+  length and an exact length match. A file larger than the largest valid file is never read.
+- Everything sensitive, every file name and path, host name, and tag, is inside the ciphertext.
+
+### Manifest schema (version 1)
+
+All integers little endian and fixed width. `str` and `bytes` are a `u32` length followed by that
+many bytes (`str` must be valid UTF-8; `bytes` are arbitrary, used for paths and names because
+Unix names are not necessarily UTF-8). `list<T>` is a `u32` count followed by the items.
+`opt<T>` is a flag byte (0 absent, 1 present, anything else invalid) followed by the value if
+present. `ts` is `i64` seconds since the Unix epoch and `u32` nanoseconds (below 10^9).
+
+```
+u32   schema version = 1                    (read first; unknown versions are rejected as such)
+[32]  snapshot id                           (must equal the id in the container's file name)
+str   repository id                         (32 lowercase hex characters; must equal the repository's)
+ts    created
+str   host                                  (as supplied by the caller; may be empty)
+list<str> tags
+str   program                               (e.g. "vaultsnap 0.1.0")
+-- backup configuration --
+u32 u32 u32   chunker minimum, average, maximum size
+u8    symlink policy      0 preserve, 1 follow inside root, 2 follow all
+u8    hard link policy    0 preserve, 1 duplicate
+u8    error policy        0 skip, 1 fail
+u8    special file policy 0 record, 1 skip
+u8    changed-file policy 0 fail, 1 accept
+u8    cross filesystems   0 or 1
+list<str> include patterns, list<str> exclude patterns
+-- content --
+list<root>:
+  bytes source                              (the resolved path that was backed up)
+  list<entry>:                              (pre-order; entry 0 is the root itself)
+    u32   parent index                      (0xFFFFFFFF only for entry 0)
+    bytes name                              (one path component; empty only for entry 0)
+    u8    kind: 0 directory, 1 file, 2 symlink, 3 hard link, 4 fifo, 5 socket,
+                6 char device, 7 block device, 8 other
+    file:      list<{ [32] chunk id, u32 chunk length }>     (in file order)
+    symlink:   bytes target
+    hard link: u32 index of the entry that carries the data
+    attributes: u64 size, opt<ts> modified, accessed, changed, created,
+                opt<u32> mode, uid, gid, u8 readonly, opt<u64> device, inode, links
+list<skipped>:
+  u32 root index, bytes path, u8 reason (0 vanished, 1 unreadable, 2 other filesystem,
+  3 special file), str detail            (empty for reasons 0 and 2)
+7 x u64  totals: directories, files, symlinks, hard links, special files, bytes, skipped
+```
+
+The whole input must be consumed. A conforming reader checks every count and length against the
+bytes that remain *before* allocating, so a lying count cannot exhaust memory.
+
+### Validity rules
+
+A manifest is accepted (when written and when read) only if all of these hold. They are the
+security boundary against a manifest that is authentic but wrong, or written by a buggy or
+future writer:
+
+- the repository id is well formed, at least one root exists, every root has a non-empty source
+  path without NUL, and a root that is not a directory has exactly one entry;
+- entry 0 of each root has no parent and an empty name; every other entry has a parent with a
+  **smaller index** that is a **directory**, and a name that is a single safe path component:
+  non-empty, at most 4096 bytes, no `/`, no NUL, not `.` or `..`. Names are **unique among
+  siblings**. Together these make cycles and path traversal impossible by construction, whatever
+  a restore later does with the names;
+- for a file, every chunk length is between 1 and 64 MiB and the lengths **add up to the size**;
+- a hard link names an **earlier regular file** of its root; a symlink target is non-empty and
+  has no NUL (it is data: it may be absolute or contain `..`, and a restore must never follow it
+  while restoring);
+- timestamps have nanoseconds below 10^9, skipped records name an existing root, the chunker
+  settings are valid, every enumerated code is known, and the stored totals **equal the totals
+  computed from the entries**.
+
+Error messages identify entries by index, never by name, because names are sensitive.
+
+### Compatibility and versioning
+
+- Reading is the dispatch point: the schema version is read first and each supported version has
+  its own decoder, so a build keeps reading every version it has ever written (**historical
+  snapshots stay readable**). Only version 1 exists so far.
+- A snapshot with a schema or container version newer than the build understands is reported
+  as unsupported, with both numbers, and is never partly interpreted; nothing is modified.
+- Changing the layout, a code, or the validity rules in a way an old reader would misread requires
+  a new schema version, an entry here, and a decoder that still accepts the old one. Adding what
+  to capture (extended attributes, ACLs, flags, sparse maps) is such a change.
+- The container version is bumped only for changes to the envelope (cipher, header, compression).
+
+### Atomic commit
+
+A snapshot is committed in this order, stopping at the first failure:
+
+1. the manifest is **validated**, and its repository id compared with the repository's;
+2. **every chunk it refers to is confirmed present** in the chunk store; if any is missing the
+   commit fails and reports how many (an interrupted or racing backup, or a concurrent prune,
+   must not produce a snapshot that cannot be restored);
+3. the manifest is encoded, compressed if smaller, and encrypted;
+4. the file is **published in one step without overwriting** (staged in a `.tmp-` file, flushed,
+   hard-linked to `snapshots/<id>`, directory synced).
+
+Until step 4 completes nothing named like a snapshot exists, so an incomplete snapshot can never
+be seen, listed, or loaded. A crash leaves at most a `.tmp-` file (ignored by all readers) and
+unreferenced chunks (removed by `prune`). Committing an id that exists fails with *already
+exists* and changes nothing; concurrent commits of the same id yield exactly one success.
+The presence check is a point-in-time check: a chunk deleted *after* it is not detected until the
+snapshot is read or checked, which is why `prune` must hold the exclusive lock and `backup` the
+shared one.
+
+### Loading
+
+Loading authenticates the file against its id, decrypts, decodes, validates, and then requires
+the manifest's own snapshot id and repository id to match the file's name and the repository.
+A damaged, truncated, extended, wrong-key, or misplaced file is a *corrupt snapshot*, and
+listings report such files with their error instead of omitting them or presenting them as good.
+Files in `snapshots/` that are not named like a snapshot id, and `.tmp-` files, are ignored.
+
+### Decisions
+
+| Decision | Reason |
+|----------|--------|
+| One manifest file per snapshot, immutable | Atomic by construction (one publish step), trivially consistent for concurrent readers, nothing to repair. |
+| Random snapshot id stored inside and bound as associated data | A content-address of the ciphertext cannot be stored inside the manifest; a random id can, and binding it makes renaming and swapping detectable. |
+| Tree stored as parent index + single-component name | Makes the validity rules (no traversal, no cycles, unique siblings) checkable in one pass, and avoids repeating path prefixes. |
+| Hand-specified binary layout, no serialization framework | The format is a long-term contract; it must not change because a library changed, and every field is validated explicitly. |
+| Paths as bytes, not text | Unix names are arbitrary bytes; converting would corrupt names on restore. |
+| Totals stored and cross-checked | A listing can show sizes without walking entries, and an inconsistent manifest is detected. |
+| Commit refuses a snapshot with missing chunks | Never present as complete something that cannot be restored. |
+| Whole manifest in one object (for now) | Simple and correct. Cost: memory proportional to the manifest (about 100 bytes plus the name per entry, 36 per chunk), a 1 GiB cap, and listing decrypts every snapshot. Splitting trees into chunk-stored subtrees, which also shares unchanged directories between snapshots, would be a new schema version. |
 
 The entries come from the filesystem scanner (`SCANNING.md`), which defines what is captured:
-type (directory, file, symlink, hard link to an earlier entry, FIFO, socket, device), size,
-modification, access, inode-change, and birth times at nanosecond resolution, permission bits
-(`0o7777`), owner uid and gid, and the hard-link and symlink structure. Names are arbitrary byte
-strings on Unix (not necessarily UTF-8), so the snapshot encoding must store them as bytes, never
-as text. Extended attributes, ACLs, file flags, and sparse-file hole maps are not captured yet;
-adding them is a snapshot format change.
+type, size, modification, access, inode-change, and birth times at nanosecond resolution,
+permission bits (`0o7777`), owner uid and gid, device and inode (for change detection), and the
+hard-link and symlink structure. Extended attributes, ACLs, file flags, and sparse-file hole maps
+are not captured yet.
 
 ## Keys and encryption (built, except where marked planned)
 
@@ -303,7 +453,7 @@ with 32-byte output. Labels are part of the format and never change or get reuse
 |----------------------|----------------------------------------|---------------------------------|
 | `ContentId`          | `vaultsnap/v1/content-id`              | keyed hash naming chunks (built)|
 | `DataEncryption`     | `vaultsnap/v1/data-encryption`         | chunk objects (built), packs    |
-| `MetadataEncryption` | `vaultsnap/v1/metadata-encryption`     | snapshot and index objects      |
+| `MetadataEncryption` | `vaultsnap/v1/metadata-encryption`     | snapshots (built), index objects|
 
 **Sealed messages.** `nonce(24 random bytes) || ciphertext || tag(16)` with XChaCha20-Poly1305
 and caller-supplied associated data. Chunk objects bind their header (magic, version, kind,
@@ -314,7 +464,7 @@ version in the same way. Random 192-bit nonces make reuse negligible without any
 
 1. Write new chunk objects (and, later, packs): temporary name, sync, no-overwrite publish.
 2. Write the index object that covers them (planned).
-3. Write the snapshot object (planned).
+3. Commit the snapshot (built; it checks that the chunks it names exist, then publishes).
 
 Readers only trust snapshots, so a crash between steps leaves unreferenced chunks that `prune`
 later removes. Existing objects are never modified in place.

@@ -59,7 +59,12 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   change to it needs a version bump), `scan` (`Scanner`, `ScanOptions`, `FileReader`: the
   filesystem walk and streaming file access; every behavior choice is an explicit policy option
   documented in `docs/SCANNING.md`, and defaults must stay conservative: never follow symlinks,
-  never open special files). No CLI or terminal concerns here. All repository file
+  never open special files), `snapshot` (`Manifest` model and `validate`, `codec` = the byte
+  layout of manifest schema v1, `object` = the encrypted container, `builder`, `store` =
+  `SnapshotStore` commit/load/list; a change to the codec layout, the container, or the validity
+  rules is a format change: new schema version, old decoder kept, `docs/FORMAT.md` updated, and
+  tests added; manifests never leak file names into errors or logs). No CLI or terminal concerns
+  here. All repository file
   access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
   through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
@@ -68,8 +73,9 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   add tests). Tests use `testing::fast_kdf()` (cheap Argon2 parameters); production code never
   does.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
-  chunking engine, the encrypted chunk store, the filesystem scanner. `backup`, `snapshots`,
-  `restore`, `check`, `prune` are stubs. Nothing connects the scanner to the chunk store yet.
+  chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
+  manifests. `backup`, `snapshots`, `restore`, `check`, `prune` are stubs. Nothing connects the
+  scanner, chunk store, and snapshot store into a backup yet, and nothing restores.
 - Tests that need privileges or special files must detect their absence at run time and say so
   (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
   any test that changes permissions must restore them with a guard so temporary directories can
