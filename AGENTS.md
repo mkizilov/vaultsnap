@@ -50,7 +50,10 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   synchronous store on Tokio's blocking pool), `util` (randomness, hex, time), `kv` (strict
   `key=value` parser shared by `config` and key files), `secret` (`Passphrase`), `crypto` (Argon2id
   `KdfParams`, HKDF `KeyPurpose`/`derive_key`, XChaCha20-Poly1305 `seal`/`open`), `keys`
-  (`RepositoryKeys`, key files, unlocking). No CLI or terminal concerns here. All repository file
+  (`RepositoryKeys`, key files, unlocking), `chunking` (`ChunkerConfig`, `Chunker`: FastCDC over
+  any `Read`, no storage coupling; its algorithm and gear table are part of the repository format,
+  so never change them without updating `docs/FORMAT.md` and bumping the format version). No CLI
+  or terminal concerns here. All repository file
   access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
   through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
@@ -58,8 +61,13 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   key file layout, AAD, or HKDF labels is a format change (update `docs/FORMAT.md`, bump versions,
   add tests). Tests use `testing::fast_kdf()` (cheap Argon2 parameters); production code never
   does.
-- Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`). `backup`,
-  `snapshots`, `restore`, `check`, `prune` are stubs. File data is not encrypted yet (no backup).
+- Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
+  chunking engine. `backup`, `snapshots`, `restore`, `check`, `prune` are stubs. Nothing chunks or
+  encrypts file data on disk yet.
+- Tests and benchmarks: chunking property tests live in `crates/vaultsnap-core/tests/chunking.rs`
+  (`proptest`; only properties that are provable, plus fixed-seed statistical tests with wide
+  margins, to avoid flaky tests); the benchmark is `crates/vaultsnap-core/benches/chunking.rs`
+  (`harness = false`, in-memory data only). Report benchmark numbers only if actually run.
 - CLI passphrases (`passphrase` module) come from `--password-file`/`VAULTSNAP_PASSWORD_FILE` or a
   no-echo prompt, never from arguments or environment values, and are read before any repository
   file is created.

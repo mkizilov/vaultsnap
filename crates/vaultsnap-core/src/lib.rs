@@ -3,11 +3,12 @@
 //! The repository format and security boundaries are specified in `docs/FORMAT.md` and
 //! `docs/SECURITY.md`. Implemented: repository creation (`init`), configuration, the local
 //! store, locking, and key management (a random master key protected by an Argon2id-derived key,
-//! per-purpose HKDF keys, XChaCha20-Poly1305 sealing). Backup, restore, and the remaining
-//! operations validate their arguments and then return [`Error::NotImplemented`]; nothing encrypts
-//! file data yet.
+//! per-purpose HKDF keys, XChaCha20-Poly1305 sealing), and a streaming content-defined chunker
+//! ([`chunking`]). Backup, restore, and the remaining operations validate their arguments and
+//! then return [`Error::NotImplemented`]; nothing chunks or encrypts file data on disk yet.
 
 mod blocking;
+pub mod chunking;
 pub mod config;
 pub mod crypto;
 pub mod error;
@@ -24,6 +25,7 @@ pub mod store;
 mod testing;
 mod util;
 
+pub use chunking::{Chunker, ChunkerConfig};
 pub use config::RepositoryConfig;
 pub use crypto::{KdfParams, KeyPurpose, SecretKey};
 pub use error::{Error, Result};

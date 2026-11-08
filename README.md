@@ -15,8 +15,27 @@ A reliable encrypted incremental backup utility written in Rust.
 | `check`     | Not implemented                                                        |
 | `prune`     | Not implemented; validates the retention policy first                  |
 
-Key management is in place, but **file data is not encrypted yet** because nothing can be backed
-up yet. Do not rely on this tool for real data.
+Key management and a streaming content-defined chunker are in place, but **file data is not
+chunked into the repository or encrypted yet** because nothing can be backed up yet. Do not rely
+on this tool for real data.
+
+### Chunking
+
+`vaultsnap_core::chunking` splits any `std::io::Read` into content-defined chunks (FastCDC with
+normalized chunking; default 256 KiB / 1 MiB / 4 MiB minimum / average / maximum). It is
+streaming with memory bounded by twice the maximum chunk size, deterministic whatever the read
+sizes, binary-safe, and independent of storage:
+
+```rust
+use vaultsnap_core::chunking::{Chunker, ChunkerConfig};
+
+let mut chunker = Chunker::new(std::fs::File::open("big.iso")?, ChunkerConfig::default());
+while let Some(chunk) = chunker.next_chunk()? {
+    // chunk.offset: u64, chunk.data: &[u8] (borrowed until the next call)
+}
+```
+
+The exact algorithm is specified in [`docs/FORMAT.md`](docs/FORMAT.md).
 
 The design is specified before the code that implements it:
 
@@ -92,10 +111,22 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 Tests:
 
 - Unit tests live next to the code in each module.
+- Chunking property tests (`proptest`) and statistical tests are in
+  `crates/vaultsnap-core/tests/chunking.rs`. A failing property case is saved under
+  `crates/vaultsnap-core/proptest-regressions/`; commit that file with the fix.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
-CI (`.github/workflows/ci.yml`) runs the four commands above on Linux and macOS.
+Benchmarks (in-memory, nothing written to disk; see the header of the file for what they cover):
+
+```sh
+cargo bench -p vaultsnap-core --bench chunking              # 4 KiB .. 64 MiB inputs
+cargo bench -p vaultsnap-core --bench chunking -- --quick   # 4 KiB .. 1 MiB
+cargo bench -p vaultsnap-core --bench chunking -- --large   # adds a 256 MiB input
+```
+
+CI (`.github/workflows/ci.yml`) runs the four commands above on Linux and macOS (the benchmark
+is compiled by `clippy --all-targets` but not run).
 
 ## Known gaps
 
@@ -106,6 +137,7 @@ CI (`.github/workflows/ci.yml`) runs the four commands above on Linux and macOS.
   yet, and the first CI run is the first verification.
 - The local store publishes new files with hard links, so the repository must live on a
   filesystem that supports them.
+- The chunking benchmark has never been run, so there are no throughput numbers yet.
 
 ## License
 

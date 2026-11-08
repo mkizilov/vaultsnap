@@ -36,6 +36,19 @@ Total repository size, number and approximate size of packs, object timestamps a
 storage, and the repository format version. Chunk sizes are bounded and packs are padded only to
 the extent documented in `FORMAT.md` once defined.
 
+**Chunk boundaries are a fingerprint.** The chunker's gear table is fixed and public, so the
+sequence of chunk sizes of a file is a deterministic function of its content. Someone who can see
+the stored (encrypted) chunk lengths and already has a candidate file can chunk it and compare
+the size sequence to confirm the file is probably in the repository. Chunk *ids* do not have this
+problem (they will be keyed with the `ContentId` key), but lengths do. Mitigation under
+consideration: derive the gear table from a per-repository secret, and/or pad chunks. Until then
+this is a known limitation for users whose threat model includes confirming known files against
+storage-side metadata.
+
+The chunker itself processes untrusted file content only as opaque bytes, allocates at most
+`2 * max_size` bytes however large the input, and is designed not to panic on any input
+(exercised by the property tests).
+
 ## Secrets handling
 
 - The passphrase is never accepted as a command-line argument or as an environment variable

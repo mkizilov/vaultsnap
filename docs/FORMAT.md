@@ -115,11 +115,47 @@ the file so an operator can delete it after confirming no VaultSnap process is r
 - **Chunk id**: keyed BLAKE3 of the plaintext chunk, keyed with a subkey derived from the master
   key. Keying prevents a storage-side party from confirming that a known file is present.
 
-## Chunking and deduplication
+## Chunking and deduplication (chunker built; storing chunks planned)
 
-Files are split with content-defined chunking (FastCDC, target 1 MiB, min 256 KiB, max 4 MiB) so
-inserting bytes into a file only changes nearby chunks. A chunk whose id is already in the index is
-not stored again.
+Files are split with content-defined chunking (FastCDC with normalized chunking) so inserting or
+deleting bytes only changes the chunks near the edit. A chunk whose id is already in the index is
+not stored again. The chunker (`vaultsnap_core::chunking`) is independent of storage; the rules
+below are the format and must never change without a format version bump, because they decide
+every chunk boundary and therefore whether new data deduplicates against old.
+
+**Parameters.** `min`, `avg`, `max` chunk size in bytes with `64 <= min <= avg <= max <= 64 MiB`
+and `avg >= 256`. Defaults: 256 KiB, 1 MiB, 4 MiB. Chunks produced with different parameters do
+not deduplicate against each other (the parameters will be recorded in `config` when backup
+stores chunks).
+
+**Gear table.** `GEAR[i]`, `i = 0..255`, is the `(i+1)`-th output of SplitMix64 started from
+state `0x5661756c74536e61` (ASCII "VaultSna"): for each output, `state += 0x9E3779B97F4A7C15`
+(wrapping), then `z = state; z = (z ^ z >> 30) * 0xBF58476D1CE4E5B9; z = (z ^ z >> 27) *
+0x94D049BB133111EB; output = z ^ z >> 31` (wrapping, 64-bit).
+
+**Cut rule.** Scanning a chunk from its first byte, with `h` a 64-bit register:
+
+1. Bytes with index `< min - 64` are skipped. Every later byte `b` updates
+   `h = (h << 1) + GEAR[b]` (wrapping). Because the register is 64 bits wide, by the time the
+   chunk has `min` bytes `h` depends only on the last 64 bytes.
+2. For each length `n` from `min` upwards: update `h` with byte `n - 1`; if `n == max`, cut at
+   `max`; otherwise cut at `n` if `h & mask == 0`, where `mask` has the top `bits + 2` bits set
+   while `n < avg` and the top `bits - 2` bits set once `n >= avg`. `bits` is `log2(avg)` rounded
+   to the nearest integer (round up when `avg >= 2^floor * sqrt(2)`, computed in integers).
+3. If the data ends first, the rest is the last chunk (it may be shorter than `min`). Empty data
+   has no chunks.
+
+Consequences: a cut depends only on the preceding 64 bytes and the chunk length so far, never on
+read sizes or file offsets; an edit disturbs only the chunks it touches and the cut points
+re-align shortly after it; chunks before an insertion or deletion are always unchanged, and
+appending data changes only the previous last chunk. Runs of one repeated byte produce chunks of
+one constant length, so they deduplicate perfectly.
+
+**Streaming.** The reader is consumed incrementally into a buffer of at most `2 * max` bytes
+(allocated lazily from 64 KiB), so memory does not grow with file size.
+
+**Known limitation.** The gear table is fixed and public, so chunk sizes in a repository reveal
+the cut pattern of the data to someone who can see the storage (see `SECURITY.md`).
 
 ## Pack files
 

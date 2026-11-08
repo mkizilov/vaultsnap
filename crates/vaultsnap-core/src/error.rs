@@ -94,6 +94,9 @@ pub enum Error {
         /// Repository-relative name of the conflicting lock file.
         holder: String,
     },
+    /// Chunk size limits are out of range or inconsistent.
+    #[error("invalid chunker configuration: {0}")]
+    InvalidChunkerConfig(String),
     /// A passphrase was rejected before use.
     #[error("invalid passphrase: {0}")]
     InvalidPassphrase(&'static str),

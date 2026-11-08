@@ -19,8 +19,13 @@ tracing.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[[bench]]
+name = "chunking"
+harness = false
 
 [lints]
 workspace = true
