@@ -12,8 +12,8 @@ require ([`AGENTS.md`](AGENTS.md)). See [Assumptions](#assumptions) before relyi
 
 | # | Step | Tier | Hours |
 |--:|------|------|------:|
-| 1 | [Run everything on Linux and on GitHub](#1-run-everything-on-linux-and-on-github) | Verification | 12 |
-| 2 | [Gate the supply chain](#2-gate-the-supply-chain) | Security | 6 |
+| 1 | [Run everything on Linux and on GitHub](#1-run-everything-on-linux-and-on-github) | Verification | 10 |
+| 2 | [Gate the supply chain and ship the license notices](#2-gate-the-supply-chain-and-ship-the-license-notices) | Security | 8 |
 | 3 | [Automate signal and terminal tests, and install the handler first](#3-automate-signal-and-terminal-tests-and-install-the-handler-first) | Verification | 12 |
 | 4 | [Handle stale locks](#4-handle-stale-locks) | Correctness | 16 |
 | 5 | [Keep secrets out of memory dumps](#5-keep-secrets-out-of-memory-dumps) | Security | 10 |
@@ -37,6 +37,13 @@ require ([`AGENTS.md`](AGENTS.md)). See [Assumptions](#assumptions) before relyi
 By tier: verification, correctness, and security (1–9) 156 hours; original requirements (10–12)
 40; performance and scale (13–15) 48; features and platforms (16–20) 156.
 
+**Changes since this roadmap was first written.** The code now *compiles and lints clean* for
+x86-64 and arm64 Linux and type-checks for 64-bit Windows (`scripts/cross-check.sh`, with zig
+cross-compiling the C dependencies), which removes the compile risk from item 1: it dropped from 12 to
+10 hours, and what remains is *running* things on those platforms. The license review found that
+binary archives must carry the dependencies' license texts, which grew item 2 from 6 to 8 hours. The
+total is unchanged at 400.
+
 **Sequencing.** Nothing has been released, so the repository format can still change without a
 migration path. That window closes at the first tag. Before tagging 0.1.0: do 1–8, 10, and 11, and
 decide explicitly about 16 and 19 (they change the format; if they will happen, doing them before
@@ -48,16 +55,18 @@ reviewer is not given known problems. Items 13–15 are independent of the rest.
 
 ## 1. Run everything on Linux and on GitHub
 
-**Scope.** Build and test on Linux x86-64 and arm64; get the CI workflow, the release workflow, the
-Windows build check, the benchmark smoke job, and the MinIO job to run on GitHub; fix whatever
+**Scope.** Run the test suite on Linux x86-64 and arm64; get the CI workflow, the release workflow,
+the Windows build check, the benchmark smoke job, and the MinIO job to run on GitHub; fix whatever
 fails; remove `continue-on-error` from the jobs that pass. Run a release dry run
 (`workflow_dispatch`) and check the four archives.
 
-**Rationale.** Only macOS on Apple silicon has ever built or run this code. The workflows have been
-parsed as YAML and nothing more. Expect Linux-specific failures: tests that assume macOS behavior
-(case-insensitive paths, `F_FULLFSYNC`, `mkfifo`, extended attributes, tmpfs without hard links),
-and the `cc`/linker environment for `ring`, `aws-lc-sys`, and `zstd`. A distributable CLI that has
-been built on one platform is not yet distributable.
+**Rationale.** Only macOS on Apple silicon has ever *run* this code. For Linux it is known to compile
+and to pass clippy with `-D warnings` for both architectures, tests and benchmarks included, and the
+C dependencies cross-compile; no test has executed there and nothing has been linked. The workflows
+have been parsed as YAML and nothing more. Expect failures that only running shows: tests that assume
+macOS behavior (case-insensitive paths, `F_FULLFSYNC`, `mkfifo`, extended attributes, tmpfs without
+hard links), and the linker environment. A distributable CLI that has been run on one platform is not
+yet distributable.
 
 **Dependencies.** The public repository, and a machine or runner for each target. No Docker needed.
 
@@ -72,14 +81,20 @@ been built on one platform is not yet distributable.
   the product or the test was wrong.
 - The Windows job either passes `cargo check` or the failures are listed in item 20.
 
-**Effort.** 12 hours (the first red run on a new platform is the uncertain part).
+**Effort.** 10 hours (the first red run on a new platform is the uncertain part).
 
-## 2. Gate the supply chain
+## 2. Gate the supply chain and ship the license notices
 
 **Scope.** Run `cargo audit` and `cargo deny` (advisories, licenses, banned and duplicate crates,
 sources) in CI and on a schedule; automate dependency updates; pin third-party GitHub Actions to
 commit hashes; generate a software bill of materials and attach it, with the checksums, to every
-release.
+release; and put the license texts of the bundled dependencies into every binary archive.
+
+**Rationale (licenses).** The source repository vendors nothing and needs no third-party notices. A
+*binary* contains 245 crates under MIT, Apache-2.0, BSD-3-Clause, ISC and similar licenses, which
+require their notices to travel with copies ([`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) lists them).
+`scripts/package.sh` currently packs only VaultSnap's own `LICENSE`, so publishing binaries as they are
+would not comply.
 
 **Rationale.** Running `cargo audit` once during this review found **7 advisories** in the shipped
 dependency tree (`h2`, `rustls`, `rustls-webpki`, including certificate-verification issues). They
@@ -97,8 +112,12 @@ action tags.
 - Dependency-update pull requests are opened automatically and run the full CI.
 - Every `uses:` in the workflows is pinned to a full commit hash with the tag in a comment.
 - Each release carries an SBOM (CycloneDX or SPDX) generated from `Cargo.lock`.
+- Every archive contains a `THIRD_PARTY_LICENSES` file with the full text of each bundled crate's
+  license and any `NOTICE` it ships (generated, for example with `cargo-about`), and
+  `scripts/test-package.sh` fails if it is missing or lacks a crate in `docs/THIRD_PARTY.md`.
+- `scripts/third-party-inventory.sh --check` runs in CI (it already does in the lint job).
 
-**Effort.** 6 hours.
+**Effort.** 8 hours: 6 for the checks and pinning, 2 for generating and testing the license file.
 
 ## 3. Automate signal and terminal tests, and install the handler first
 
@@ -566,10 +585,14 @@ permissions and attributes, symbolic links and junctions, file locking and renam
 paths, case-insensitive collision handling in restore, and a Windows job in CI and the release
 workflow.
 
-**Rationale.** The code has fallbacks for platforms without Unix permissions and links, but they have
-never been built or run, and `docs/INSTALL.md` declares Windows unsupported. A large share of backup
-users run Windows. It is last because it is the largest platform gap that is not a defect: the
-product is honest about it, and the work is mostly in the restore and scanner layers.
+**Rationale.** The code has fallbacks for platforms without Unix permissions and links. They now
+*type-check* for 64-bit Windows (`scripts/cross-check.sh x86_64-pc-windows-gnu`, cross-compiled from
+macOS) after one test that used Unix-only APIs without a `cfg(unix)` guard was fixed, so the product
+code compiles; the same check shows unused-import and dead-code warnings in test helpers that only
+Unix tests use, which must be cleaned before Windows can be lint-gated. Nothing has been linked or
+run on Windows, and `docs/INSTALL.md` declares it unsupported. A large share of backup users run
+Windows. It is last because it is the largest platform gap that is not a defect: the product is
+honest about it, and the remaining work is mostly in the restore and scanner layers.
 
 **Dependencies.** Item 1 (CI that runs), item 8 (handle-based traversal has a Windows counterpart),
 item 16 (alternate data streams and ACLs are the Windows form of extended metadata).

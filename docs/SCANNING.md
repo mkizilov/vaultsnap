@@ -3,9 +3,9 @@
 The scanner (`vaultsnap_core::scan`) walks the files a backup was asked to cover and reports
 them. It reads **no file content during the walk**: it lists directories and inspects each path
 (`lstat`). Content is read afterwards, one file at a time, as a stream (`Scanner::open`), which
-plugs into the chunker. Status: written for Unix (Linux, macOS); platform-gated fallbacks for
-other systems exist but have never been built or run (see *Platforms*). No test has been run at
-all yet (see *Verification status*).
+plugs into the chunker. Status: written for Unix (Linux, macOS), tested on macOS only (see
+*Verification status*); it compiles and lints clean for Linux. Platform-gated fallbacks for other
+systems type-check for Windows but have never been linked or run (see *Platforms*).
 
 ## What is reported
 

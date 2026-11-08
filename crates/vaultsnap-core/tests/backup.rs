@@ -387,6 +387,8 @@ async fn modified_inserted_deleted_and_added_files_are_handled_and_history_is_ke
     assert!(!after.contains_key("dir/old.txt") && after.contains_key("dir/new.txt"));
 }
 
+// The inode change time that reveals this rewrite exists only on Unix.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_rewrite_with_the_same_size_and_a_restored_modification_time_is_still_noticed() {
     use std::os::unix::fs::MetadataExt;

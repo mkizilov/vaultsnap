@@ -59,6 +59,7 @@ jobs:
         run: |
           sh contrib/test-scheduled.sh
           sh scripts/test-package.sh
+          sh scripts/third-party-inventory.sh --check
 
   # Windows is not a supported platform yet (docs/LIMITATIONS.md): the code has fallbacks for
   # systems without Unix permissions and links, but they have never been built. This job says

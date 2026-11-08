@@ -252,8 +252,9 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
 - `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, `CHECK.md`,
   `PRUNE.md`, `STORAGE.md`, `S3.md`, and `CLI.md` (the command reference; every new or changed
   command, option, or output goes there with an example); for people using the tool `INSTALL.md`,
-  `GUIDE.md`, `DISASTER_RECOVERY.md`, `LIMITATIONS.md`; for maintainers `RELIABILITY.md` and
-  `RELEASING.md`. A behavior change updates the guide that describes it in the same commit.
+  `GUIDE.md`, `DISASTER_RECOVERY.md`, `LIMITATIONS.md`; for maintainers `RELIABILITY.md`,
+  `RELEASING.md`, and the generated `THIRD_PARTY.md`; at the root `ROADMAP.md`. A behavior change
+  updates the guide that describes it in the same commit.
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors
 are typed in core and converted at the CLI boundary; user-supplied identifiers are validated
@@ -269,8 +270,17 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 sh contrib/test-scheduled.sh && sh scripts/test-package.sh
+sh scripts/third-party-inventory.sh --check   # docs/THIRD_PARTY.md matches Cargo.lock
 cargo audit            # cargo install cargo-audit --locked (into the project-local CARGO_HOME)
+sh scripts/cross-check.sh   # clippy for x86-64 and arm64 Linux, a type-check for Windows (compile only)
 ```
+
+`scripts/cross-check.sh` installs `ziglang` (a C cross compiler) into `.venv` and the Rust targets
+into the project-local `RUSTUP_HOME`; it runs nothing on the other platforms.
+
+The project is MIT-licensed (`LICENSE`). A dependency change regenerates `docs/THIRD_PARTY.md`
+(`sh scripts/third-party-inventory.sh`), and a crate with a copyleft-only or missing license is
+not added.
 
 At most two build/test workers (`CARGO_BUILD_JOBS=2`, `RUST_TEST_THREADS=2`). Test servers bind to
 loopback ports 21100-21199 and are stopped, with their data and credentials deleted, before
@@ -296,7 +306,8 @@ chmod +x .agent-local/tmp/rustup-init
 ```
 
 On macOS the sandbox does not let `xcrun` write its cache under `/var/folders`, so clang finds no
-SDK and C dependencies (`ring`, `zstd`) fail with `'TargetConditionals.h' file not found`. Name the
+SDK and C dependencies fail with `'TargetConditionals.h' file not found` (seen with `ring`, which
+the build no longer uses; `zstd-sys` and `aws-lc-sys` are compiled the same way). Name the
 SDK and the compiler directly (read-only paths, nothing outside the repository is written):
 
 ```sh

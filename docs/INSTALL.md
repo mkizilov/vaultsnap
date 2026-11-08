@@ -1,7 +1,8 @@
 # Installing VaultSnap
 
 > **Status.** No release has been published. The code builds and its tests pass on macOS (Apple
-> silicon) with Rust 1.94.1; it has not been built on Linux or Windows ([`RELIABILITY.md`](RELIABILITY.md)
+> silicon) with Rust 1.94.1; for Linux it compiles and lints clean but no test has run there, and nothing
+> has run on Windows ([`RELIABILITY.md`](RELIABILITY.md)
 > says exactly what has and has not been verified). Run `cargo test --workspace` on your machine
 > before trusting it with data you care about, and keep other backups until you have restored from
 > it yourself ([`DISASTER_RECOVERY.md`](DISASTER_RECOVERY.md)).
@@ -12,8 +13,8 @@
 |----------|--------|
 | macOS, Apple silicon | Built, tested, benchmarked, and packaged. |
 | macOS, Intel | Intended; the release workflow cross-builds it. Not built or run. |
-| Linux, x86-64 and arm64 | Intended; CI and the release workflow are written for it. **Not built or run yet.** |
-| Windows | **Not supported.** The code has fallbacks for systems without Unix permissions and links, but they have never been built or run; CI has a build check that may fail. |
+| Linux, x86-64 and arm64 | Intended; CI and the release workflow are written for it. Compiles and passes clippy (cross-compiled from macOS); **no test has run there.** |
+| Windows | **Not supported.** The code has fallbacks for systems without Unix permissions and links; it type-checks for 64-bit Windows, but nothing has been linked or run; CI has a build check that may fail. |
 
 VaultSnap does not need root. Run it as the user who owns the files to back up, or as root to back
 up other users' files (`restore` does not restore owners; see [`LIMITATIONS.md`](LIMITATIONS.md)).
@@ -51,8 +52,8 @@ You need:
 
 - the Rust toolchain pinned in `rust-toolchain.toml` (1.94.1; `rustup` installs it automatically
   when you build inside the repository), and
-- a C compiler, because `zstd` and the TLS libraries of the S3 client (`ring`, `aws-lc-sys`) compile
-  C code. On macOS that is the Command Line Tools (`xcode-select --install`); no CMake was needed
+- a C compiler, because `zstd` and the TLS library of the S3 client (`aws-lc-sys`) compile C code.
+  On macOS that is the Command Line Tools (`xcode-select --install`); no CMake was needed
   there. `AGENTS.md` explains the two variables a sandbox that blocks `xcrun`'s cache needs.
 
 ```sh

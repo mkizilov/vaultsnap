@@ -5,8 +5,10 @@ A reliable encrypted incremental backup utility written in Rust.
 ## Status
 
 **Pre-release (0.1.0, not published).** All nine commands are implemented. The whole automated
-suite passes on **one** platform, macOS on Apple silicon with Rust 1.94.1; nothing has run on Linux
-or Windows. Read [`docs/RELIABILITY.md`](docs/RELIABILITY.md) for the evidence before relying on it
+suite passes on **one** platform, macOS on Apple silicon with Rust 1.94.1. For Linux (x86-64 and
+arm64) the code compiles and passes clippy with `-D warnings`, tests and benchmarks included, and for
+64-bit Windows it type-checks, all cross-compiled from macOS (`scripts/cross-check.sh`); **no test has
+run on Linux or Windows.** Read [`docs/RELIABILITY.md`](docs/RELIABILITY.md) for the evidence before relying on it
 for data you cannot lose, and keep a second copy of anything important until you have restored from
 VaultSnap yourself ([`docs/DISASTER_RECOVERY.md`](docs/DISASTER_RECOVERY.md)). What to do next, in
 priority order, is in [`ROADMAP.md`](ROADMAP.md).
@@ -27,9 +29,10 @@ against the real binary (said where). **Partial**: it works, with a documented l
 | `prune` | Retention rules, mark and sweep, dry run, confirmation | Unit and integration tests; every kept snapshot restores; killed at every storage call | **Unverified:** the interactive question; signals mid-flight. **Partial:** no `forget` of one named snapshot, no grouping |
 | Local directory backend | Reference backend | The 22-case storage contract and all tests, on APFS | **Unverified:** Linux file systems, network shares (it needs hard links) |
 | S3-compatible backend | AWS SDK adapter, connect-time probe of conditional writes | The contract on an in-memory fake and on a real MinIO (7 of 7); TLS verification by hand against a generated CA | **Unverified:** AWS S3 itself, public-CA certificates, profiles, SSO, roles. **Partial:** one request per chunk (slow for large backups); a region warning unless a region is set |
-| Version, packaging | `version`, `--version`, `scripts/package.sh`, release workflow | The package builds, its checksum verifies, the packed binary runs | **Unverified:** the release and CI workflows on GitHub; Linux and Intel archives; the binaries are not signed |
+| Version, packaging | `version`, `--version`, `scripts/package.sh`, release workflow | The package builds, its checksum verifies, the packed binary runs | **Unverified:** the release and CI workflows on GitHub; Linux and Intel archives; the binaries are not signed. **Partial:** archives carry only VaultSnap's own `LICENSE`, not the dependencies' license texts (`ROADMAP.md`, item 2) |
 | Scheduling | `contrib/` wrapper, systemd, launchd, cron files | The wrapper against stand-ins and the real binary | **Unverified:** the units inside a service manager (only syntax is checked) |
-| Dependencies | Pinned in `Cargo.lock` | `cargo audit`: no advisories in 288 crates | Run by hand; not yet a CI gate |
+| Dependencies and license | Pinned in `Cargo.lock`; MIT `LICENSE`; `docs/THIRD_PARTY.md` generated from the lock file | `cargo audit`: no advisories in 288 crates; all 245 crates in the binary are permissively licensed; the inventory is checked against the lock file by a script | The audit is run by hand, not a CI gate |
+| Other platforms | | Linux x86-64 and arm64: compile and lint. Windows: type-check | **Unverified:** running anything on them; Windows is unsupported |
 
 ### Documentation
 
@@ -449,8 +452,9 @@ What the tests do not cover, and what is slow or missing by design. [`docs/RELIA
 has the evidence behind what *is* verified; [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) is the list for
 users; [`ROADMAP.md`](ROADMAP.md) says which gaps to close first and what each costs.
 
-- **Only macOS (Apple silicon) has been built and tested.** Linux and Windows are untested here; the
-  GitHub workflows (CI, release) are written and syntax-checked but have never run on GitHub.
+- **Only macOS (Apple silicon) has *run* the code.** Linux (x86-64, arm64) compiles and lints clean and
+  Windows type-checks, cross-compiled from macOS, but no test has executed there; the GitHub
+  workflows (CI, release) are written and syntax-checked but have never run on GitHub.
   Windows is not supported.
 - **S3** is verified against a MinIO server (the April 2025 release, built from source, on loopback)
   through the real AWS SDK adapter, including the whole storage contract, over plain HTTP in the
@@ -506,4 +510,9 @@ users; [`ROADMAP.md`](ROADMAP.md) says which gaps to close first and what each c
 
 ## License
 
-MIT.
+VaultSnap is released under the MIT license: Copyright (c) 2026 Mykyta Kizilov. The full text is in
+[`LICENSE`](LICENSE), and both crates declare `license = "MIT"`. The crates it depends on keep their
+own licenses: all of them are permissive (MIT, Apache-2.0, BSD, ISC, and similar), none requires
+copyleft terms, and the list is in [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md). That page also says
+what a *binary* release must add (the third-party license texts); a source checkout owes nothing,
+because no third-party code is vendored.

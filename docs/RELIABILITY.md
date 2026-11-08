@@ -11,9 +11,11 @@ observed on the machine described below, and anything that was not run is listed
 
 **Environment.** macOS 27.2 (build 26B123), Apple silicon (arm64, 10 cores), Rust 1.94.1
 (`rust-toolchain.toml`), installed inside the repository (`AGENTS.md`). At most two build jobs and two
-test threads. The code was written without a Rust toolchain or network access, so this was the first
-time any of it was compiled, and it was done with network access to the Rust, Go, and crates.io
-hosts.
+test threads. The code was written without a Rust toolchain or network access, so it was first
+compiled during the final reviews. Everything needed was then installed over the network, inside the
+repository and pinned: the Rust toolchain (1.94.1), the crates, `cargo-audit`, Go and the MinIO
+source (for the S3 tests), and `ziglang` (a C cross compiler, for the Linux and Windows compile
+checks).
 
 | Check | Command | Result |
 |-------|---------|--------|
@@ -28,6 +30,9 @@ hosts.
 | Dependency audit | `cargo audit` (RustSec database of 1422 advisories) | **no advisories in 288 crates**; there were **7 before** the fix in section 2. Run by hand, not yet a CI gate |
 | Signals through the binary | by hand, release binary | SIGINT and SIGTERM during `backup` and `restore` behave as documented (section 5). Manual; not in the test suite |
 | TLS to the S3 backend | by hand, MinIO with a generated CA | certificate and hostname verification work as documented (section 5). Manual; not in the test suite |
+| Linux compile and lint | `scripts/cross-check.sh`: `cargo clippy --workspace --all-targets --target T -- -D warnings` for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` | both pass, tests and benchmarks included, with the C code of `zstd-sys` and `aws-lc-sys` cross-compiled by zig. **Compiled only: nothing was run on Linux** |
+| Windows compile | `scripts/cross-check.sh x86_64-pc-windows-gnu`: `cargo check --workspace --all-targets` | passes after one test was guarded with `#[cfg(unix)]` (section 2); warnings only in test code. **Compiled only; Windows remains unsupported** |
+| License and repository review | `LICENSE`; scans of HEAD and every revision; `scripts/third-party-inventory.sh --check` | section 7 |
 | Scheduler script | `sh contrib/test-scheduled.sh` | 15 checks pass |
 | Packaging script | `sh scripts/test-package.sh` | 15 checks pass (against stand-ins for cargo) |
 | Release package | `scripts/package.sh` | builds; the archive's checksum verifies; the packed binary runs and reports its version |
@@ -59,6 +64,9 @@ Everything was written without a compiler, so this is the honest account of what
 | dependency audit | **7 advisories** in three crates: `h2` (unbounded empty HTTP/2 DATA frames), `rustls` (secrets exposed by `Debug` output of session values; a key-exchange downgrade by an unauthenticated ServerHello), and `rustls-webpki` (a reachable panic parsing certificate revocation lists, and three certificate-validation flaws: URI and wildcard name constraints, and distrusted intermediates) | a default feature of `aws-sdk-s3` (`rustls`) links the legacy hyper 0.14 / rustls 0.21 client; the SDK's own selection code prefers the current client (`default-https-client`), so by reading the source the vulnerable one is linked but not used by default | product dependencies (`Cargo.toml`): the feature is off; 11 crates left `Cargo.lock`; the audit is clean; the binary is 1.9 MiB smaller; the MinIO suite and a TLS run were repeated |
 | helper script | `scripts/minio-local.sh stop` printed success and forgot the pid when its shell was not allowed to signal the server | liveness was judged with `kill -0`, which fails for a process that exists but may not be signalled | the script (written in this project): now judged by the server's health endpoint, the outcome is verified, and it fails loudly; tested with an unsignalable pid and with a server it did not start |
 | first signal experiment | a SIGTERM "failure" (the process died from the signal) | my experiment counted objects left by the previous run, so it signalled before the handler existed | the experiment, not the product; redone with a trigger relative to a baseline. It did reveal the window before the handler is installed (roadmap item 3) |
+| Windows compile | 3 errors in `tests/backup.rs` | one test used `std::os::unix` and `MetadataExt::mtime` with no `cfg(unix)` guard | test; guarded with `#[cfg(unix)]` (it still runs, and passes, on macOS) |
+| license inventory | the first copyleft detector in `scripts/third-party-inventory.sh` flagged `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`), which has permissive alternatives | the detector could not tell "copyleft is the only option" from "copyleft is one choice" | the script (written in this project); it now classifies both, and was exercised on synthetic rows |
+| stale docs | three documents said `ring` compiles C code | `ring` has not been in the build since the SDK feature change (it is in `Cargo.lock` only for features that are off); found while checking the license inventory | documentation, corrected |
 | S3 warning | `failed to load region from IMDS` on every command when no region is configured | the default region chain asks the instance-metadata service first | product behavior; the documentation now says to set a region (any of three ways silences it); the fix is roadmap item 12 |
 
 The ten test failures were each analyzed before anything was changed, and none showed a product
@@ -341,11 +349,62 @@ Almost all of the 73 MiB floor is the Argon2id working set (64 MiB) that every u
 not grow with the data (256 MiB peaked at 120 MiB), and 10,000 files and 10,000 objects added 3 to
 20 MiB. `--jobs 1`: 80 MiB; `--jobs 4`: 101 MiB.
 
+## 7. Review before publication
+
+Done for the public release of the source repository. Nothing here involved a person outside the
+project.
+
+**License.** `LICENSE` is the MIT license with the notice `Copyright (c) 2026 Mykyta Kizilov`; it
+equals the SPDX `MIT` template (fetched from `spdx/license-list-data` and compared, ignoring white
+space) with that holder filled in. A valid MIT `LICENSE` already existed, added in the previous
+step of this project with the generic holder "VaultSnap contributors", which was a placeholder
+chosen then, not an attribution given by anyone. The instruction for this step said both to use
+Mykyta Kizilov and to preserve the attribution of an existing valid MIT license; the holder was
+changed, on the reading that the second clause protects somebody else's notice, and the earlier
+text stays in the history (`git show dd4400f:LICENSE`). If that reading is wrong, it is a one-line
+revert. Both crates declare `license = "MIT"` through the workspace, and no other file states a
+different license or holder.
+
+**Licenses of the dependencies.** The normal dependencies of the command-line program, for every
+platform, are 245 crates ([`THIRD_PARTY.md`](THIRD_PARTY.md), generated and checked against
+`Cargo.lock` by `scripts/third-party-inventory.sh --check`). Every one declares a license and every
+one is permissive (MIT, Apache-2.0, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0, and similar). One,
+`r-efi` (UEFI targets only), offers LGPL as a third alternative next to MIT and Apache-2.0, and the
+permissive terms are the ones used. No third-party code is vendored in the repository, so the source
+needs no notices. **A binary release does:** the archives carry only VaultSnap's own `LICENSE`, and
+the dependencies' license texts still have to be added (roadmap item 2).
+
+**Secrets, personal data, and junk.** HEAD (164 tracked files) and all 19 revisions were searched for
+private keys and certificates, AWS keys, tokens, e-mail addresses, home-directory paths, and
+addresses other than loopback and documentation ranges; the tracked paths of every revision were
+checked for build output, caches, logs, keys, and local state. Findings:
+
+- **No real secret.** The matches are deliberate fake credentials in the tests that prove
+  credentials are refused and redacted: AWS's documented example key `AKIAIOSFODNN7EXAMPLE`, and
+  made-up passwords in endpoint URLs (`user:hunter2@…`). A secret scanner may flag them; they are
+  not valid for anything. The test passphrases are public constants.
+- **Nothing that should not be tracked was ever tracked:** no `.env`, key, log, database, cache,
+  `target/`, virtual environment, or editor state; no file was ever deleted from history; the largest
+  object ever committed is 75 KB. The ignored directories (`.agent-local/`, `.venv/`, `target/`,
+  `dist/`, and the development tools' state directories) are not tracked.
+- **One item in history, not in HEAD:** early revisions of `AGENTS.md` contain the absolute path of
+  the author's working directory, which includes an operating-system account name. It is not a
+  credential. History was deliberately not rewritten; whether it matters for publication is a
+  decision for the owner.
+
+**Checks that were run again on the final tree** for this review: formatting, clippy, rustdoc, the
+whole test suite (section 1), the MinIO tests, the audit, both shell tests, the release package, and
+both benchmarks, each with a hard time limit so that a hang would have been diagnosed and not waited
+for. None hung.
+
 ## What is not verified
 
-- **Linux and Windows.** Nothing was built or run on them. The GitHub workflows (CI on Linux x86-64 and
-  arm64 and macOS, a Windows build check, the release workflow for four targets) are written and their
-  YAML parses, but none has run on GitHub. Windows is not supported.
+- **Running on Linux and Windows.** The code **compiles** for x86-64 and arm64 Linux (clippy with
+  `-D warnings`, tests and benchmarks included) and type-checks for 64-bit Windows, cross-compiled
+  from macOS (`scripts/cross-check.sh`); no test has run on either, and nothing was linked. The GitHub
+  workflows (CI on Linux x86-64 and arm64 and macOS, a Windows build check, the release workflow for
+  four targets) are written and their YAML parses, but none has run on GitHub. Windows is not
+  supported.
 - **AWS S3 itself, and everything about the SDK that a local server does not exercise:** a
   certificate from a public CA, named profiles, SSO, role credentials, request signing for a real
   region, throttling. The tested server is a MinIO release built from source, on loopback, over plain

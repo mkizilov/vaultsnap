@@ -8,7 +8,7 @@ is a decision or a gap; none is hidden anywhere else. The security-relevant ones
 
 - **Built and tested on one platform:** macOS on Apple silicon, Rust 1.94.1. The whole test suite
   passes there (1027 tests), as do the S3 tests against a real MinIO server, formatting, lints, and
-  documentation checks. **Nothing has been built or run on Linux or Windows**, and the GitHub
+  documentation checks. **No test has run on Linux or Windows** (the code compiles and lints clean for x86-64 and arm64 Linux and type-checks for 64-bit Windows, cross-compiled from macOS), and the GitHub
   workflows (CI, release) have not run on GitHub. [`RELIABILITY.md`](RELIABILITY.md) lists exactly what
   was run and what was not.
 - **Not tested against AWS S3 itself**, nor a certificate from a public CA, named profiles, SSO, or
@@ -29,7 +29,7 @@ is a decision or a gap; none is hidden anywhere else. The security-relevant ones
 ## Platforms and file systems
 
 - **Intended for Linux and macOS**; only macOS has been tested. Windows is not supported (there are
-  fallbacks for systems without Unix permissions and links, but they have never been built or run).
+  fallbacks for systems without Unix permissions and links; they type-check but have never been linked or run).
   Path names that are not valid UTF-8 are preserved on Unix and shown escaped.
 - **The repository's file system must support hard links** (ext4, XFS, btrfs, APFS, NTFS, ZFS do; FAT
   and exFAT do not), because the local backend publishes new objects with a no-overwrite hard link.
