@@ -1,9 +1,10 @@
 # VaultSnap repository format (version 1, planned)
 
-Status: **specification only**. No storage behavior is implemented yet; every repository
-command currently returns "not implemented". Code that lands later must follow this document, and
-changes to the format must update it first and bump `FORMAT_VERSION`
-(`crates/vaultsnap-core/src/repository.rs`).
+Status: **partly implemented**. `init`, the `config` file, the local store, and locking exist and
+are described as built. Everything about keys, encryption, chunking, packs, indexes, and snapshot
+objects is still *planned*; `backup`, `snapshots`, `restore`, `check`, and `prune` return "not
+implemented". Code that lands later must follow this document, and changes to the format must
+update it first and bump `FORMAT_VERSION` (`crates/vaultsnap-core/src/repository.rs`).
 
 Cryptographic primitives named here are the *planned* choices; the final selection is recorded in
 this file before the first byte of ciphertext is written.
@@ -21,16 +22,78 @@ this file before the first byte of ciphertext is written.
 
 ```
 <repo>/
-  config            plaintext header: format version, repository id, KDF parameters
-  keys/<key-id>     key slots: the master key wrapped by a passphrase-derived key
-  snapshots/<id>    one encrypted snapshot object per snapshot
-  index/<id>        encrypted index objects mapping chunk ids to pack locations
-  data/<xx>/<id>    encrypted pack files; <xx> is the first two hex characters of <id>
-  locks/<id>        advisory lock files
+  config            plaintext header: format version, repository id (built)
+  data/             object storage; encrypted pack files <xx>/<id>, <xx> = first two hex chars
+  snapshots/        snapshot metadata; one encrypted snapshot object per snapshot
+  locks/<id>.lock   advisory lock files (built)
+  keys/<key-id>     key slots: the master key wrapped by a passphrase-derived key (planned)
+  index/<id>        encrypted index objects mapping chunk ids to pack locations (planned)
 ```
 
-These names are the constants on `RepositoryLayout`. All object names are lowercase hexadecimal
-(`[0-9a-f]`), 64 characters long, and are validated before being turned into paths.
+These names are the constants on `RepositoryLayout`. `init` creates `config`, `data/`,
+`snapshots/`, and `locks/`. `keys/` and `index/` are created by the stages that introduce
+encryption and the index. Object names are lowercase hexadecimal (`[0-9a-f]`), 64 characters long,
+and are validated before being turned into paths. The store (below) accepts only `/`-separated
+segments of `[A-Za-z0-9._-]` that do not start with `.`.
+
+## The `config` file (built)
+
+Plain text, written once by `init`, never rewritten in place:
+
+```
+vaultsnap-repository
+format_version=1
+repository_id=<32 lowercase hex characters, 128 random bits from the OS>
+created_at_unix=<seconds since the Unix epoch>
+```
+
+The parser is strict: the first line must be the header, every other line is `key=value`, no
+duplicate or unknown keys, at most 4096 bytes. `format_version` is checked *before* any other
+field, so a repository written by a newer release is reported as an unsupported version rather
+than as malformed. The repository id is unique per repository and is the only identity the
+config carries; it contains no secret.
+
+## Initialization (built)
+
+`init` on a path:
+
+1. Rejects an empty path, and a path that exists but is not a directory.
+2. If the path is a directory containing a `config`: parses it, then fails with *already
+   initialized* (or *unsupported version* / *invalid config*). Nothing is written.
+3. If it is a non-empty directory with anything other than `data/`, `snapshots/`, `locks/`, or
+   `.tmp-*` files, fails without writing: a VaultSnap repository is never mixed into other data.
+4. Otherwise creates the root (and missing parents) if needed, then `data/`, `snapshots/`,
+   `locks/` with mode `0700`, and finally writes `config` atomically, never overwriting.
+
+`config` is written last and is what makes a directory a repository, so an interrupted `init`
+leaves only empty directories and can be re-run (step 3 accepts them). Concurrent `init` calls on
+the same path produce exactly one repository; the others fail with *already initialized*.
+
+## Local store (built)
+
+All repository file access goes through `LocalStore`:
+
+- **Names** are validated (see above); absolute paths, `..`, hidden names, and empty segments are
+  rejected before touching the filesystem.
+- **Symlinks** found at any component below the repository root are refused, never followed. (The
+  root itself may be a symlink chosen by the user.)
+- **Atomic commit**: a write is staged in `.tmp-<random>` in the destination directory, flushed
+  with `fsync`, and published in one step: `write_new` hard-links it to the final name (fails if the
+  name exists, so nothing is ever overwritten); `write_replace` renames it over the old file. The
+  directory is then `fsync`ed. Readers see the old state or the complete new file.
+- **Permissions**: directories `0700`, files `0600` (subject to umask, which can only tighten them).
+- `read` takes a maximum size and refuses larger files.
+
+The store needs a filesystem that supports hard links (any local Unix filesystem does).
+
+## Locks (built)
+
+`locks/<32 hex>.lock` contains `kind=shared|exclusive`, `pid=`, and `created_at_unix=`. A process
+creates its own lock file atomically, then scans the other locks; if any conflicts (exclusive vs
+anything, or a file it cannot recognize) it removes its own file and fails naming the holder. Two
+racing exclusive requests may both fail but never both succeed. The lock is removed when the guard
+is dropped. Stale locks left by a crashed process are never removed automatically; the error names
+the file so an operator can delete it after confirming no VaultSnap process is running.
 
 ## Identifiers
 
@@ -82,8 +145,8 @@ later removes. Existing objects are never modified in place.
 ## Locking
 
 `backup`, `restore`, `snapshots`, and `check` take shared locks; `prune` takes an exclusive lock.
-Locks are advisory and carry a timestamp so stale locks can be detected and reported. Locking
-protects against concurrent VaultSnap runs, not against a hostile writer (see `SECURITY.md`).
+Locks are advisory and carry a timestamp for diagnostics. Locking protects against concurrent
+VaultSnap runs, not against a hostile writer (see `SECURITY.md`).
 
 ## Command semantics
 
@@ -105,4 +168,5 @@ rewrite or delete packs with unreachable chunks.
 ## Versioning
 
 `config` holds `format_version`. A reader refuses repositories whose version it does not know and
-never writes to a repository with a newer version.
+never writes to a repository with a newer version. Opening a repository (`load_config`, `lock`)
+also verifies that `data/`, `snapshots/`, and `locks/` exist.

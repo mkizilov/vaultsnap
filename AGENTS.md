@@ -43,8 +43,15 @@ Extend this file with the project's language-specific architecture and verificat
 Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-toolchain.toml`.
 
 - `crates/vaultsnap-core`: library. `error` (thiserror `Error`), `snapshot` (`SnapshotId`),
-  `retention` (`RetentionPolicy`), `repository` (`Repository`, `RepositoryLayout`), `ops/*` (one
-  file per operation, each an `async` method on `Repository`). No CLI or terminal concerns here.
+  `retention` (`RetentionPolicy`), `repository` (`Repository`, `RepositoryLayout`, open/verify),
+  `config` (strict `config` file parser/writer), `store` (`LocalStore`: validated names, symlink
+  refusal, atomic `write_new`/`write_replace`, private permissions), `lock` (`RepositoryLock`),
+  `ops/*` (one file per operation, each an `async` method on `Repository`), `blocking` (runs the
+  synchronous store on Tokio's blocking pool), `util` (randomness, time). No CLI or terminal
+  concerns here. All repository file access goes through `LocalStore`; do not use `std::fs`
+  directly on repository paths elsewhere.
+- Implemented so far: `init`, config, store, locks. `backup`, `snapshots`, `restore`, `check`,
+  `prune` are stubs. No encryption yet.
 - `crates/vaultsnap-cli`: binary `vaultsnap`. `cli` (clap definitions), `commands` (argument to
   core mapping and printing), `logging` (tracing setup, stderr only).
 - `docs/`: `FORMAT.md` and `SECURITY.md`.

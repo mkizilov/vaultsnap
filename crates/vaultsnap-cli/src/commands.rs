@@ -22,7 +22,14 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
     let repo = Repository::at(root);
 
     match cli.command {
-        Command::Init => repo.init().await?,
+        Command::Init => {
+            let config = repo.init().await?;
+            println!(
+                "created VaultSnap repository {} at {}",
+                config.repository_id,
+                repo.layout().root().display()
+            );
+        }
         Command::Backup(args) => {
             let options = BackupOptions {
                 sources: args.paths,

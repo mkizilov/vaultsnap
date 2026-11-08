@@ -8,10 +8,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+getrandom.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]

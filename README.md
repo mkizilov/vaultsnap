@@ -4,10 +4,28 @@ A reliable encrypted incremental backup utility written in Rust.
 
 ## Status
 
-**Early scaffold.** The workspace, command-line interface, error model, tests, and CI exist.
-Repository storage, encryption, and backup logic are **not implemented**: `init`, `backup`,
-`snapshots`, `restore`, `check`, and `prune` parse their arguments, validate them, and then fail
-with `... is not implemented yet`. Nothing is written to disk by any command.
+**Early development.**
+
+| Command     | State                                                                  |
+|-------------|------------------------------------------------------------------------|
+| `init`      | Implemented: creates a versioned repository (see below)                |
+| `backup`    | Not implemented; validates arguments, then fails                        |
+| `snapshots` | Not implemented                                                        |
+| `restore`   | Not implemented                                                        |
+| `check`     | Not implemented                                                        |
+| `prune`     | Not implemented; validates the retention policy first                  |
+
+There is **no encryption yet**. `init` writes only plaintext, non-secret metadata. Do not store
+data you care about; backups cannot be made at all at this stage.
+
+### `vaultsnap init`
+
+Creates, at `--repo`: a `config` file (format version, random repository id, creation time) and
+the `data/`, `snapshots/`, and `locks/` directories, with owner-only permissions (`0700`/`0600`).
+The `config` file is written atomically and last. `init` never overwrites anything: it fails if a
+repository already exists there (and reports an unsupported format version separately), if the
+path is a file, or if the directory holds unrelated files. Re-running it after an interrupted
+`init` is safe.
 
 The planned design is specified first, before any storage code:
 
@@ -19,11 +37,12 @@ The planned design is specified first, before any storage code:
 
 | Crate             | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `vaultsnap-core`  | Library: repository handle, layout, snapshot ids, retention, operations |
+| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, snapshot ids, retention, operations |
 | `vaultsnap-cli`   | Binary `vaultsnap`: `clap` argument parsing and output          |
 
 Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiserror` (errors),
-`tokio` (async runtime; repository operations are `async`).
+`tokio` (async runtime; repository operations are `async` and run blocking file I/O on Tokio's
+blocking pool), `getrandom` (repository ids and temporary file names from OS randomness).
 
 ## Usage
 
@@ -63,8 +82,11 @@ CI (`.github/workflows/ci.yml`) runs the four commands above on Linux and macOS.
 
 - `Cargo.lock` has not been generated or committed yet; it must be produced by the first build
   with network access and committed. Until then CI does not use `--locked`.
-- Formatting, linting, and tests of this scaffold were written without a Rust toolchain being
-  available in the authoring environment; the first CI run is the first verification.
+- Formatting, linting, and tests were written without a Rust toolchain being available in the
+  authoring environment (no network, no preinstalled `cargo`); nothing has been compiled or run
+  yet, and the first CI run is the first verification.
+- The local store publishes new files with hard links, so the repository must live on a
+  filesystem that supports them.
 
 ## License
 

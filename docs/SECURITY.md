@@ -1,8 +1,10 @@
 # VaultSnap security boundaries (planned)
 
-Status: **specification only**. No encryption or storage is implemented yet. This document defines
-what the implementation must guarantee, and what it deliberately does not. See `FORMAT.md` for the
-data layout.
+Status: **partly implemented**. Repository creation, the local store (permissions, symlink
+refusal, atomic writes), and locking exist. Encryption, key handling, and restore are not
+implemented yet, so nothing stored today is confidential: the `config` file is plaintext by design
+and holds no secret. This document defines what the implementation must guarantee, and what it
+deliberately does not. See `FORMAT.md` for the data layout.
 
 ## Protected assets
 
@@ -63,6 +65,16 @@ as untrusted for path purposes:
   (`SnapshotId`). This prevents path traversal through user input.
 - Lengths and counts read from the repository are bounded before allocating.
 - The repository format version is checked before any other parsing of repository contents.
+
+## Filesystem handling (built)
+
+- Repository directories are created `0700` and files `0600`.
+- Files are never overwritten by creation: `init` and `write_new` fail rather than replace.
+- `init` refuses to place a repository inside a non-empty directory it does not recognize.
+- Names passed to the store are validated; symlinks below the repository root are refused.
+  The check is made before the operation, so a local attacker who can race symlink swaps inside
+  the repository directory is outside the threat model (they already have write access to it).
+- Temporary files are created exclusively (`create_new`) with random names.
 
 ## Concurrency
 

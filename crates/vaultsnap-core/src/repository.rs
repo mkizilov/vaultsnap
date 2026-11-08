@@ -1,11 +1,25 @@
 //! Repository handle and on-disk layout (specified in `docs/FORMAT.md`).
 
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use crate::blocking::blocking;
+use crate::config::RepositoryConfig;
+use crate::error::{Error, Result};
+use crate::lock::{LockKind, RepositoryLock};
 use crate::snapshot::SnapshotId;
+use crate::store::LocalStore;
 
 /// Repository format version written to the `config` file.
 pub const FORMAT_VERSION: u32 = 1;
+
+/// Directories `init` creates and every later operation requires.
+pub(crate) const REQUIRED_DIRS: [&str; 3] = [
+    RepositoryLayout::DATA_DIR,
+    RepositoryLayout::SNAPSHOTS_DIR,
+    RepositoryLayout::LOCKS_DIR,
+];
 
 /// Paths of the well-known entries inside a repository root. Pure path arithmetic, no I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,13 +30,13 @@ pub struct RepositoryLayout {
 impl RepositoryLayout {
     /// Repository configuration file name.
     pub const CONFIG_FILE: &'static str = "config";
-    /// Directory holding key slots.
+    /// Directory holding key slots. Created by the stage that introduces encryption.
     pub const KEYS_DIR: &'static str = "keys";
-    /// Directory holding snapshot objects.
+    /// Directory holding snapshot metadata objects.
     pub const SNAPSHOTS_DIR: &'static str = "snapshots";
-    /// Directory holding index objects.
+    /// Directory holding index objects. Created by the stage that introduces the index.
     pub const INDEX_DIR: &'static str = "index";
-    /// Directory holding pack files.
+    /// Directory holding object (pack) storage.
     pub const DATA_DIR: &'static str = "data";
     /// Directory holding advisory lock files.
     pub const LOCKS_DIR: &'static str = "locks";
@@ -91,6 +105,55 @@ impl Repository {
     pub fn layout(&self) -> &RepositoryLayout {
         &self.layout
     }
+
+    /// The local store backing this repository.
+    pub fn store(&self) -> LocalStore {
+        LocalStore::new(self.layout.root())
+    }
+
+    /// Opens the repository: checks that it exists, that its format version is supported, and
+    /// that its required directories are present. Returns the parsed configuration.
+    pub async fn load_config(&self) -> Result<RepositoryConfig> {
+        let store = self.store();
+        blocking(move || open_repository(&store)).await
+    }
+
+    /// Opens the repository (see [`Repository::load_config`]) and takes a lock on it. The lock
+    /// is released when the returned guard is dropped.
+    pub async fn lock(&self, kind: LockKind) -> Result<RepositoryLock> {
+        let store = self.store();
+        blocking(move || {
+            open_repository(&store)?;
+            RepositoryLock::acquire(&store, kind)
+        })
+        .await
+    }
+}
+
+pub(crate) fn open_repository(store: &LocalStore) -> Result<RepositoryConfig> {
+    let root = store.root();
+    let not_a_repository = || Error::NotARepository {
+        path: root.to_path_buf(),
+    };
+    match fs::metadata(root) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Err(not_a_repository()),
+        Err(err) if err.kind() == ErrorKind::NotFound => return Err(not_a_repository()),
+        Err(err) => return Err(Error::io("inspect", root, err)),
+    }
+    let config = RepositoryConfig::load(store).map_err(|err| {
+        if err.is_not_found() {
+            not_a_repository()
+        } else {
+            err
+        }
+    })?;
+    for dir in REQUIRED_DIRS {
+        if !store.resolve(dir)?.is_dir() {
+            return Err(Error::Corrupt(format!("missing directory `{dir}`")));
+        }
+    }
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -126,5 +189,75 @@ mod tests {
     #[test]
     fn format_version_is_one() {
         assert_eq!(FORMAT_VERSION, 1);
+    }
+
+    #[test]
+    fn required_dirs_are_data_snapshots_and_locks() {
+        assert_eq!(REQUIRED_DIRS, ["data", "snapshots", "locks"]);
+    }
+
+    #[tokio::test]
+    async fn load_config_on_a_missing_path_is_not_a_repository() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let repo = Repository::at(dir.path().join("nope"));
+        let err = repo.load_config().await.expect_err("must fail");
+        assert!(matches!(err, Error::NotARepository { .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn load_config_on_an_unrelated_directory_is_not_a_repository() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let repo = Repository::at(dir.path());
+        let err = repo.load_config().await.expect_err("must fail");
+        assert!(matches!(err, Error::NotARepository { .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn load_config_on_a_file_is_not_a_repository() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let file = dir.path().join("file");
+        fs::write(&file, b"x").expect("write file");
+        let repo = Repository::at(&file);
+        let err = repo.load_config().await.expect_err("must fail");
+        assert!(matches!(err, Error::NotARepository { .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn open_detects_missing_directories_and_newer_versions() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let repo = Repository::at(dir.path());
+        repo.init().await.expect("init");
+        repo.load_config().await.expect("healthy repository opens");
+
+        fs::remove_dir(repo.layout().locks_dir()).expect("remove locks");
+        let err = repo.load_config().await.expect_err("must fail");
+        assert!(matches!(err, Error::Corrupt(_)), "{err}");
+        fs::create_dir(repo.layout().locks_dir()).expect("restore locks");
+
+        let config = fs::read_to_string(repo.layout().config_file()).expect("read config");
+        fs::write(
+            repo.layout().config_file(),
+            config.replace("format_version=1", "format_version=7"),
+        )
+        .expect("rewrite config");
+        let err = repo.load_config().await.expect_err("must fail");
+        assert!(matches!(err, Error::UnsupportedVersion { found: 7, .. }), "{err}");
+        let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
+        assert!(matches!(err, Error::UnsupportedVersion { found: 7, .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn lock_requires_an_initialized_repository_and_conflicts_are_reported() {
+        let dir = tempfile::tempdir().expect("create temporary directory");
+        let repo = Repository::at(dir.path());
+        let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
+        assert!(matches!(err, Error::NotARepository { .. }), "{err}");
+
+        repo.init().await.expect("init");
+        let exclusive = repo.lock(LockKind::Exclusive).await.expect("exclusive");
+        let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
+        assert!(matches!(err, Error::Locked { .. }), "{err}");
+        drop(exclusive);
+        repo.lock(LockKind::Shared).await.expect("free again");
     }
 }
