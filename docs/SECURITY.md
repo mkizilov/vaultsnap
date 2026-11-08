@@ -1,14 +1,15 @@
-# VaultSnap security boundaries (planned)
+# VaultSnap security boundaries
 
-Status: **partly implemented**. Repository creation, the local store (permissions, symlink
-refusal, atomic writes), locking, and key management exist: the master key is random, protected by
+Status: **implemented for repository format 1**; see [`RELIABILITY.md`](RELIABILITY.md) for what is
+tested and what is not (nothing here has been reviewed by an outside party). Repository creation,
+the local store (permissions, symlink refusal, atomic writes), locking, and key management exist: the master key is random, protected by
 an Argon2id-derived key, and per-purpose keys are derived with HKDF. The encrypted chunk store
 exists: chunks are named by a keyed hash, compressed when beneficial, and sealed with
 XChaCha20-Poly1305, and snapshot manifests (every file name, path, host, tag, attribute, and the
 chunk lists) are encrypted and authenticated together with their snapshot id, and committed
 atomically. `backup`, the inspection commands, `restore`, `check`, and `prune` are built on these
 stores. The `config` file is plaintext by design and holds no secret. This document defines what the
-implementation must guarantee, and what it deliberately does not. See `FORMAT.md` for the data
+implementation guarantees, and what it deliberately does not. See `FORMAT.md` for the data
 layout.
 
 ## Protected assets
@@ -423,9 +424,15 @@ control: someone with write access to the repository can ignore them.
 ## Code and supply chain
 
 - `unsafe` code is forbidden workspace-wide (`unsafe_code = "forbid"`).
-- Cryptography comes from maintained, audited crates; there are no home-grown primitives.
+- Cryptography comes from widely used, maintained crates (RustCrypto's `argon2`, `hkdf`, `sha2`, and
+  `chacha20poly1305`; `blake3`; `rustls` with `aws-lc` for TLS); there are no home-grown primitives.
+  How VaultSnap *composes* them (what is authenticated with what, in which order) has had **no
+  independent review**; that is roadmap item 9, and until it is done treat the design as unreviewed.
 - Dependencies are added deliberately, are pinned by `Cargo.lock`, and are reviewed for
-  maintenance status before use.
+  maintenance status before use. `cargo audit` was run against the RustSec database during the last
+  review: it found 7 advisories, all in a legacy HTTP and TLS client that a default feature of the
+  AWS SDK linked in; the feature is now off and the audit finds nothing in 288 crates. It is a manual
+  check today, not yet a CI gate (roadmap item 2).
 - Tests use temporary directories inside the project and never touch real user data.
 
 ## Reporting

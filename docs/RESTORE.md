@@ -3,7 +3,7 @@
 `vaultsnap restore` and `Repository::restore` rebuild the files of a snapshot, or selected paths of
 it, under a directory chosen by the caller. This document is the specification of what a restore
 does and does not guarantee. The command line is in [`CLI.md`](CLI.md#restore); the threat model
-is in [`SECURITY.md`](SECURITY.md#restore-safety).
+is in [`SECURITY.md`](SECURITY.md#restore-safety-built).
 
 Everything described here is implemented and its tests pass on macOS with Rust 1.94.1;
 [`RELIABILITY.md`](RELIABILITY.md) says exactly what has been run and what has not (Linux, Windows,

@@ -2,8 +2,9 @@
 //! and added files, interruptions and failures, partial backups, concurrency, and a check that the
 //! repository holds enough to reconstruct every completed snapshot byte for byte.
 //!
-//! Restoring is not implemented, so "reconstruct" here reads each file's chunk list from the
-//! manifest and fetches the chunks from the chunk store, exactly what a restore will do.
+//! "Reconstruct" here reads each file's chunk list from the manifest and fetches the chunks from
+//! the chunk store, independently of the restore engine (which `tests/restore.rs` covers), so a
+//! fault in one cannot hide a fault in the other.
 
 use std::collections::BTreeMap;
 use std::fs;

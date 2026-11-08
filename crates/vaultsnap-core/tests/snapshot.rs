@@ -1,6 +1,6 @@
 //! End-to-end tests of snapshot manifests: a real repository, the real scanner, chunker, and chunk
 //! store, and the snapshot store. These do everything a backup does short of the command itself;
-//! restoring is not implemented, so file content is checked by reading chunks back directly.
+//! file content is checked by reading chunks back directly, independently of the restore engine.
 
 use std::fs;
 use std::path::Path;

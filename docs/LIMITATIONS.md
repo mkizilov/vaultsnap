@@ -11,11 +11,17 @@ is a decision or a gap; none is hidden anywhere else. The security-relevant ones
   documentation checks. **Nothing has been built or run on Linux or Windows**, and the GitHub
   workflows (CI, release) have not run on GitHub. [`RELIABILITY.md`](RELIABILITY.md) lists exactly what
   was run and what was not.
-- **Not tested against AWS S3 itself**, nor TLS with a private CA, named profiles, SSO, or role
-  credentials; only against a local MinIO ([`S3.md`](S3.md)).
-- **Signals through the binary are untested:** Ctrl-C and SIGTERM handling is exercised only through
-  the library's cancel token. A power cut, and torn writes, are not simulated; the crash tests model a
-  storage that stops answering.
+- **Not tested against AWS S3 itself**, nor a certificate from a public CA, named profiles, SSO, or
+  role credentials; only against a local MinIO, over plain HTTP in the automated tests and over TLS
+  with a generated CA in a manual run ([`S3.md`](S3.md)).
+- **Signals are verified by hand, not by the test suite.** SIGINT and SIGTERM were delivered to the
+  real binary during `backup` and `restore` and behaved as documented; `check` and `prune` were not
+  caught mid-flight, and the passphrase prompt and the `prune` question have never run on a terminal.
+  A signal in the first fraction of a second, before the handler is installed, ends the process by
+  the signal itself (nothing has been written by then). A power cut and torn writes are not
+  simulated; the crash tests model a storage that stops answering.
+- **Dependencies were audited once** (`cargo audit`: no advisories in 288 crates) and the audit is
+  not yet a CI gate, so a new advisory would not be noticed automatically.
 - **Measured on one machine, up to 64 MiB per dataset** (and 256 MiB / 10,000 files for memory). Nothing
   larger has been tried.
 - The `Cargo.lock` is committed; releases build from it (`--locked`).

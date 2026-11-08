@@ -9,12 +9,13 @@ repository says so in this file.
 
 ### Status
 
-**0.1.0 has not been released.** The code was written over many steps without a compiler; it was
-first built and run in the step that added release packaging. On macOS (Apple silicon, Rust 1.94.1)
-formatting, lints, documentation, and all 1027 tests pass, the S3 tests pass against a real MinIO
-server, and the benchmarks have run. It has not been built on Linux or Windows, and the GitHub
+**0.1.0 has not been released.** The code was written without a compiler and was first built and
+run when release packaging was added. On macOS (Apple silicon, Rust 1.94.1) formatting, lints,
+documentation, and all 1027 tests pass, the S3 tests pass against a real MinIO server, the
+benchmarks have run, `cargo audit` finds nothing, and SIGINT, SIGTERM, and TLS verification were
+checked by hand against the real binary. It has not been built on Linux or Windows, and the GitHub
 workflows have not run. [`docs/RELIABILITY.md`](docs/RELIABILITY.md) lists exactly what was and was
-not verified. `Cargo.lock` is committed.
+not verified, and [`ROADMAP.md`](ROADMAP.md) what to do next. `Cargo.lock` is committed.
 
 ### Added
 
@@ -46,6 +47,21 @@ not verified. `Cargo.lock` is committed.
   on `If-Match` of a missing one (the MinIO release of April 2025 does). Repositories were never
   affected: they use only the exclusive create.
 - Test-data generator: different seeds now give different data.
+- Seven RustSec advisories in the shipped dependency tree (`h2`, `rustls`, `rustls-webpki`): a
+  default feature of `aws-sdk-s3` linked the SDK's legacy HTTP and TLS client. The feature is off,
+  11 crates left `Cargo.lock`, the binary is 1.9 MiB smaller, and the audit is clean. The current
+  client, which the SDK selected by default anyway, was checked against a real TLS endpoint.
+- `scripts/minio-local.sh stop` reported success and forgot the server when its shell was not
+  allowed to signal it; it now checks that the server stopped and fails otherwise.
+- Comments and documents that still said restore, check, prune, or the S3 backend were not
+  implemented or not built.
+
+### Changed
+
+- `AGENTS.md` states the project's boundaries and finishing rules without reference to how the
+  work was scheduled.
+- Added [`ROADMAP.md`](ROADMAP.md): twenty prioritized steps with scope, rationale, dependencies,
+  acceptance criteria, and hours.
 
 ### Known limitations
 

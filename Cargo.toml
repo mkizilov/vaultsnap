@@ -12,7 +12,15 @@ publish = false
 [workspace.dependencies]
 argon2 = "0.5"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
-aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
+# The defaults of aws-sdk-s3 include `rustls`, the legacy hyper 0.14 / rustls 0.21 client, which
+# `cargo audit` reports advisories against; the current client comes from `default-https-client`.
+aws-sdk-s3 = { version = "1", default-features = false, features = [
+    "behavior-version-latest",
+    "default-https-client",
+    "http-1x",
+    "rt-tokio",
+    "sigv4a",
+] }
 aws-smithy-http-client = { version = "1", features = ["rustls-aws-lc"] }
 aws-smithy-types = "1"
 blake3 = "1"

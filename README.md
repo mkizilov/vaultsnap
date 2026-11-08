@@ -4,29 +4,32 @@ A reliable encrypted incremental backup utility written in Rust.
 
 ## Status
 
-**Pre-release (0.1.0, not yet published).** Every command is implemented and the test suite passes
-on macOS (Apple silicon) with Rust 1.94.1; Linux and Windows have not been run. Read
-[`docs/RELIABILITY.md`](docs/RELIABILITY.md) for exactly what has and has not been verified before
-relying on it for data you cannot lose, and keep a second copy of anything important until you have
-restored from VaultSnap yourself ([`docs/DISASTER_RECOVERY.md`](docs/DISASTER_RECOVERY.md)).
+**Pre-release (0.1.0, not published).** All nine commands are implemented. The whole automated
+suite passes on **one** platform, macOS on Apple silicon with Rust 1.94.1; nothing has run on Linux
+or Windows. Read [`docs/RELIABILITY.md`](docs/RELIABILITY.md) for the evidence before relying on it
+for data you cannot lose, and keep a second copy of anything important until you have restored from
+VaultSnap yourself ([`docs/DISASTER_RECOVERY.md`](docs/DISASTER_RECOVERY.md)). What to do next, in
+priority order, is in [`ROADMAP.md`](ROADMAP.md).
 
-| Command     | State                                                                  |
-|-------------|------------------------------------------------------------------------|
-| `init`      | Implemented: creates a versioned repository (see below)                |
-| `backup`    | Implemented: incremental, encrypted, deduplicated (see below)           |
-| `snapshots` | Implemented: lists snapshots with sizes, text or JSON                  |
-| `show`      | Implemented: everything about one snapshot, text or JSON               |
-| `ls`        | Implemented: the files of a snapshot, text or JSON                     |
-| `diff`      | Implemented: added, deleted, and modified files between two snapshots   |
-| `restore`   | Implemented: safe restore of a snapshot or selected paths (see below)  |
-| `check`     | Implemented: quick or full verification; reports, never repairs        |
-| `prune`     | Implemented: retention policy plus mark-and-sweep; dry run, confirmation |
+The words in the table mean exactly this. **Implemented**: the code exists and is reachable from the
+command line or the library. **Verified**: automated tests pass on macOS, or it was run by hand
+against the real binary (said where). **Partial**: it works, with a documented limitation.
+**Unverified**: not run, or run only in part.
 
-Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
-filesystem scanner, encrypted snapshot manifests, the `backup` command that connects them, the
-commands that inspect snapshot history, `restore`, `check`, `prune`, local and S3-compatible
-storage, release packaging, and scheduler files are in place. `vaultsnap version` shows the build
-and the repository formats it reads and writes.
+| Area | Implemented | Verified | Partial or unverified |
+|------|-------------|----------|-----------------------|
+| `init`, keys | Random master key, Argon2id-protected key file, HKDF purpose keys, XChaCha20-Poly1305 | Unit, property, and CLI tests; every command refuses a wrong passphrase and changes nothing; key persistence; tampered key files | **Partial:** no way to add, remove, or change a passphrase. **Unverified:** the interactive prompt (tests have no terminal); whether Argon2's working memory is wiped after use |
+| Chunking, chunk store | FastCDC chunking, keyed BLAKE3 ids, zstd when it helps, deduplication | Unit, property, and statistical tests; about 2 GiB/s measured; an exact copy stores 0 new chunks; every bit flip and truncation of an object is detected | |
+| `backup` | Incremental, concurrent (bounded), cancellable, published atomically | Unit and integration tests; 60 random trees restored byte for byte; killed at every storage call; SIGINT and SIGTERM by hand | **Partial:** the command line exposes only some scanner options; extended attributes, ACLs, and flags are not captured; small files back up at about 1.3 MiB/s. **Unverified:** beyond 256 MiB or 10,000 files; signals in the automated suite |
+| `snapshots`, `show`, `ls`, `diff` | Text and JSON output | Golden tests of the exact output; tests on real backups; the documented `jq` recipes by hand | Every listing decrypts every snapshot (scale unmeasured) |
+| `restore` | Conflict modes, link policy, atomic files, selected paths | Byte for byte against the originals; hostile manifests; damaged chunks; SIGINT and SIGTERM by hand | **Partial:** owners, extended attributes not restored; no `fsync`; not defended against a local attacker racing the target directory. **Unverified:** case-insensitive clashes, Windows |
+| `check` | Quick and full, JSON report, never repairs | Deliberate corruption of every kind of file | **Unverified:** next to a running backup (safe by design, not tested). **Partial:** quick mode cannot see damage inside a payload |
+| `prune` | Retention rules, mark and sweep, dry run, confirmation | Unit and integration tests; every kept snapshot restores; killed at every storage call | **Unverified:** the interactive question; signals mid-flight. **Partial:** no `forget` of one named snapshot, no grouping |
+| Local directory backend | Reference backend | The 22-case storage contract and all tests, on APFS | **Unverified:** Linux file systems, network shares (it needs hard links) |
+| S3-compatible backend | AWS SDK adapter, connect-time probe of conditional writes | The contract on an in-memory fake and on a real MinIO (7 of 7); TLS verification by hand against a generated CA | **Unverified:** AWS S3 itself, public-CA certificates, profiles, SSO, roles. **Partial:** one request per chunk (slow for large backups); a region warning unless a region is set |
+| Version, packaging | `version`, `--version`, `scripts/package.sh`, release workflow | The package builds, its checksum verifies, the packed binary runs | **Unverified:** the release and CI workflows on GitHub; Linux and Intel archives; the binaries are not signed |
+| Scheduling | `contrib/` wrapper, systemd, launchd, cron files | The wrapper against stand-ins and the real binary | **Unverified:** the units inside a service manager (only syntax is checked) |
+| Dependencies | Pinned in `Cargo.lock` | `cargo audit`: no advisories in 288 crates | Run by hand; not yet a CI gate |
 
 ### Documentation
 
@@ -34,8 +37,8 @@ To use it: [`INSTALL.md`](docs/INSTALL.md) (installing and upgrading),
 [`GUIDE.md`](docs/GUIDE.md) (initialization, backup schedules, restores, retention, remote
 repositories), [`DISASTER_RECOVERY.md`](docs/DISASTER_RECOVERY.md), and
 [`LIMITATIONS.md`](docs/LIMITATIONS.md). To maintain it: [`RELIABILITY.md`](docs/RELIABILITY.md)
-(what is tested and how, review findings, measurements) and [`RELEASING.md`](docs/RELEASING.md).
-The reference documents are listed further down.
+(what is tested and how, review findings, measurements), [`RELEASING.md`](docs/RELEASING.md), and
+[`ROADMAP.md`](ROADMAP.md). The reference documents are listed further down.
 
 ### Chunking
 
@@ -140,8 +143,9 @@ snapshots.commit(&manifest)?;                 // atomic; refuses if a chunk is m
 let again = snapshots.load(&manifest.id)?;    // authenticated, decrypted, validated
 ```
 
-Restoring is not implemented; loading only reads and verifies manifests. The byte-level format
-and compatibility rules are in [`docs/FORMAT.md`](docs/FORMAT.md) ("Snapshots").
+Loading a snapshot only reads and verifies its manifest; rebuilding files is `vaultsnap restore`
+(below). The byte-level format and compatibility rules are in [`docs/FORMAT.md`](docs/FORMAT.md)
+("Snapshots").
 
 ### `vaultsnap backup`
 
@@ -269,10 +273,12 @@ profiles, SSO, roles); there is no option for them. Certificates are always veri
 export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
 vaultsnap --repo s3://my-bucket/laptop init
 vaultsnap --repo s3://my-bucket/laptop backup ~/Documents
-vaultsnap --repo s3://my-bucket --s3-endpoint http://127.0.0.1:21100 snapshots   # MinIO
+vaultsnap --repo s3://my-bucket --s3-endpoint http://127.0.0.1:21100 --s3-region us-east-1 snapshots   # MinIO
 ```
 
-See [`docs/S3.md`](docs/S3.md) for the options and the guarantees.
+For a service that is not AWS, give a region (any value it accepts), or every command prints a
+warning about the instance-metadata service. See [`docs/S3.md`](docs/S3.md) for the options and the
+guarantees.
 
 ### `vaultsnap init`
 
@@ -441,24 +447,33 @@ None of these workflows has run on GitHub yet.
 
 What the tests do not cover, and what is slow or missing by design. [`docs/RELIABILITY.md`](docs/RELIABILITY.md)
 has the evidence behind what *is* verified; [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) is the list for
-users.
+users; [`ROADMAP.md`](ROADMAP.md) says which gaps to close first and what each costs.
 
 - **Only macOS (Apple silicon) has been built and tested.** Linux and Windows are untested here; the
   GitHub workflows (CI, release) are written and syntax-checked but have never run on GitHub.
   Windows is not supported.
 - **S3** is verified against a MinIO server (the April 2025 release, built from source, on loopback)
-  through the real AWS SDK adapter, including the whole storage contract. It is not verified against
-  AWS S3 itself, nor TLS with a private CA, named profiles, SSO, or role credentials. That server
-  creates an object on `If-Match` of a missing one, unlike S3, so it is given no conditional-replace
-  guarantee (nothing in a repository uses one). A backup checks each chunk with its own request, one
-  after the other, so a very large backup to a distant bucket is slow (`docs/S3.md`).
+  through the real AWS SDK adapter, including the whole storage contract, over plain HTTP in the
+  automated tests. TLS verification was checked by hand against that server behind a generated CA
+  (unknown issuer, wrong CA, and wrong host name are refused; the right CA works end to end). It is
+  not verified against AWS S3 itself, a certificate from a public CA, named profiles, SSO, or role
+  credentials. That server creates an object on `If-Match` of a missing one, unlike S3, so it is
+  given no conditional-replace guarantee (nothing in a repository uses one). A backup checks each
+  chunk with its own request, one after the other, so a very large backup to a distant bucket is
+  slow. Without a region (`--s3-region`, `AWS_REGION`) every command prints a warning about the
+  instance-metadata service (`docs/S3.md`).
 - **Many small files back up slowly** because every chunk object is committed durably (a file sync
   and a directory sync each; on macOS a full flush to the disk, about 3.6 ms): about 7.7 ms per file,
   1.3 MiB/s, whatever the number of workers. Large files reach 100 MiB/s or more
   (`docs/RELIABILITY.md`). Packing chunks into larger files would fix this and is a format change.
-- **Signals through the binary are not tested.** Ctrl-C and SIGTERM handling of `backup`, `restore`,
-  `check`, and `prune` is exercised only through the library's cancel token. The interactive `yes`
-  question of `prune` needs a terminal, so only its logic is unit tested.
+- **Signals are verified by hand, not by the test suite.** SIGINT and SIGTERM sent to the real
+  binary during `backup` and `restore` give exit status 130, a message, no snapshot or partial file,
+  and a clean repository, and the next run completes. `check` and `prune` were not caught mid-flight.
+  A signal in the first fraction of a second, before the handler is installed, ends the process by
+  the signal itself (nothing is written by then). The interactive passphrase prompt and the `prune`
+  question need a terminal and have not been run on one.
+- **Dependencies were audited by hand** (`cargo audit`: no advisories in 288 crates, after turning
+  off a default SDK feature that linked a vulnerable legacy client). It is not a CI gate yet.
 - **Crash tests model a storage that stops answering**, at every call and in both ways a call can
   fail to report back. They do not model a power cut that loses data a file system had acknowledged,
   or torn writes inside one file; the design leans on `fsync` and no-overwrite publication for those
@@ -486,6 +501,8 @@ users.
   (`docs/SCANNING.md`).
 - The benchmarks have run only on one machine and only at the default sizes (chunker up to 64 MiB,
   end to end 64 MiB per dataset); the `--large` variants were not run.
+- Nothing in the cryptographic design has been reviewed by anyone but its author; only established
+  primitives are used, but how they are composed is unreviewed (`ROADMAP.md`, item 9).
 
 ## License
 

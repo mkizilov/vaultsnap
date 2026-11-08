@@ -11,19 +11,23 @@ observed on the machine described below, and anything that was not run is listed
 
 **Environment.** macOS 27.2 (build 26B123), Apple silicon (arm64, 10 cores), Rust 1.94.1
 (`rust-toolchain.toml`), installed inside the repository (`AGENTS.md`). At most two build jobs and two
-test threads. Network access to the Rust, Go, and crates.io hosts was available for this run; earlier
-turns of the project were written without a toolchain, so this was the first time any of the code was
-compiled.
+test threads. The code was written without a Rust toolchain or network access, so this was the first
+time any of it was compiled, and it was done with network access to the Rust, Go, and crates.io
+hosts.
 
 | Check | Command | Result |
 |-------|---------|--------|
 | Formatting | `cargo fmt --all --check` | passes |
 | Lints | `cargo clippy --workspace --all-targets --locked -- -D warnings` | passes |
 | Lints, without the S3 client | `cargo clippy -p vaultsnap-core --no-default-features --all-targets -- -D warnings` | passes |
-| Tests | `cargo test --workspace --locked --no-fail-fast` | **1027 passed, 0 failed, 1 ignored** (a doctest that is not meant to run) |
+| Tests | `cargo test --workspace --locked --no-fail-fast` | **1027 passed, 0 failed, 1 ignored** (a doctest that is not meant to run); re-run after the last dependency change |
 | Tests, without the S3 client | `cargo test -p vaultsnap-core --no-default-features --lib` | 633 passed |
 | Documentation | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked` | passes |
-| S3 tests against a real server | `cargo test -p vaultsnap-core --test s3_minio` with MinIO running | **7 of 7 passed**, including the whole storage contract (22 cases); with no server they skip, and with the server pointed at a dead port 5 of them fail, which shows they really use it |
+| S3 tests against a real server | `cargo test -p vaultsnap-core --test s3_minio` with MinIO running | **7 of 7 passed**, including the whole storage contract (22 cases), on the final dependency set; with no server they skip, and with the server pointed at a dead port 5 of them fail, which shows they really use it |
+| More random trees | `VAULTSNAP_ROUNDTRIP_SEEDS=60 cargo test -p vaultsnap-core --test roundtrip` | 60 of 60 seeds pass (the default is 10) |
+| Dependency audit | `cargo audit` (RustSec database of 1422 advisories) | **no advisories in 288 crates**; there were **7 before** the fix in section 2. Run by hand, not yet a CI gate |
+| Signals through the binary | by hand, release binary | SIGINT and SIGTERM during `backup` and `restore` behave as documented (section 5). Manual; not in the test suite |
+| TLS to the S3 backend | by hand, MinIO with a generated CA | certificate and hostname verification work as documented (section 5). Manual; not in the test suite |
 | Scheduler script | `sh contrib/test-scheduled.sh` | 15 checks pass |
 | Packaging script | `sh scripts/test-package.sh` | 15 checks pass (against stand-ins for cargo) |
 | Release package | `scripts/package.sh` | builds; the archive's checksum verifies; the packed binary runs and reports its version |
@@ -52,6 +56,10 @@ Everything was written without a compiler, so this is the honest account of what
 | clippy (no S3 feature) | 3 dead-code warnings | the S3 error tables are used only by the SDK adapter | product (marked as intentionally unused there) |
 | tests | **10 failures** in the first full run | see below | **all in the tests, none in the product** |
 | real S3 server | 1 of 22 contract cases failed | MinIO creates an object on `If-Match` of a missing one (S3 answers 404) | product assumption, fixed in the connect-time probe |
+| dependency audit | **7 advisories** in three crates: `h2` (unbounded empty HTTP/2 DATA frames), `rustls` (secrets exposed by `Debug` output of session values; a key-exchange downgrade by an unauthenticated ServerHello), and `rustls-webpki` (a reachable panic parsing certificate revocation lists, and three certificate-validation flaws: URI and wildcard name constraints, and distrusted intermediates) | a default feature of `aws-sdk-s3` (`rustls`) links the legacy hyper 0.14 / rustls 0.21 client; the SDK's own selection code prefers the current client (`default-https-client`), so by reading the source the vulnerable one is linked but not used by default | product dependencies (`Cargo.toml`): the feature is off; 11 crates left `Cargo.lock`; the audit is clean; the binary is 1.9 MiB smaller; the MinIO suite and a TLS run were repeated |
+| helper script | `scripts/minio-local.sh stop` printed success and forgot the pid when its shell was not allowed to signal the server | liveness was judged with `kill -0`, which fails for a process that exists but may not be signalled | the script (written in this project): now judged by the server's health endpoint, the outcome is verified, and it fails loudly; tested with an unsignalable pid and with a server it did not start |
+| first signal experiment | a SIGTERM "failure" (the process died from the signal) | my experiment counted objects left by the previous run, so it signalled before the handler existed | the experiment, not the product; redone with a trigger relative to a baseline. It did reveal the window before the handler is installed (roadmap item 3) |
+| S3 warning | `failed to load region from IMDS` on every command when no region is configured | the default region chain asks the instance-metadata service first | product behavior; the documentation now says to set a region (any of three ways silences it); the fix is roadmap item 12 |
 
 The ten test failures were each analyzed before anything was changed, and none showed a product
 defect:
@@ -219,7 +227,8 @@ output (asserted by the S3 tests, including against a real server).
 
 ## 5. User flows run against the real binary
 
-The documentation's own instructions were run, with the release binary, in a scratch repository:
+The documentation's own instructions were run, with the release binary (the TLS run used the debug
+build of the same code), in scratch repositories that were deleted afterwards:
 
 - the restore drill of [`GUIDE.md`](GUIDE.md): backup, restore into a scratch directory, `diff -r`
   reports the trees **identical**, and `check --read-data` exits 0;
@@ -233,7 +242,29 @@ The documentation's own instructions were run, with the release binary, in a scr
   that a dead exclusive lock stops `check` too;
 - a lost `config`: the commands report "not a VaultSnap repository"; the four-line file rewritten from
   the repository id restores service and `check --read-data` is clean; a `config` with another id gives
-  "incorrect passphrase, or the key file was modified".
+  "incorrect passphrase, or the key file was modified";
+- **signals**, delivered to the release binary by a script that waits until work is under way (by
+  watching the repository, not by sleeping) and then signals. `backup` of 6,000 small files with
+  SIGINT after 209 objects, and of 3,000 with SIGTERM after 202: exit status 130 within 0.02 s, a
+  message (`cancelled: no snapshot was created (chunks already stored are kept and will be reused)`),
+  **no snapshot, no lock file, no temporary file**, `check` clean, and the next `backup` completes
+  (it reused the 210 stored chunks) and passes `check --read-data`. `restore` with SIGINT after 325
+  files and with SIGTERM after 347: exit status 130, a message, no partial files, and resuming with
+  `--on-conflict skip` yields all files, byte for byte equal to the source. **A signal that arrives
+  before the handler is installed** (during key derivation, a fraction of a second after start) kills
+  the process by the signal itself; the first run of the experiment hit this with SIGTERM and found
+  the repository untouched. `check` and `prune` finish too quickly to be caught and were **not**
+  tested; nothing here is in the automated suite (roadmap item 3);
+- **TLS**, with MinIO serving HTTPS on loopback behind a generated CA and a leaf certificate that
+  names only `127.0.0.1`: with no CA bundle, and with an unrelated CA, every command is refused
+  (`invalid peer certificate: UnknownIssuer`); with the right CA, `init`, `backup`,
+  `check --read-data`, and `restore` succeed and the restored tree is identical to the source; the
+  URL `https://localhost` is refused (`certificate not valid for name "localhost"`); there is no
+  option to turn verification off (`--s3-insecure` is an unknown argument); the secret key does not
+  appear in the output. This exercised the dependency change above. The case of a certificate from a
+  public CA (the common case with AWS) cannot be run on loopback and was **not** tested;
+- the region warning: set by `--s3-region`, `AWS_REGION`, or `VAULTSNAP_S3_REGION` it disappears
+  (one warning without; about 0.25 s per command against 0.15 s on a loopback server).
 
 ## 6. Performance and memory
 
@@ -315,11 +346,14 @@ not grow with the data (256 MiB peaked at 120 MiB), and 10,000 files and 10,000 
 - **Linux and Windows.** Nothing was built or run on them. The GitHub workflows (CI on Linux x86-64 and
   arm64 and macOS, a Windows build check, the release workflow for four targets) are written and their
   YAML parses, but none has run on GitHub. Windows is not supported.
-- **AWS S3 itself, and everything about the SDK that a local server does not exercise:** TLS and private
-  CA bundles, named profiles, SSO, role credentials, request signing for a real region, throttling.
-  The tested server is a MinIO release built from source, on loopback, over plain HTTP.
-- **Signals through the binary.** The Ctrl-C and SIGTERM handlers are exercised only through the
-  library's cancel token. The interactive `yes` question of `prune` needs a terminal.
+- **AWS S3 itself, and everything about the SDK that a local server does not exercise:** a
+  certificate from a public CA, named profiles, SSO, role credentials, request signing for a real
+  region, throttling. The tested server is a MinIO release built from source, on loopback, over plain
+  HTTP in the automated tests and over TLS with a generated CA in a manual run.
+- **Signals in the automated suite.** `backup` and `restore` were checked by hand with SIGINT and
+  SIGTERM (section 5); `check` and `prune` were not caught mid-flight; none of it is a test that runs
+  in CI. The interactive passphrase prompt and the `prune` question need a terminal and have not
+  been exercised.
 - **Power loss and torn writes**, and anything about real disk failures.
 - **Scale.** The largest dataset measured was 256 MiB (and 10,000 files). The `--large` benchmark
   (512 MiB per dataset) was not run, and no multi-gigabyte or million-object repository was tried.

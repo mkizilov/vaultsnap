@@ -65,7 +65,7 @@ vaultsnap --password-file ~/.config/vaultsnap/passphrase init
 `init` without `--password-file` asks for the passphrase twice on the terminal (nothing is shown as
 you type). **Write down the repository id it prints** next to the passphrase: it is not secret, and
 together with the passphrase it is enough to bring a repository back even if its `config` file is
-lost ([how](DISASTER_RECOVERY.md#a-lost-config-file)). `init` never overwrites anything: it refuses a
+lost ([how](DISASTER_RECOVERY.md#a-lost-config-file-tested)). `init` never overwrites anything: it refuses a
 directory that already holds a repository or other data.
 
 Key derivation is deliberately slow (Argon2id, 64 MiB of memory, 3 passes): every command that
@@ -180,7 +180,7 @@ again.
 **A job that was killed** (the machine lost power during a backup) leaves a *lock file* behind. The
 one a killed backup leaves does not stop later backups, but it stops `prune` until it is removed, and
 the nightly check reports it as a warning. A killed `prune` leaves an exclusive lock that makes every
-command refuse until it is removed ([how](DISASTER_RECOVERY.md#a-stale-lock)).
+command refuse until it is removed ([how](DISASTER_RECOVERY.md#a-stale-lock-tested)).
 
 ## 5. Restoring
 
@@ -281,13 +281,17 @@ service) with exactly the same commands:
 export AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...      # or a profile, SSO, a role
 vaultsnap --repo s3://my-bucket/laptop init
 vaultsnap --repo s3://my-bucket/laptop backup ~/Documents
-vaultsnap --repo s3://my-bucket --s3-endpoint https://s3.example.org snapshots
+vaultsnap --repo s3://my-bucket --s3-endpoint https://s3.example.org --s3-region us-east-1 snapshots
 ```
 
 Everything is encrypted before it leaves the machine. The bucket must exist; credentials come only from
-the AWS credential chain (there is no option to pass them); certificates are always verified. For a
-schedule, put `VAULTSNAP_REPO=s3://...` (and `VAULTSNAP_S3_ENDPOINT` if needed) in the environment file
-and give the job its credentials the way you would any AWS tool. Details, costs, and limits are in
+the AWS credential chain (there is no option to pass them); certificates are always verified (a
+private CA is trusted with `--s3-ca-bundle FILE`). For a service that is not AWS, give a region
+(`--s3-region`, `VAULTSNAP_S3_REGION`, or `AWS_REGION`; any value the service accepts) or every command
+prints a warning about the instance-metadata service. For a schedule, put `VAULTSNAP_REPO=s3://...`
+(and `VAULTSNAP_S3_ENDPOINT` and `VAULTSNAP_S3_REGION` if needed) in the environment file and give the
+job its credentials the way you would any AWS tool. This has been tried against a MinIO server and
+not against AWS itself ([`RELIABILITY.md`](RELIABILITY.md)). Details, costs, and limits are in
 [`S3.md`](S3.md).
 
 ## 9. Cheat sheet

@@ -1,13 +1,13 @@
-# VaultSnap repository format (version 1, planned)
+# VaultSnap repository format (version 1)
 
-Status: **partly implemented**. `init`, the `config` file, the local store, locking, and key
-management (master key, key files, derived keys, authenticated encryption) exist and are marked
-*built*, as are chunking, the encrypted, deduplicated chunk store, the filesystem scanner, and
-encrypted snapshot manifests. Packs and indexes are still *planned*. `backup`, the commands
-that inspect snapshots (`snapshots`, `show`, `ls`, `diff`), and `restore` are built on top of
-these, as are `check` and `prune`. Code that lands later must follow this
-document, and changes to the format must update it first and bump `FORMAT_VERSION`
-(`crates/vaultsnap-core/src/repository.rs`).
+Status: **version 1 is implemented**: the `config` file, the storage backends, locking, key
+management (master key, key files, derived keys, authenticated encryption), chunking, the
+encrypted, deduplicated chunk store, the filesystem scanner, and encrypted snapshot manifests are
+marked *built*, and `backup`, `snapshots`, `show`, `ls`, `diff`, `restore`, `check`, and `prune` are
+built on them. Pack files and an index are *planned* for a later format version and are not part of
+version 1; sections marked *planned* describe that future work, not current behavior. What is
+tested, and how, is in [`RELIABILITY.md`](RELIABILITY.md). Changes to the format must update this
+document first and bump `FORMAT_VERSION` (`crates/vaultsnap-core/src/repository.rs`).
 
 Repositories created by pre-release builds before key management existed have no `keys/`
 directory or key file; they are not usable and must be re-created (nothing of value could have
@@ -150,11 +150,11 @@ the other's lock and both proceed. Such a backend is refused (see *Storage*).
   in it. Identical chunks have identical ids within a repository, which is what deduplication
   uses.
 
-## Chunking and deduplication (chunker built; storing chunks planned)
+## Chunking and deduplication (built)
 
 Files are split with content-defined chunking (FastCDC with normalized chunking) so inserting or
-deleting bytes only changes the chunks near the edit. A chunk whose id is already in the index is
-not stored again. The chunker (`vaultsnap_core::chunking`) is independent of storage; the rules
+deleting bytes only changes the chunks near the edit. A chunk whose object already exists (there is
+no index in version 1) is not stored again. The chunker (`vaultsnap_core::chunking`) is independent of storage; the rules
 below are the format and must never change without a format version bump, because they decide
 every chunk boundary and therefore whether new data deduplicates against old.
 
@@ -238,11 +238,11 @@ offset  size  field
   writer got there first and the result is again *duplicate*. Exactly one of any number of
   concurrent writers of the same chunk creates the object; the others leave nothing behind.
 - **Trust in existing objects**: deduplication decides by the presence of the object and does
-  not re-verify it. Damage is detected when the chunk is read and by the repository check
-  (planned), not hidden. Repairing a damaged chunk means deleting its object and storing the
-  chunk again.
-- Stale `.tmp-` files left by a crash are ignored and can be removed by a future repository
-  check.
+  not re-verify it. Damage is detected when the chunk is read and by `check --read-data`, not
+  hidden. Repairing a damaged chunk means moving its object away and storing the chunk again
+  ([`CHECK.md`](CHECK.md)).
+- Stale `.tmp-` files left by a crash are ignored. `check` reports them (`leftover_temp_file`);
+  nothing in VaultSnap removes them, and they are safe to delete by hand.
 
 ### Cryptographic format decisions
 
@@ -506,7 +506,7 @@ sealed=<144 lowercase hex characters: nonce(24) || ciphertext(32) || tag(16)>
 **Derived keys.** One key per purpose, `HKDF-SHA256(salt = none, ikm = master key, info = label)`
 with 32-byte output. Labels are part of the format and never change or get reused:
 
-| Purpose              | Label                                  | Used for (planned)              |
+| Purpose              | Label                                  | Used for                        |
 |----------------------|----------------------------------------|---------------------------------|
 | `ContentId`          | `vaultsnap/v1/content-id`              | keyed hash naming chunks (built)|
 | `DataEncryption`     | `vaultsnap/v1/data-encryption`         | chunk objects (built), packs    |

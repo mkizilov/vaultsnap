@@ -60,9 +60,11 @@ All of this on the commit that will be tagged, on a machine with the pinned tool
    cargo test --workspace --locked
    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
    sh contrib/test-scheduled.sh && sh scripts/test-package.sh
+   cargo audit                      # cargo install cargo-audit --locked; must report no vulnerabilities
    ```
 4. The MinIO tests have passed once ([`S3.md`](S3.md)): `cargo test -p vaultsnap-core --test
-   s3_minio` against a running server. They are the only tests that meet a real S3 service.
+   s3_minio` against a running server (`scripts/minio-local.sh`), and not as skips. They are the only
+   tests that meet a real S3 service.
 5. `scripts/package.sh` works on at least one real machine and the packed binary runs
    (`vaultsnap version`).
 6. A restore drill from the package, not from a development build ([`GUIDE.md`](GUIDE.md)):
@@ -95,7 +97,10 @@ run `vaultsnap version` once.
   you. Signed or notarized macOS binaries are not produced: Gatekeeper will quarantine a downloaded
   binary (`xattr -d com.apple.quarantine vaultsnap`), or build from source.
 - Dependencies are pinned by `Cargo.lock`. Before a release, look at what changed in it
-  (`git diff Cargo.lock`) and run `cargo audit` (not wired into CI) if you use it.
+  (`git diff Cargo.lock`) and run `cargo audit`, which is not wired into CI yet (roadmap item 2).
+  The last run found 7 advisories through a default feature of the AWS SDK and the fix was to turn
+  that feature off; check the new feature set of any SDK upgrade with `cargo tree -i rustls@0.21`
+  (it must fail with "did not match any packages").
 - Nothing in a release depends on the machine that built it except the system C library it links.
 
 ## After a bad release

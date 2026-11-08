@@ -12,8 +12,8 @@
 //! * [`ManifestBuilder`] assembles a manifest from [`crate::scan`] entries and chunk references.
 //! * [`SnapshotStore`] commits, loads, and lists snapshots.
 //!
-//! The byte-level formats and the compatibility rules are in `docs/FORMAT.md`. Restoring a
-//! snapshot is not implemented yet; loading one only reads and verifies its manifest.
+//! The byte-level formats and the compatibility rules are in `docs/FORMAT.md`. Loading a snapshot
+//! here only reads and verifies its manifest; rebuilding the files is [`crate::restore`].
 
 mod builder;
 mod codec;

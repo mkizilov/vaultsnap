@@ -1,20 +1,37 @@
 # VaultSnap: project boundaries and working agreement
 
-- Work only in `/Users/mk-rune/test_projects/02-vaultsnap`. This is one of fourteen independent repositories.
-- Do not read, modify, clean up, or run commands in sibling repositories or the user's configuration.
-- Work autonomously: choose sensible defaults and document assumptions; do not ask questions or delegate.
-- Never install anything globally or use sudo, Homebrew, launchd, host credentials, or host Docker sockets.
-- Dependencies, toolchains, caches, browser binaries, SDKs, temporary files and test data stay in this repository. Preserve the supplied project-local environment. Python packages go in `.venv`.
-- `.agent-local/` is ignored, project-local build/runtime state. `.opencode/` is managed orchestration configuration; do not change or remove it or bypass the sandbox.
-- Use existing system tools read-only, or install pinned tools under this repository. Do not change shell profiles, user settings, Keychain, or global Git settings.
-- Bind test servers to loopback; use ports 21100–21199. Limit build/test workers to two unless a required benchmark explicitly needs more.
-- Docker-dependent integration tests must remain reproducible but be reported as unverified here if they require access outside this repository. Do not bypass this boundary.
-- Do not touch attached hardware, enroll services, flash firmware, install agents, or alter OS settings. Supply manual checklists for such steps.
-- Implement only the current numbered prompt, preserving prior behavior. Run appropriate checks, fix failures, and report genuine limitations without fabricating test or benchmark results.
-- Before finishing every numbered turn: stop its servers/watchers, remove scratch outputs, update relevant documentation, and make a local conventional-commit Git commit. Do not push.
-- End each turn with a short summary of changes, checks actually run, remaining limitations, and commit hash. The orchestrator will provide the next prompt only after this turn ends.
+## Boundaries
 
-Extend this file with the project's language-specific architecture and verification commands while retaining these boundaries.
+- Work only inside this repository. Do not read or modify anything outside it: other projects,
+  the user's configuration, shell profiles, Keychain, or global Git settings.
+- Choose sensible defaults and document assumptions. Preserve existing behavior and change only
+  what the task needs.
+- Never install anything globally, and never use `sudo`, Homebrew, host credentials, or the host's
+  Docker socket. Install pinned tools under this repository instead, or use existing system tools
+  read-only. Python packages go in `.venv`.
+- Dependencies, toolchains, caches, SDKs, temporary files, and test data stay in this repository.
+  `.agent-local/` is git-ignored, project-local build and runtime state; keep the project-local
+  `HOME`, `TMPDIR`, and cache settings you are given.
+- `.opencode/` and `.cortexkit/` are managed by the development environment and are not part of
+  this project: leave them alone, and do not bypass the sandbox the environment applies.
+- Test servers bind to loopback only, on ports 21100–21199. Limit build and test workers to two
+  unless a required benchmark explicitly needs more.
+- Tests that need Docker, or any access outside this repository, must stay reproducible and be
+  reported as unverified when they cannot run. Do not work around the boundary.
+- Do not install services or agents, or change operating system settings. Supply a manual
+  checklist for such steps instead.
+- Start any server you need so that the process that started it can stop it, and stop it, with
+  its data and credentials, before finishing (`sh scripts/minio-local.sh clean`). Scripts that
+  stop a server must verify that it stopped.
+
+## Finishing a piece of work
+
+- Run the checks below, fix failures without weakening tests, and report genuine limitations
+  without inventing test or benchmark results.
+- Stop servers and watchers, remove scratch outputs, update the documentation that describes what
+  changed, and make a local conventional-commit Git commit. Do not push unless asked.
+- Report: a short summary of the changes, the checks actually run and their real results, what
+  remains unverified or limited, and the commit hash.
 
 ## Engineering rules
 
@@ -30,7 +47,7 @@ Extend this file with the project's language-specific architecture and verificat
   toolchain, Cargo registry, and build output stay under `.agent-local/` (`CARGO_HOME`,
   `RUSTUP_HOME`) and `target/`, both git-ignored.
 - **Cleanup.** Remove scratch files, temporary repositories, logs, and generated datasets, and
-  stop servers or watchers, before finishing a turn. Tests create temporary data only through
+  stop servers or watchers, before finishing a piece of work. Tests create temporary data only through
   `tempfile` (which honors the project-local `TMPDIR`).
 - **Transparent verification.** Reports list the exact commands run and their real results. Say
   plainly what could not be run (missing toolchain, no network, Docker unavailable) and mark it
@@ -252,11 +269,12 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 sh contrib/test-scheduled.sh && sh scripts/test-package.sh
+cargo audit            # cargo install cargo-audit --locked (into the project-local CARGO_HOME)
 ```
 
 At most two build/test workers (`CARGO_BUILD_JOBS=2`, `RUST_TEST_THREADS=2`). Test servers bind to
-loopback ports 21100-21199 and are stopped, with their data and credentials deleted, before a
-turn ends (`sh scripts/minio-local.sh clean`). The MinIO tests (`docs/S3.md`) must stay
+loopback ports 21100-21199 and are stopped, with their data and credentials deleted, before
+finishing (`sh scripts/minio-local.sh clean`). The MinIO tests (`docs/S3.md`) must stay
 reproducible and be reported as unverified when they cannot run.
 
 A test failure is analyzed before anything is changed: say whether the product or the test was

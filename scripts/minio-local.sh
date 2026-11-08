@@ -97,8 +97,11 @@ install_minio() {
     [ -x "$minio" ] || die "the build did not produce $minio"
 }
 
+# Whether MinIO answers on its port. This asks the server itself rather than signalling a pid: a
+# shell that did not start the server (a sandbox, another user) may not be allowed to signal it,
+# and then `kill -0` would claim a running server is gone.
 running() {
-    [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null
+    curl -fsS --max-time 2 "http://127.0.0.1:$PORT/minio/health/live" >/dev/null 2>&1
 }
 
 start() {
@@ -131,14 +134,20 @@ start() {
 
 stop() {
     if running; then
+        [ -f "$pidfile" ] || die "something answers on port $PORT, but this script did not start it (no pid file); stop it yourself"
         pid=$(cat "$pidfile")
         kill "$pid" 2>/dev/null || true
         i=0
-        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do
+        while running && [ "$i" -lt 20 ]; do
             i=$((i + 1))
             sleep 1
         done
-        kill -9 "$pid" 2>/dev/null || true
+        if running; then
+            kill -9 "$pid" 2>/dev/null || true
+            sleep 1
+        fi
+        # The pid file stays if the server is still up, so nothing is forgotten.
+        running && die "could not stop MinIO (pid $pid): the signal was refused or ignored. Stop it from the shell or task that started it."
         echo "stopped (pid $pid)"
     fi
     rm -f "$pidfile"
