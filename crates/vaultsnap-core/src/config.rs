@@ -1,8 +1,7 @@
 //! Repository `config` file: versioned, plaintext, strictly parsed (see `docs/FORMAT.md`).
 
-use std::collections::BTreeMap;
-
 use crate::error::{Error, Result};
+use crate::kv;
 use crate::repository::{RepositoryLayout, FORMAT_VERSION};
 use crate::store::LocalStore;
 
@@ -49,40 +48,26 @@ impl RepositoryConfig {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| Error::InvalidConfig("file is not valid UTF-8".to_owned()))?;
-        let mut lines = text.lines();
-        if lines.next() != Some(MAGIC) {
-            return Err(Error::InvalidConfig(format!("missing `{MAGIC}` header")));
-        }
+        let invalid = Error::InvalidConfig;
+        let mut fields = kv::parse(text, MAGIC).map_err(invalid)?;
 
-        let mut fields = BTreeMap::new();
-        for (index, line) in lines.enumerate() {
-            let (key, value) = line.split_once('=').ok_or_else(|| {
-                Error::InvalidConfig(format!("line {} is not `key=value`", index + 2))
-            })?;
-            if fields.insert(key, value).is_some() {
-                return Err(Error::InvalidConfig(format!("duplicate key `{key}`")));
-            }
-        }
-
-        let format_version = take_number::<u32>(&mut fields, "format_version")?;
+        let format_version =
+            kv::take_number::<u32>(&mut fields, "format_version").map_err(invalid)?;
         if format_version != FORMAT_VERSION {
             return Err(Error::UnsupportedVersion {
                 found: format_version,
                 supported: FORMAT_VERSION,
             });
         }
-        let repository_id = fields
-            .remove("repository_id")
-            .ok_or_else(|| Error::InvalidConfig("missing `repository_id`".to_owned()))?;
+        let repository_id = kv::take(&mut fields, "repository_id").map_err(invalid)?;
         if !is_repository_id(repository_id) {
             return Err(Error::InvalidConfig(format!(
                 "`repository_id` must be {REPOSITORY_ID_LEN} lowercase hexadecimal characters"
             )));
         }
-        let created_at_unix = take_number::<u64>(&mut fields, "created_at_unix")?;
-        if let Some(key) = fields.keys().next() {
-            return Err(Error::InvalidConfig(format!("unknown key `{key}`")));
-        }
+        let created_at_unix =
+            kv::take_number::<u64>(&mut fields, "created_at_unix").map_err(invalid)?;
+        kv::reject_unknown(&fields).map_err(invalid)?;
 
         Ok(Self {
             format_version,
@@ -97,18 +82,6 @@ impl RepositoryConfig {
     pub fn load(store: &LocalStore) -> Result<Self> {
         Self::parse(&store.read(RepositoryLayout::CONFIG_FILE, MAX_CONFIG_BYTES)?)
     }
-}
-
-fn take_number<T: std::str::FromStr>(
-    fields: &mut BTreeMap<&str, &str>,
-    key: &'static str,
-) -> Result<T> {
-    let value = fields
-        .remove(key)
-        .ok_or_else(|| Error::InvalidConfig(format!("missing `{key}`")))?;
-    value
-        .parse()
-        .map_err(|_| Error::InvalidConfig(format!("`{key}` is not a valid number: {value:?}")))
 }
 
 fn is_repository_id(value: &str) -> bool {

@@ -13,11 +13,13 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+rpassword.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 vaultsnap-core.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -13,6 +13,10 @@ pub struct Cli {
     #[arg(short, long, global = true, env = "VAULTSNAP_REPO", value_name = "PATH")]
     pub repo: Option<PathBuf>,
 
+    /// File containing the repository passphrase (instead of asking on the terminal)
+    #[arg(long, global = true, env = "VAULTSNAP_PASSWORD_FILE", value_name = "FILE")]
+    pub password_file: Option<PathBuf>,
+
     /// Increase log detail (-v info, -vv debug, -vvv trace); RUST_LOG overrides
     #[arg(short, long, global = true, action = ArgAction::Count)]
     pub verbose: u8,
@@ -125,6 +129,14 @@ mod tests {
         let id = "a".repeat(64);
         let restore = parse(&["restore", &id, "--target", "out"]);
         assert!(matches!(restore.map(|c| c.command), Ok(Command::Restore(_))));
+    }
+
+    #[test]
+    fn password_file_is_a_global_option() {
+        let cli = parse(&["init", "--password-file", "/p"]).expect("valid arguments");
+        assert_eq!(cli.password_file, Some(PathBuf::from("/p")));
+        let cli = parse(&["--password-file", "/q", "snapshots"]).expect("valid arguments");
+        assert_eq!(cli.password_file, Some(PathBuf::from("/q")));
     }
 
     #[test]

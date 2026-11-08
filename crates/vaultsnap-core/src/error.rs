@@ -94,6 +94,38 @@ pub enum Error {
         /// Repository-relative name of the conflicting lock file.
         holder: String,
     },
+    /// A passphrase was rejected before use.
+    #[error("invalid passphrase: {0}")]
+    InvalidPassphrase(&'static str),
+    /// No key slot could be opened with the given passphrase.
+    #[error("incorrect passphrase, or the key file was modified")]
+    WrongPassphrase,
+    /// Authenticated decryption failed.
+    #[error("decryption failed: wrong key, or the data was corrupted or tampered with")]
+    Decryption,
+    /// A cryptographic primitive reported an internal failure.
+    #[error("cryptographic operation failed: {0}")]
+    Crypto(&'static str),
+    /// Argon2id could not derive a key.
+    #[error("key derivation failed: {0}")]
+    Kdf(String),
+    /// Key derivation parameters are out of the accepted range.
+    #[error("invalid key derivation parameters: {0}")]
+    InvalidKdfParams(String),
+    /// A key file is malformed.
+    #[error("invalid key file: {0}")]
+    InvalidKeyFile(String),
+    /// A key file was written with a version this build does not understand.
+    #[error(
+        "key file version {found} is not supported (this build supports version {supported}); \
+         nothing was changed"
+    )]
+    UnsupportedKeyVersion {
+        /// Version found in the key file.
+        found: u32,
+        /// Version this build reads and writes.
+        supported: u32,
+    },
     /// The operating system could not provide random bytes.
     #[error("failed to gather randomness: {0}")]
     Random(String),

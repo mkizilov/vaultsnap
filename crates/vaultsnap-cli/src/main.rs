@@ -3,6 +3,7 @@
 mod cli;
 mod commands;
 mod logging;
+mod passphrase;
 
 use std::process::ExitCode;
 

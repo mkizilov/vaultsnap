@@ -1,10 +1,12 @@
 # VaultSnap security boundaries (planned)
 
 Status: **partly implemented**. Repository creation, the local store (permissions, symlink
-refusal, atomic writes), and locking exist. Encryption, key handling, and restore are not
-implemented yet, so nothing stored today is confidential: the `config` file is plaintext by design
-and holds no secret. This document defines what the implementation must guarantee, and what it
-deliberately does not. See `FORMAT.md` for the data layout.
+refusal, atomic writes), locking, and key management exist: the master key is random, protected by
+an Argon2id-derived key, and per-purpose keys are derived with HKDF. File data and metadata are
+not encrypted yet because backup does not exist yet, so nothing user-supplied is stored at all.
+The `config` file is plaintext by design and holds no secret. This document defines what the
+implementation must guarantee, and what it deliberately does not. See `FORMAT.md` for the data
+layout.
 
 ## Protected assets
 
@@ -36,11 +38,26 @@ the extent documented in `FORMAT.md` once defined.
 
 ## Secrets handling
 
-- The passphrase is never accepted as a command-line argument (visible in process listings and
-  shell history). It will be read from a file (`--password-file`), standard input, or an
-  interactive prompt without echo.
-- Secrets are held in zeroizing buffers and never logged, formatted with `Debug`, or put in error
-  messages.
+- The passphrase is never accepted as a command-line argument or as an environment variable
+  value (both are visible to other processes and often end up in shell history or logs). It is
+  read from an explicit file (`--password-file`, or `VAULTSNAP_PASSWORD_FILE` naming a file) or,
+  when none is given and a terminal is attached, from an interactive prompt with echo disabled
+  (asked twice when creating a repository). Without a file and without a terminal the command
+  fails rather than guessing. The file is read once; one trailing newline is removed; it must be
+  non-empty and at most 4096 bytes, and VaultSnap warns if other users can read it.
+- The passphrase is obtained *before* anything is created on disk.
+- Secrets (passphrase, master key, derived keys, decrypted plaintext) are held in buffers that
+  are zeroed on drop (`zeroize`), and `Passphrase` and `RepositoryKeys` print as `<redacted>`, so
+  they cannot leak through `Debug`, `tracing` fields, or error messages. Tests assert that the
+  passphrase appears in neither output nor stored files, even at `-vvv`.
+- Limits of zeroization: copies made inside dependencies (the cipher key schedule, Argon2's
+  working memory, HKDF's pseudorandom key), by the terminal or operating system, in swap, or by
+  `Clone` of a `Passphrase` are only cleared if and when those components do so. Memory locking
+  (`mlock`) is not used. An attacker who can read VaultSnap's memory is out of scope (above).
+- Randomness (master key, salts, nonces, ids) comes only from the operating system via
+  `getrandom`; there is no fallback generator.
+- Passphrase strength is the user's responsibility. Argon2id slows offline guessing but cannot
+  rescue a weak passphrase, and VaultSnap does not enforce a policy beyond non-empty.
 - Diagnostics (`tracing`) may log counts, ids, and repository paths. They must not log file
   contents or key material. File names are logged only at `debug` level or lower.
 - Key files and the repository are created with owner-only permissions (`0600` files, `0700`

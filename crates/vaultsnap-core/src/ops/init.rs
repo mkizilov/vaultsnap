@@ -3,26 +3,48 @@ use std::io::ErrorKind;
 
 use crate::blocking::blocking;
 use crate::config::RepositoryConfig;
+use crate::crypto::KdfParams;
 use crate::error::{Error, Result};
+use crate::keys::{write_key_slot, RepositoryKeys};
 use crate::repository::{Repository, RepositoryLayout, REQUIRED_DIRS};
+use crate::secret::Passphrase;
 use crate::store::LocalStore;
 use crate::util::{random_hex, unix_now};
 
 impl Repository {
-    /// Creates a new, empty repository at the repository root and returns its configuration.
+    /// Creates a new repository at the repository root and returns its configuration.
+    ///
+    /// A random master key is generated and stored in `keys/`, encrypted under a key derived
+    /// from `passphrase` with Argon2id (default cost parameters; see [`KdfParams`]). The master
+    /// key itself is never written unencrypted and is zeroed before this call returns.
     ///
     /// Safe to repeat: an existing repository is never modified. If one is found the call fails
     /// with [`Error::AlreadyInitialized`], or with [`Error::UnsupportedVersion`] when it was
     /// written by an incompatible format version. A directory holding anything other than an
     /// interrupted `init` is rejected with [`Error::InvalidPath`]. The `config` file is written
     /// last, so an interrupted `init` leaves no half-valid repository and can simply be re-run.
-    pub async fn init(&self) -> Result<RepositoryConfig> {
+    pub async fn init(&self, passphrase: &Passphrase) -> Result<RepositoryConfig> {
+        self.init_with_kdf(passphrase, KdfParams::default()).await
+    }
+
+    /// Like [`Repository::init`] with explicit key derivation cost parameters.
+    pub async fn init_with_kdf(
+        &self,
+        passphrase: &Passphrase,
+        kdf: KdfParams,
+    ) -> Result<RepositoryConfig> {
+        kdf.validate()?;
         let store = self.store();
-        blocking(move || init_repository(&store)).await
+        let passphrase = passphrase.clone();
+        blocking(move || init_repository(&store, &passphrase, kdf)).await
     }
 }
 
-fn init_repository(store: &LocalStore) -> Result<RepositoryConfig> {
+fn init_repository(
+    store: &LocalStore,
+    passphrase: &Passphrase,
+    kdf: KdfParams,
+) -> Result<RepositoryConfig> {
     let root = store.root();
     if root.as_os_str().is_empty() {
         return Err(Error::InvalidPath("the path is empty".to_owned()));
@@ -41,10 +63,19 @@ fn init_repository(store: &LocalStore) -> Result<RepositoryConfig> {
         store.create_dir(dir)?;
     }
     let config = RepositoryConfig::new(random_hex(16)?, unix_now());
+    let keys = RepositoryKeys::generate()?;
+    let key_file = write_key_slot(store, &config.repository_id, &keys, passphrase, kdf)?;
     match store.write_new(RepositoryLayout::CONFIG_FILE, &config.to_bytes()) {
         Ok(()) => Ok(config),
-        Err(Error::AlreadyExists { .. }) => Err(already_initialized(store)),
-        Err(err) => Err(err),
+        Err(err) => {
+            if let Err(cleanup) = store.remove(&key_file) {
+                tracing::warn!(file = %key_file, error = %cleanup, "failed to remove unused key file");
+            }
+            match err {
+                Error::AlreadyExists { .. } => Err(already_initialized(store)),
+                other => Err(other),
+            }
+        }
     }
 }
 
@@ -83,6 +114,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::testing::{fast_kdf, init, passphrase};
 
     fn temp() -> TempDir {
         tempfile::tempdir().expect("create temporary directory")
@@ -112,52 +144,86 @@ mod tests {
     async fn creates_a_complete_repository() {
         let dir = temp();
         let repo = Repository::at(dir.path().join("repo"));
-        let config = repo.init().await.expect("init");
+        let config = init(&repo).await.expect("init");
 
         let layout = repo.layout();
         assert!(layout.data_dir().is_dir());
         assert!(layout.snapshots_dir().is_dir());
         assert!(layout.locks_dir().is_dir());
+        assert!(layout.keys_dir().is_dir());
         assert!(layout.config_file().is_file());
         assert_eq!(config.format_version, 1);
         assert_eq!(config.repository_id.len(), 32);
         assert_eq!(repo.load_config().await.expect("loads"), config);
-        assert!(repo.store().list("").expect("list").iter().all(|n| !n.starts_with('.')));
+        let names = repo.store().list("").expect("list");
+        assert!(names.iter().all(|name| !name.starts_with('.')), "{names:?}");
+    }
+
+    #[tokio::test]
+    async fn creates_exactly_one_key_file_that_unlocks() {
+        let dir = temp();
+        let repo = Repository::at(dir.path());
+        init(&repo).await.expect("init");
+        assert_eq!(repo.store().list("keys").expect("list").len(), 1);
+        repo.unlock(&passphrase()).await.expect("unlocks");
     }
 
     #[tokio::test]
     async fn creates_missing_parent_directories() {
         let dir = temp();
         let repo = Repository::at(dir.path().join("a").join("b").join("repo"));
-        repo.init().await.expect("init");
+        init(&repo).await.expect("init");
         repo.load_config().await.expect("loads");
     }
 
     #[tokio::test]
     async fn initializes_an_existing_empty_directory() {
         let dir = temp();
-        Repository::at(dir.path()).init().await.expect("init");
+        init(&Repository::at(dir.path())).await.expect("init");
     }
 
     #[tokio::test]
-    async fn each_repository_gets_a_unique_id() {
+    async fn each_repository_gets_a_unique_id_and_master_key() {
         let dir = temp();
         let repo_a = Repository::at(dir.path().join("a"));
         let repo_b = Repository::at(dir.path().join("b"));
-        let a = repo_a.init().await.expect("init a");
-        let b = repo_b.init().await.expect("init b");
+        let a = init(&repo_a).await.expect("init a");
+        let b = init(&repo_b).await.expect("init b");
         assert_ne!(a.repository_id, b.repository_id);
+
+        let keys_a = repo_a.unlock(&passphrase()).await.expect("unlock a");
+        let keys_b = repo_b.unlock(&passphrase()).await.expect("unlock b");
+        let purpose = crate::crypto::KeyPurpose::DataEncryption;
+        let derived_a = keys_a.derive(purpose).expect("derive");
+        let derived_b = keys_b.derive(purpose).expect("derive");
+        assert_ne!(*derived_a, *derived_b);
+    }
+
+    #[tokio::test]
+    async fn invalid_kdf_parameters_are_rejected_before_touching_the_disk() {
+        let dir = temp();
+        let repo = Repository::at(dir.path().join("repo"));
+        let kdf = KdfParams {
+            t_cost: 0,
+            ..fast_kdf()
+        };
+        let err = repo
+            .init_with_kdf(&passphrase(), kdf)
+            .await
+            .expect_err("must fail");
+        assert!(matches!(err, Error::InvalidKdfParams(_)), "{err}");
+        assert!(!dir.path().join("repo").exists());
     }
 
     #[tokio::test]
     async fn repeated_init_fails_and_changes_nothing() {
         let dir = temp();
         let repo = Repository::at(dir.path().join("repo"));
-        let first = repo.init().await.expect("init");
+        let first = init(&repo).await.expect("init");
         let before = tree_state(dir.path());
 
         for _ in 0..3 {
-            let err = repo.init().await.expect_err("must fail");
+            let err = init(&repo).await.expect_err("must fail");
             assert!(matches!(err, Error::AlreadyInitialized { .. }), "{err}");
         }
         assert_eq!(tree_state(dir.path()), before);
@@ -165,12 +231,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_second_init_with_another_passphrase_does_not_replace_the_keys() {
+        let dir = temp();
+        let repo = Repository::at(dir.path());
+        init(&repo).await.expect("init");
+        let other = Passphrase::new(b"a different passphrase".to_vec()).expect("valid");
+        let err = repo
+            .init_with_kdf(&other, fast_kdf())
+            .await
+            .expect_err("must fail");
+        assert!(matches!(err, Error::AlreadyInitialized { .. }), "{err}");
+        repo.unlock(&passphrase()).await.expect("original passphrase still works");
+        assert!(repo.unlock(&other).await.is_err());
+    }
+
+    #[tokio::test]
     async fn init_never_overwrites_data_in_an_existing_repository() {
         let dir = temp();
         let repo = Repository::at(dir.path());
-        repo.init().await.expect("init");
+        init(&repo).await.expect("init");
         fs::write(repo.layout().data_dir().join("object"), b"precious").expect("write object");
-        let _ = repo.init().await;
+        let _ = init(&repo).await;
         let kept = fs::read(repo.layout().data_dir().join("object")).expect("read object");
         assert_eq!(kept, b"precious");
     }
@@ -180,14 +261,14 @@ mod tests {
         for version in ["0", "2", "99"] {
             let dir = temp();
             let repo = Repository::at(dir.path());
-            repo.init().await.expect("init");
+            init(&repo).await.expect("init");
             let path = repo.layout().config_file();
             let text = fs::read_to_string(&path).expect("read config");
             let modified = text.replace("format_version=1", &format!("format_version={version}"));
             fs::write(&path, &modified).expect("write config");
             let before = tree_state(dir.path());
 
-            let err = repo.init().await.expect_err("must fail");
+            let err = init(&repo).await.expect_err("must fail");
             assert!(matches!(err, Error::UnsupportedVersion { .. }), "{version}: {err}");
             assert_eq!(tree_state(dir.path()), before);
             assert_eq!(fs::read_to_string(&path).expect("read config"), modified);
@@ -199,15 +280,16 @@ mod tests {
         let dir = temp();
         fs::write(dir.path().join("config"), b"garbage").expect("write config");
         let repo = Repository::at(dir.path());
-        let err = repo.init().await.expect_err("must fail");
+        let err = init(&repo).await.expect_err("must fail");
         assert!(matches!(err, Error::InvalidConfig(_)), "{err}");
         assert_eq!(fs::read(dir.path().join("config")).expect("read"), b"garbage");
         assert!(!dir.path().join("data").exists());
+        assert!(!dir.path().join("keys").exists());
     }
 
     #[tokio::test]
     async fn an_empty_path_is_rejected() {
-        let err = Repository::at("").init().await.expect_err("must fail");
+        let err = init(&Repository::at("")).await.expect_err("must fail");
         assert!(matches!(err, Error::InvalidPath(_)), "{err}");
     }
 
@@ -216,8 +298,7 @@ mod tests {
         let dir = temp();
         let file = dir.path().join("repo");
         fs::write(&file, b"not a directory").expect("write file");
-        let repo = Repository::at(&file);
-        let err = repo.init().await.expect_err("must fail");
+        let err = init(&Repository::at(&file)).await.expect_err("must fail");
         assert!(matches!(err, Error::InvalidPath(_)), "{err}");
         assert_eq!(fs::read(&file).expect("read"), b"not a directory");
     }
@@ -228,7 +309,7 @@ mod tests {
         let file = dir.path().join("file");
         fs::write(&file, b"x").expect("write file");
         let repo = Repository::at(file.join("repo"));
-        assert!(repo.init().await.is_err());
+        assert!(init(&repo).await.is_err());
         assert_eq!(fs::read(&file).expect("read"), b"x");
     }
 
@@ -237,21 +318,33 @@ mod tests {
         let dir = temp();
         fs::write(dir.path().join("photos.jpg"), b"jpeg").expect("write file");
         let before = tree_state(dir.path());
-        let repo = Repository::at(dir.path());
-        let err = repo.init().await.expect_err("must fail");
+        let err = init(&Repository::at(dir.path())).await.expect_err("must fail");
         assert!(matches!(err, Error::InvalidPath(_)), "{err}");
         assert!(err.to_string().contains("photos.jpg"), "{err}");
         assert_eq!(tree_state(dir.path()), before);
     }
 
     #[tokio::test]
-    async fn an_interrupted_init_can_be_resumed() {
+    async fn an_interrupted_init_can_be_resumed_and_ignores_the_stray_key_file() {
         let dir = temp();
+        let repo = Repository::at(dir.path());
         fs::create_dir(dir.path().join("data")).expect("mkdir");
         fs::write(dir.path().join(".tmp-0123456789abcdef"), b"half").expect("write temp");
-        let repo = Repository::at(dir.path());
-        repo.init().await.expect("init resumes");
+
+        // An earlier attempt got as far as writing a key file for a repository id that never
+        // received a config.
+        let store = repo.store();
+        store.create_dir("keys").expect("mkdir");
+        let stray = RepositoryKeys::generate().expect("generate");
+        let stray_id = "fedcba9876543210fedcba9876543210";
+        write_key_slot(&store, stray_id, &stray, &passphrase(), fast_kdf()).expect("stray");
+
+        init(&repo).await.expect("init resumes");
         repo.load_config().await.expect("loads");
+        let keys = repo.unlock(&passphrase()).await.expect("unlocks");
+        let purpose = crate::crypto::KeyPurpose::ContentId;
+        let stray_key = stray.derive(purpose).expect("derive");
+        assert_ne!(*keys.derive(purpose).expect("derive"), *stray_key);
     }
 
     #[cfg(unix)]
@@ -261,7 +354,7 @@ mod tests {
 
         let dir = temp();
         let repo = Repository::at(dir.path().join("repo"));
-        repo.init().await.expect("init");
+        init(&repo).await.expect("init");
         let layout = repo.layout();
         let mode = |path: &Path| {
             let metadata = fs::metadata(path).expect("metadata");
@@ -271,17 +364,23 @@ mod tests {
         assert_eq!(mode(&layout.data_dir()), 0o700);
         assert_eq!(mode(&layout.snapshots_dir()), 0o700);
         assert_eq!(mode(&layout.locks_dir()), 0o700);
+        assert_eq!(mode(&layout.keys_dir()), 0o700);
         assert_eq!(mode(&layout.config_file()), 0o600);
+        let store = repo.store();
+        for name in store.list("keys").expect("list") {
+            assert_eq!(mode(&layout.keys_dir().join(name)), 0o600);
+        }
     }
 
     #[test]
-    fn concurrent_init_has_exactly_one_winner() {
+    fn concurrent_init_has_exactly_one_winner_and_a_usable_repository() {
         let dir = temp();
         let store = LocalStore::new(dir.path().join("repo"));
+        let pass = passphrase();
         let results: Vec<Result<RepositoryConfig>> = std::thread::scope(|scope| {
             let mut handles = Vec::new();
             for _ in 0..8 {
-                handles.push(scope.spawn(|| init_repository(&store)));
+                handles.push(scope.spawn(|| init_repository(&store, &pass, fast_kdf())));
             }
             handles
                 .into_iter()
@@ -296,5 +395,7 @@ mod tests {
         }
         let winner = results.iter().find_map(|r| r.as_ref().ok()).expect("a winner");
         assert_eq!(&RepositoryConfig::load(&store).expect("loads"), winner);
+        crate::keys::unlock(&store, &winner.repository_id, &pass).expect("winner's keys unlock");
+        assert_eq!(store.list("keys").expect("list").len(), 1, "losers remove their key files");
     }
 }

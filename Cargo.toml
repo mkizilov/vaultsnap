@@ -10,14 +10,20 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
 clap = { version = "4.5", features = ["derive", "env"] }
 getrandom = "0.2"
+hkdf = "0.12"
+rpassword = "7"
+sha2 = "0.10"
 tempfile = "3.10"
 thiserror = "2"
 tokio = "1.40"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 vaultsnap-core = { path = "crates/vaultsnap-core" }
+zeroize = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -27,6 +33,10 @@ all = { level = "warn", priority = -1 }
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
+
+# Argon2id is deliberately slow; unoptimized dependencies would make debug builds and tests crawl.
+[profile.dev.package."*"]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

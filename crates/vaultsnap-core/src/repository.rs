@@ -15,10 +15,11 @@ use crate::store::LocalStore;
 pub const FORMAT_VERSION: u32 = 1;
 
 /// Directories `init` creates and every later operation requires.
-pub(crate) const REQUIRED_DIRS: [&str; 3] = [
+pub(crate) const REQUIRED_DIRS: [&str; 4] = [
     RepositoryLayout::DATA_DIR,
     RepositoryLayout::SNAPSHOTS_DIR,
     RepositoryLayout::LOCKS_DIR,
+    RepositoryLayout::KEYS_DIR,
 ];
 
 /// Paths of the well-known entries inside a repository root. Pure path arithmetic, no I/O.
@@ -30,7 +31,7 @@ pub struct RepositoryLayout {
 impl RepositoryLayout {
     /// Repository configuration file name.
     pub const CONFIG_FILE: &'static str = "config";
-    /// Directory holding key slots. Created by the stage that introduces encryption.
+    /// Directory holding key files: the passphrase-wrapped master key.
     pub const KEYS_DIR: &'static str = "keys";
     /// Directory holding snapshot metadata objects.
     pub const SNAPSHOTS_DIR: &'static str = "snapshots";
@@ -159,6 +160,7 @@ pub(crate) fn open_repository(store: &LocalStore) -> Result<RepositoryConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::init;
 
     #[test]
     fn layout_matches_the_documented_format() {
@@ -192,8 +194,8 @@ mod tests {
     }
 
     #[test]
-    fn required_dirs_are_data_snapshots_and_locks() {
-        assert_eq!(REQUIRED_DIRS, ["data", "snapshots", "locks"]);
+    fn required_dirs_are_data_snapshots_locks_and_keys() {
+        assert_eq!(REQUIRED_DIRS, ["data", "snapshots", "locks", "keys"]);
     }
 
     #[tokio::test]
@@ -226,7 +228,7 @@ mod tests {
     async fn open_detects_missing_directories_and_newer_versions() {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let repo = Repository::at(dir.path());
-        repo.init().await.expect("init");
+        init(&repo).await.expect("init");
         repo.load_config().await.expect("healthy repository opens");
 
         fs::remove_dir(repo.layout().locks_dir()).expect("remove locks");
@@ -253,7 +255,7 @@ mod tests {
         let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
         assert!(matches!(err, Error::NotARepository { .. }), "{err}");
 
-        repo.init().await.expect("init");
+        init(&repo).await.expect("init");
         let exclusive = repo.lock(LockKind::Exclusive).await.expect("exclusive");
         let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
         assert!(matches!(err, Error::Locked { .. }), "{err}");

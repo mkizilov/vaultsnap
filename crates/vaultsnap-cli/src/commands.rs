@@ -5,11 +5,28 @@ use vaultsnap_core::{
 };
 
 use crate::cli::{Cli, Command};
+use crate::passphrase;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error("no repository specified: pass --repo <PATH> or set VAULTSNAP_REPO")]
     MissingRepository,
+    #[error("cannot read password file {}: {}", .path.display(), .source)]
+    PasswordFile {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    #[error("password file {} is larger than 4096 bytes", .path.display())]
+    PasswordFileTooLarge { path: std::path::PathBuf },
+    #[error(
+        "no terminal available to ask for a passphrase: pass --password-file <FILE> \
+         (or set VAULTSNAP_PASSWORD_FILE)"
+    )]
+    NoTerminal,
+    #[error("the two passphrases do not match")]
+    PassphraseMismatch,
+    #[error("cannot read the passphrase from the terminal: {0}")]
+    Terminal(std::io::Error),
     #[error("repository check found {0} problem(s)")]
     CheckFailed(usize),
     #[error(transparent)]
@@ -23,7 +40,8 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
 
     match cli.command {
         Command::Init => {
-            let config = repo.init().await?;
+            let passphrase = passphrase::read_new(cli.password_file.as_deref())?;
+            let config = repo.init(&passphrase).await?;
             println!(
                 "created VaultSnap repository {} at {}",
                 config.repository_id,

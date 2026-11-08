@@ -47,11 +47,22 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   `config` (strict `config` file parser/writer), `store` (`LocalStore`: validated names, symlink
   refusal, atomic `write_new`/`write_replace`, private permissions), `lock` (`RepositoryLock`),
   `ops/*` (one file per operation, each an `async` method on `Repository`), `blocking` (runs the
-  synchronous store on Tokio's blocking pool), `util` (randomness, time). No CLI or terminal
-  concerns here. All repository file access goes through `LocalStore`; do not use `std::fs`
-  directly on repository paths elsewhere.
-- Implemented so far: `init`, config, store, locks. `backup`, `snapshots`, `restore`, `check`,
-  `prune` are stubs. No encryption yet.
+  synchronous store on Tokio's blocking pool), `util` (randomness, hex, time), `kv` (strict
+  `key=value` parser shared by `config` and key files), `secret` (`Passphrase`), `crypto` (Argon2id
+  `KdfParams`, HKDF `KeyPurpose`/`derive_key`, XChaCha20-Poly1305 `seal`/`open`), `keys`
+  (`RepositoryKeys`, key files, unlocking). No CLI or terminal concerns here. All repository file
+  access goes through `LocalStore`; do not use `std::fs` directly on repository paths elsewhere.
+- Cryptography rules: only established crates, never a hand-written primitive; randomness only
+  through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
+  print `<redacted>`; never format a secret into a log, error, or `Debug` output; any change to
+  key file layout, AAD, or HKDF labels is a format change (update `docs/FORMAT.md`, bump versions,
+  add tests). Tests use `testing::fast_kdf()` (cheap Argon2 parameters); production code never
+  does.
+- Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`). `backup`,
+  `snapshots`, `restore`, `check`, `prune` are stubs. File data is not encrypted yet (no backup).
+- CLI passphrases (`passphrase` module) come from `--password-file`/`VAULTSNAP_PASSWORD_FILE` or a
+  no-echo prompt, never from arguments or environment values, and are read before any repository
+  file is created.
 - `crates/vaultsnap-cli`: binary `vaultsnap`. `cli` (clap definitions), `commands` (argument to
   core mapping and printing), `logging` (tracing setup, stderr only).
 - `docs/`: `FORMAT.md` and `SECURITY.md`.
