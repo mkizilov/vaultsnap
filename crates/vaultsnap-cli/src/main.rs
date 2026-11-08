@@ -10,6 +10,7 @@ mod interrupt;
 mod logging;
 mod passphrase;
 mod progress;
+mod prune;
 mod restore;
 
 use std::process::ExitCode;

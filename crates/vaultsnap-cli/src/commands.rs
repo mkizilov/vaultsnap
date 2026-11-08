@@ -1,9 +1,9 @@
 //! Maps parsed arguments onto `vaultsnap-core` operations and prints results.
 
-use vaultsnap_core::{Error, PruneOptions, Repository, RetentionPolicy};
+use vaultsnap_core::{Error, Repository};
 
 use crate::cli::{Cli, Command};
-use crate::{backup, check, inspect, passphrase, restore};
+use crate::{backup, check, inspect, passphrase, prune, restore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -44,6 +44,19 @@ pub enum CliError {
          nothing half-written was left behind"
     )]
     RestoreIncomplete { failed: usize },
+    #[error(
+        "prune deletes data permanently and needs confirmation, but standard input is not a \
+         terminal: look at the plan with --dry-run, then run again with --yes to proceed without \
+         being asked"
+    )]
+    PruneNeedsConfirmation,
+    #[error("not confirmed; nothing was changed")]
+    PruneDeclined,
+    #[error(
+        "the prune finished, but {failed} unreferenced object(s) could not be deleted (listed \
+         above); every kept snapshot is intact and the next prune tries again"
+    )]
+    PruneIncomplete { failed: usize },
     #[error("snapshot {snapshot} has no entry at or below {}", .path.display())]
     PathNotInSnapshot {
         snapshot: String,
@@ -65,8 +78,14 @@ impl CliError {
             Self::BackupIncomplete { .. }
             | Self::DamagedSnapshots { .. }
             | Self::RestoreIncomplete { .. }
+            | Self::PruneIncomplete { .. }
             | Self::CheckFailed(_) => 3,
-            Self::Core(Error::Cancelled | Error::RestoreCancelled | Error::CheckCancelled) => 130,
+            Self::Core(
+                Error::Cancelled
+                | Error::RestoreCancelled
+                | Error::CheckCancelled
+                | Error::PruneCancelled,
+            ) => 130,
             _ => 1,
         }
     }
@@ -109,18 +128,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
             check::run(&repo, cli.password_file.as_deref(), args).await?;
         }
         Command::Prune(args) => {
-            let options = PruneOptions {
-                policy: RetentionPolicy {
-                    keep_last: args.keep_last,
-                    keep_daily: args.keep_daily,
-                    keep_weekly: args.keep_weekly,
-                    keep_monthly: args.keep_monthly,
-                    keep_yearly: args.keep_yearly,
-                },
-                dry_run: args.dry_run,
-            };
-            let report = repo.prune(&options).await?;
-            println!("{} snapshot(s) selected for removal", report.removed.len());
+            prune::run(&repo, cli.password_file.as_deref(), args).await?;
         }
     }
     Ok(())
@@ -138,6 +146,11 @@ mod tests {
         assert_eq!(CliError::DamagedSnapshots { count: 1 }.exit_code(), 3);
         assert_eq!(CliError::RestoreIncomplete { failed: 4 }.exit_code(), 3);
         assert_eq!(CliError::CheckFailed(2).exit_code(), 3);
+        assert_eq!(CliError::PruneIncomplete { failed: 1 }.exit_code(), 3);
+        assert_eq!(CliError::PruneNeedsConfirmation.exit_code(), 1);
+        assert_eq!(CliError::PruneDeclined.exit_code(), 1);
+        assert_eq!(CliError::Core(vaultsnap_core::Error::PruneCancelled).exit_code(), 130);
+        assert_eq!(CliError::Core(vaultsnap_core::Error::PlanChanged).exit_code(), 1);
         assert_eq!(CliError::Core(vaultsnap_core::Error::CheckCancelled).exit_code(), 130);
         assert_eq!(CliError::Core(vaultsnap_core::Error::RestoreCancelled).exit_code(), 130);
         let conflict = vaultsnap_core::Error::RestoreConflict {

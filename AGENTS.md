@@ -43,7 +43,8 @@ Extend this file with the project's language-specific architecture and verificat
 Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-toolchain.toml`.
 
 - `crates/vaultsnap-core`: library. `error` (thiserror `Error`), `snapshot` (`SnapshotId`),
-  `retention` (`RetentionPolicy`), `repository` (`Repository`, `RepositoryLayout`, open/verify),
+  `retention` (`RetentionPolicy`, `select` = a pure function from snapshot times to `Decision`s,
+  UTC calendar, no clock), `repository` (`Repository`, `RepositoryLayout`, open/verify),
   `config` (strict `config` file parser/writer), `store` (`LocalStore`: validated names, symlink
   refusal, atomic `write_new`/`write_replace`, private permissions), `lock` (`RepositoryLock`),
   `ops/*` (one file per operation, each an `async` method on `Repository`), `blocking` (runs the
@@ -84,7 +85,10 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   `Repository::check` is in `ops/check.rs`, `Repository::unlock_for_check` in `ops/unlock.rs`;
   `ChunkStore::peek` and `chunk_store::object::inspect` are the keyless structural examination
   that quick mode and `decode` share; the specification, every finding kind, and the advice for
-  each are in `docs/CHECK.md`).
+  each are in `docs/CHECK.md`), `prune` (`PruneOptions`, `PruneMode`, `PlanDigest`, `PruneReport`;
+  `engine` = read, decide, mark, check, sweep, verify; `Repository::prune` is in `ops/prune.rs`;
+  `SnapshotStore::remove`/`sync_removals` and `ChunkStore::objects`/`remove` are the only
+  deleting primitives and are `pub(crate)`; the specification is `docs/PRUNE.md`).
 - Cryptography rules: only established crates, never a hand-written primitive; randomness only
   through `util::fill_random`/`random_bytes`; secrets live in `Zeroizing` buffers or types that
   print `<redacted>`; never format a secret into a log, error, or `Debug` output; any change to
@@ -130,10 +134,22 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   concurrent backup can only produce orphans; counts are exact even when the listing is limited,
   and the report is deterministic whatever the thread count; no name from the backed-up data
   appears in a finding (stray entries are the one exception and are escaped on output).
+- Prune invariants (do not break them without updating `docs/PRUNE.md`, `docs/SECURITY.md`, and
+  the tests): prune is the **only** code that deletes repository data, through the `pub(crate)`
+  primitives above; it fails closed (an unreadable snapshot or a kept snapshot missing chunks
+  means nothing is changed); the set of chunks to keep is computed from the kept snapshots before
+  the first deletion; snapshot files are removed and the directory synced **before** any chunk is
+  removed, so a snapshot file that exists always has its chunks; only names that are snapshot ids
+  or chunk objects (`ChunkStore::objects`) are ever deleted, never strays; deleting is never the
+  default (`PruneMode::DryRun`), a person's confirmation carries the `PlanDigest` of what they saw
+  and a changed plan deletes nothing, and the CLI refuses to delete without a terminal unless
+  `--yes`; a deleting run holds the exclusive lock, a dry run the shared one; the newest snapshot
+  is never removed; retention uses the manifest's `created` time, UTC, never file times or the
+  clock; a cancelled or failed run leaves every remaining snapshot complete.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
-  manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, `restore`, and
-  `check`. Only `prune` is a stub.
+  manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, `restore`,
+  `check`, and `prune`. Every command is implemented.
 - Tests that need privileges or special files must detect their absence at run time and say so
   (for example when run as root, or when `mkfifo` or sockets are unavailable) rather than fail;
   any test that changes permissions must restore them with a guard so temporary directories can
@@ -151,15 +167,17 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   unlock, progress line on a terminal only, SIGINT/SIGTERM to a `CancelToken`, summary),
   `restore` (the `restore` command: policies, progress, report, problems listed on stderr,
   exit 3 when some paths failed), `check` (the `check` command: lenient unlock, progress, `human`
-  and `json` renderers, golden tests; exit 3 when errors were found), `interrupt` and `progress`
-  (shared by `backup`, `restore`, and `check`),
+  and `json` renderers, golden tests; exit 3 when errors were found), `prune` (the `prune`
+  command: policy and permission checked before unlocking, plan, the `yes` question, `human` text
+  and golden tests; exit 3 when objects could not be deleted), `interrupt` and `progress` (shared
+  by `backup`, `restore`, `check`, and `prune`),
   `inspect` (`snapshots`/`show`/`ls`/`diff`: `human` = text, `json` = one JSON document built
   from explicit `serde` structs, `tests` = golden output), `format` (sizes, UTC times, `escape`
   for names, `ls`-style modes), `passphrase` (including `unlock`), `logging` (tracing setup,
   stderr only). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
-- `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, `CHECK.md`, and
-  `CLI.md` (the command reference; every new or changed command, option, or output goes there
-  with an example).
+- `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, `CHECK.md`,
+  `PRUNE.md`, and `CLI.md` (the command reference; every new or changed command, option, or output
+  goes there with an example).
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors
 are typed in core and converted at the CLI boundary; user-supplied identifiers are validated

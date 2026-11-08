@@ -145,6 +145,16 @@ impl SnapshotStore {
             .collect())
     }
 
+    /// Deletes the snapshot file `id`. Only a prune may call this.
+    pub(crate) fn remove(&self, id: &SnapshotId) -> Result<()> {
+        self.store.remove(&id.object_name())
+    }
+
+    /// Makes the removal of snapshot files durable (see [`LocalStore::sync_directory`]).
+    pub(crate) fn sync_removals(&self) -> Result<()> {
+        self.store.sync_directory(RepositoryLayout::SNAPSHOTS_DIR)
+    }
+
     /// The snapshot a reference names: a full id as is, or the one snapshot whose id starts with
     /// the given text. Reads file names only, so the result is a candidate; [`SnapshotStore::load`]
     /// is what authenticates it. Fails with [`Error::SnapshotNotFound`] if nothing matches and
@@ -594,6 +604,19 @@ mod tests {
         }
         // The first commit was given the smallest age, so it is the newest.
         assert_eq!(fx.snapshots.ids_newest_first().expect("ids"), committed);
+    }
+
+    #[test]
+    fn a_snapshot_can_be_removed_and_only_that_one() {
+        let fx = Fixture::new();
+        let first = commit_with_id(&fx, &"aa".repeat(32));
+        let second = commit_with_id(&fx, &"bb".repeat(32));
+        fx.snapshots.remove(&first).expect("remove");
+        fx.snapshots.sync_removals().expect("sync");
+        assert_eq!(fx.snapshots.ids().expect("ids"), [second.clone()]);
+        assert!(matches!(fx.snapshots.load(&first), Err(Error::SnapshotNotFound(_))));
+        assert!(fx.snapshots.load(&second).is_ok());
+        assert!(fx.snapshots.remove(&first).expect_err("already gone").is_not_found());
     }
 
     fn commit_with_id(fx: &Fixture, id: &str) -> SnapshotId {

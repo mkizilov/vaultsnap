@@ -14,7 +14,7 @@ vaultsnap [--repo PATH] [--password-file FILE] [-v...] <COMMAND>
 | [`diff`](#diff) | Compare two snapshots | implemented |
 | [`restore`](#restore) | Restore a snapshot, or selected paths, into a directory | implemented |
 | [`check`](#check) | Verify repository integrity, quick or full; report only, never repairs | implemented |
-| [`prune`](#prune) | Remove snapshots outside a retention policy | not implemented |
+| [`prune`](#prune) | Remove snapshots outside a retention policy and the chunks nothing needs; the only command that deletes | implemented |
 
 ## Global options
 
@@ -27,7 +27,7 @@ vaultsnap [--repo PATH] [--password-file FILE] [-v...] <COMMAND>
 
 Options may come before or after the command name.
 
-`backup`, `snapshots`, `show`, `ls`, `diff`, and `restore` unlock the repository first, so a
+`backup`, `snapshots`, `show`, `ls`, `diff`, `restore`, and `prune` unlock the repository first, so a
 wrong passphrase fails before anything is read, printed, or written. Without `--password-file` and without a
 terminal, they fail with *no terminal available to ask for a passphrase*.
 
@@ -36,10 +36,10 @@ terminal, they fail with *no terminal available to ask for a passphrase*.
 | Status | Meaning |
 |--------|---------|
 | 0 | Success. For `diff`, success does **not** mean "no differences": differences are normal output. |
-| 1 | The command failed. The repository was not changed. `backup` created no snapshot; `restore` normally restored nothing (see [`restore`](#restore) for the one exception). |
+| 1 | The command failed. The repository was not changed. `backup` created no snapshot; `restore` normally restored nothing (see [`restore`](#restore) for the one exception); `prune` normally deleted nothing (see [`prune`](#prune)). |
 | 2 | Usage error: unknown option, missing argument, or a malformed snapshot reference. Nothing ran. |
-| 3 | The command finished, but its result has a problem. `backup`: the snapshot was created but some paths could not be read. `snapshots`: some snapshots are damaged and are not shown. `restore`: everything that could be restored was, but some paths could not be (a damaged or missing chunk, a refused write). `check`: the check ran and found **errors** (damage or loss); warnings alone give status 0. |
-| 130 | `backup`, `restore`, or `check` was cancelled with Ctrl-C or SIGTERM. |
+| 3 | The command finished, but its result has a problem. `backup`: the snapshot was created but some paths could not be read. `snapshots`: some snapshots are damaged and are not shown. `restore`: everything that could be restored was, but some paths could not be (a damaged or missing chunk, a refused write). `check`: the check ran and found **errors** (damage or loss); warnings alone give status 0. `prune`: it finished, but some unreferenced chunk objects could not be deleted. |
+| 130 | `backup`, `restore`, `check`, or `prune` was cancelled with Ctrl-C or SIGTERM. |
 
 Standard output carries the result; warnings and errors go to standard error. If the reader of
 standard output goes away (`vaultsnap ls … | head`), the output simply ends.
@@ -492,15 +492,103 @@ there is no time in it, so the same repository gives the same bytes.
 
 ## prune
 
-The command exists and validates its arguments, but does nothing yet: it fails with status 1 and
-*… is not implemented yet*.
-
 ```sh
+# Look first: shows which snapshots go and what space is freed, changes nothing
 vaultsnap --repo ~/backups prune --keep-last 7 --keep-monthly 12 --dry-run
+
+# Apply it: shows the plan, then waits for you to type "yes"
+vaultsnap --repo ~/backups prune --keep-last 7 --keep-monthly 12
+
+# In a script (standard input is not a terminal): say so explicitly
+vaultsnap --repo ~/backups --password-file /etc/vaultsnap.pass prune --keep-daily 7 --keep-weekly 4 --yes
 ```
 
-`prune` takes `--keep-last`, `--keep-daily`, `--keep-weekly`, `--keep-monthly`, `--keep-yearly` (at
-least one is required) and `--dry-run`.
+Removes the snapshots a retention policy does not keep, and then the chunk objects that no kept
+snapshot needs. **This is the only command that deletes data, and it cannot be undone.** How the
+policy is applied, why a kept snapshot cannot lose a chunk, and what happens when a prune is
+interrupted are in [`PRUNE.md`](PRUNE.md).
+
+| Option | Meaning |
+|--------|---------|
+| `--keep-last N` | Keep the N newest snapshots. |
+| `--keep-daily N` | Keep the newest snapshot of each of the N most recent days that have a snapshot. |
+| `--keep-weekly N` | The same for ISO weeks (Monday to Sunday). |
+| `--keep-monthly N` | The same for months. |
+| `--keep-yearly N` | The same for years. |
+| `--dry-run` | Print the plan and change nothing. Wins over `--yes`. |
+| `--yes` | Delete without asking. Required when standard input is not a terminal. |
+
+At least one `--keep-*` option is required, every count must be at least 1, and a snapshot is kept
+if **any** rule selects it. Days, months, and years are UTC, and times come from the authenticated
+manifests. The newest snapshot is always kept. The policy and the missing confirmation are checked
+before the passphrase is asked for.
+
+Without `--dry-run` and `--yes`, `prune` prints the plan to standard output, asks on standard error
+and reads one line from standard input. Only the word `yes` proceeds; anything else, an empty line,
+or the end of the input stops with *not confirmed; nothing was changed*. What you confirm is what is
+executed: if a snapshot was added or removed while you were deciding, the prune fails with *the
+repository changed since the plan was made* and deletes nothing. When standard input is not a
+terminal and `--yes` is not given, the command refuses and changes nothing.
+
+Output of a dry run (the numbers are illustrative, the layout is what the command prints and
+`crates/vaultsnap-cli/src/prune/tests.rs` asserts):
+
+```
+Policy       keep last 2
+Snapshots    3 (2 kept, 1 to remove)
+
+  REMOVE  3f2a91c4  2025-06-01T09:00:02Z
+  KEEP    8c0d17e5  2025-06-02T09:00:01Z  last
+  KEEP    b41e66a9  2025-06-03T09:00:03Z  last
+
+Chunks       40 in use by the kept snapshots
+Unreferenced 3 objects (3.5 KiB) that no kept snapshot needs
+
+Dry run: nothing was changed.
+```
+
+The question, on standard error:
+
+```
+This permanently deletes 1 snapshot and 3 unreferenced chunk objects (3.5 KiB) from the repository.
+This cannot be undone. Type "yes" to continue:
+```
+
+After the plan, an executed prune prints:
+
+```
+Removed      1 snapshot and 3 chunk objects (3.5 KiB)
+Verified     all 40 chunks used by the kept snapshots are present
+Took         0.1s
+```
+
+`Verified` is the check made at the end: every chunk a kept snapshot needs still exists. If some
+objects could not be deleted, a `Not removed` line appears and each object is listed on standard
+error with the reason (at most 100 are listed; the count is exact):
+
+```
+2 could not be deleted:
+  data/9c/9c1e…7a: failed to remove …: Permission denied (os error 13)
+```
+
+A terminal also shows a progress line (`removing chunk objects: 12 of 40`) that is erased when the
+prune ends; it is never printed when standard error is not a terminal. The `yes` question cannot be
+answered through a pipe, by design: scripts use `--yes`.
+
+### Exit status
+
+| Status | Meaning |
+|--------|---------|
+| 0 | A dry run, or a prune that deleted everything it planned (possibly nothing). |
+| 1 | Refused or failed. Nearly always nothing was changed: an invalid policy, no way to ask and no `--yes`, *not confirmed*, a snapshot that cannot be read, a kept snapshot that is already missing chunks, a plan that changed, a repository that is locked, a wrong passphrase. The one exception is an error while removing a snapshot file, which stops the run there; every remaining snapshot is still complete and running again finishes the job. |
+| 2 | Usage error (a non-numeric count, an unknown option). |
+| 3 | The prune finished and every kept snapshot is intact, but some unreferenced chunk objects could not be deleted. They are harmless leftovers; the next prune tries again. |
+| 130 | Cancelled with Ctrl-C or SIGTERM. At the question nothing was changed. During a run, every snapshot that still exists is complete; run it again to finish. |
+
+A prune that deletes holds the **exclusive** lock for its whole run and fails with *locked* while
+a backup, restore, check, or another prune is running. A dry run holds only the shared lock. A
+process killed while holding a lock leaves a stale lock file that blocks pruning until it is
+removed by hand; see [`PRUNE.md`](PRUNE.md#locking).
 
 ---
 

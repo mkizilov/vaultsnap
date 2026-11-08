@@ -16,11 +16,11 @@ A reliable encrypted incremental backup utility written in Rust.
 | `diff`      | Implemented: added, deleted, and modified files between two snapshots   |
 | `restore`   | Implemented: safe restore of a snapshot or selected paths (see below)  |
 | `check`     | Implemented: quick or full verification; reports, never repairs        |
-| `prune`     | Not implemented; validates the retention policy first                  |
+| `prune`     | Implemented: retention policy plus mark-and-sweep; dry run, confirmation |
 
 Key management, a streaming content-defined chunker, an encrypted, deduplicating chunk store, a
 filesystem scanner, encrypted snapshot manifests, the `backup` command that connects them, the
-commands that inspect snapshot history, `restore`, and `check` are in place. **None of this code
+commands that inspect snapshot history, `restore`, `check`, and `prune` are in place. **None of this code
 has been compiled or run** (see "Known gaps"). Do not rely on it for real data.
 
 ### Chunking
@@ -233,6 +233,8 @@ The design is specified before the code that implements it:
   links, atomicity, interruption.
 - [`docs/CHECK.md`](docs/CHECK.md): what `check` examines, what each mode can and cannot find,
   the report, and how to respond to each failure.
+- [`docs/PRUNE.md`](docs/PRUNE.md): retention rules, what `prune` deletes and in which order, why
+  a kept snapshot cannot lose a chunk, confirmation, locking, and interruption.
 - [`docs/CLI.md`](docs/CLI.md): every command with examples, exit statuses, size definitions,
   and the JSON output.
 - [`docs/SECURITY.md`](docs/SECURITY.md): threat model, secrets handling, restore safety.
@@ -268,7 +270,7 @@ no way to recover a lost passphrase.
 
 | Crate             | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot manifests, the backup engine, retention, operations |
+| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot manifests, the backup engine, retention and garbage collection, operations |
 | `vaultsnap-cli`   | Binary `vaultsnap`: `clap` argument parsing and output          |
 
 Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiserror` (errors),
@@ -292,7 +294,9 @@ vaultsnap --repo /path/to/repo diff <older> <newer> --json
 vaultsnap --repo /path/to/repo restore <snapshot-id-or-start> --target /path/to/restore \
     [--include /path/inside]... [--on-conflict fail|skip|overwrite] [--symlinks contained|skip|as-recorded]
 vaultsnap --repo /path/to/repo check --read-data
-vaultsnap --repo /path/to/repo prune --keep-last 7 --keep-monthly 12 --dry-run
+vaultsnap --repo /path/to/repo prune --keep-last 7 --keep-monthly 12 --dry-run   # look first
+vaultsnap --repo /path/to/repo prune --keep-last 7 --keep-monthly 12             # asks for "yes"
+vaultsnap --repo /path/to/repo prune --keep-last 7 --keep-monthly 12 --yes       # scripts
 ```
 
 `--repo` can also be set with `VAULTSNAP_REPO`. Use `-v`, `-vv`, `-vvv` for more diagnostics on
@@ -347,6 +351,15 @@ Tests:
   `crates/vaultsnap-cli/tests/check.rs`; the exact text and JSON for fixed reports are unit tests
   in `crates/vaultsnap-cli/src/check/tests.rs`; the keyless object inspection, the directory walk,
   and the verification pool have unit tests beside the code in `crates/vaultsnap-core/src/`.
+- Prune tests: the retention rules (calendar boundaries, ISO weeks, ties) and the pipeline (shared
+  chunks, refusals, plan digests, cancellation after every possible number of deletions, a
+  deletion that fails) are unit tests in `crates/vaultsnap-core/src/retention.rs` and
+  `src/prune/engine.rs`; prunes of real backups, with every kept snapshot restored byte for byte
+  and fully checked afterwards, dry runs and refusals that change nothing, interrupted prunes
+  finished by a rerun, and prunes racing a backup or another prune are in
+  `crates/vaultsnap-core/tests/prune.rs`; the binary is exercised in
+  `crates/vaultsnap-cli/tests/prune.rs`, and the exact text and the confirmation rules are unit
+  tests in `crates/vaultsnap-cli/src/prune/tests.rs`.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -395,6 +408,14 @@ is compiled by `clippy --all-targets` but not run).
   reasoned about but not observed; on non-Unix platforms the link-related tests are skipped. A
   quick check cannot see damage inside a chunk's payload, and nothing can see a deleted snapshot
   (`docs/CHECK.md`).
+- `prune` is unverified like everything else. Specifically: the interactive question (`Type
+  "yes"`) needs a terminal, so only its logic is unit tested and the flow around it is not tested
+  end to end; Ctrl-C and SIGTERM through the binary are not tested; the race tests (a prune
+  against a backup, two prunes) assert only that every outcome is a success or a lock conflict and
+  that nothing is damaged, because which one wins is not deterministic; and calendar retention
+  (days, weeks, months, years) is tested on hand-made times only, since a real backup cannot be
+  given a time. The test that makes objects undeletable skips itself as root. There is no
+  append-only mode and no way to forget one named snapshot (`docs/PRUNE.md`, `docs/SECURITY.md`).
 - Several lines are longer than rustfmt's limit because nothing could be formatted; the first
   toolchain run needs `cargo fmt --all`, and `clippy` may report lints that were not seen.
 - Scanner behavior on real mount points, on Windows, and on network filesystems is unverified;

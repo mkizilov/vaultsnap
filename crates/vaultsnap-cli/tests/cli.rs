@@ -55,13 +55,18 @@ fn prune_without_keep_rules_is_rejected() {
 }
 
 #[test]
-fn unfinished_commands_report_not_implemented_without_touching_the_repository() {
+fn commands_on_a_missing_repository_fail_without_creating_it() {
     let env = TestEnv::default();
-    let invocations: [&[&str]; 1] = [&["prune", "--keep-last", "1"]];
-    for args in invocations {
-        let output = env.run(args);
+    let password_file = env.password_file();
+    for args in [
+        vec!["snapshots"],
+        vec!["check"],
+        vec!["prune", "--keep-last", "1", "--dry-run"],
+        vec!["prune", "--keep-last", "1", "--yes"],
+    ] {
+        let output = env.run_with_password_file(&password_file, &args);
         assert_eq!(output.status.code(), Some(1), "{args:?}");
-        assert!(stderr(&output).contains("not implemented"), "{args:?}");
+        assert!(stderr(&output).contains("is not a VaultSnap repository"), "{args:?}");
     }
     assert!(!env.repo_path().exists());
 }

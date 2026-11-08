@@ -7,5 +7,3 @@ mod prune;
 mod restore;
 mod snapshots;
 mod unlock;
-
-pub use prune::{PruneOptions, PruneReport};

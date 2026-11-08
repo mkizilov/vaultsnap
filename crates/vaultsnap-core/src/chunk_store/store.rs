@@ -10,7 +10,8 @@ use super::object::{
 use crate::blocking::blocking;
 use crate::error::{Error, Result};
 use crate::keys::RepositoryKeys;
-use crate::store::LocalStore;
+use crate::repository::RepositoryLayout;
+use crate::store::{DirEntryKind, LocalStore};
 
 /// What `put` did with a chunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +99,43 @@ impl ChunkStore {
             Err(err) if err.is_not_found() => Err(Error::ChunkNotFound(id.to_hex())),
             other => other,
         }
+    }
+
+    /// Every chunk object in the store with the size of its file, in ascending order of id.
+    ///
+    /// Only entries that are chunk objects by name count: a regular file named by 64 lowercase
+    /// hexadecimal digits in the `data/xx/` directory its first two digits name. Anything else
+    /// (temporary files, strays, links, misplaced files) is not an object and is not listed. The
+    /// listing is complete or it fails; a directory that cannot be read is an error.
+    pub fn objects(&self) -> Result<Vec<(ChunkId, u64)>> {
+        let is_hex = |name: &str, len: usize| {
+            name.len() == len && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        };
+        let mut objects = Vec::new();
+        for shard in self.store.list_entries(RepositoryLayout::DATA_DIR)? {
+            if shard.kind != DirEntryKind::Directory || !is_hex(&shard.name, 2) {
+                continue;
+            }
+            let dir = format!("{}/{}", RepositoryLayout::DATA_DIR, shard.name);
+            for entry in self.store.list_entries(&dir)? {
+                if entry.kind != DirEntryKind::File
+                    || !is_hex(&entry.name, 64)
+                    || !entry.name.starts_with(&shard.name)
+                {
+                    continue;
+                }
+                if let Ok(id) = entry.name.parse::<ChunkId>() {
+                    objects.push((id, entry.len));
+                }
+            }
+        }
+        objects.sort_by_key(|(id, _)| *id);
+        Ok(objects)
+    }
+
+    /// Deletes the object for `id`. Only a prune may call this: nothing else ever removes data.
+    pub(crate) fn remove(&self, id: &ChunkId) -> Result<()> {
+        self.store.remove(&id.object_name())
     }
 
     /// Examines the object stored for `id` without opening it: reads at most its first 12 bytes
@@ -277,6 +315,51 @@ mod tests {
         assert_eq!(fx.chunks.stored_len(&put.id).expect("length"), object_len);
         let on_disk = fs::metadata(fx.path_of(&put.id)).expect("metadata").len();
         assert_eq!(on_disk, object_len);
+    }
+
+    #[test]
+    fn objects_are_listed_by_name_in_id_order_and_everything_else_is_ignored() {
+        let fx = Fx::new();
+        let mut ids: Vec<ChunkId> = (0..6_u64)
+            .map(|seed| fx.chunks.put(&pseudo_random(300 + seed as usize, seed)).expect("put").id)
+            .collect();
+        ids.sort();
+        let data = fx.dir.path().join("data");
+        fs::write(data.join("loose"), b"x").expect("write");
+        fs::create_dir(data.join("zz")).expect("mkdir");
+        fs::write(data.join("zz").join("a".repeat(64)), b"x").expect("write");
+        let shard = data.join(&ids[0].to_hex()[..2]);
+        fs::write(shard.join(".tmp-0011223344556677"), b"x").expect("write");
+        fs::write(shard.join("short"), b"x").expect("write");
+        let misplaced = if ids[0].to_hex().starts_with("ff") { "00" } else { "ff" };
+        fs::create_dir_all(data.join(misplaced)).expect("mkdir");
+        fs::write(data.join(misplaced).join(ids[0].to_hex()), b"x").expect("write");
+
+        let listed = fx.chunks.objects().expect("list");
+        let listed_ids: Vec<ChunkId> = listed.iter().map(|(id, _)| *id).collect();
+        assert_eq!(listed_ids, ids);
+        for (id, len) in listed {
+            assert_eq!(len, fx.chunks.stored_len(&id).expect("length"));
+        }
+    }
+
+    #[test]
+    fn an_empty_store_has_no_objects_and_a_missing_data_directory_is_an_error() {
+        let fx = Fx::new();
+        assert!(fx.chunks.objects().expect("list").is_empty());
+        fs::remove_dir(fx.dir.path().join("data")).expect("remove");
+        assert!(fx.chunks.objects().is_err(), "a listing that cannot be complete is not given");
+    }
+
+    #[test]
+    fn removing_an_object_removes_exactly_that_object() {
+        let fx = Fx::new();
+        let first = fx.chunks.put(&pseudo_random(500, 1)).expect("put").id;
+        let second = fx.chunks.put(&pseudo_random(500, 2)).expect("put").id;
+        fx.chunks.remove(&first).expect("remove");
+        assert!(!fx.chunks.contains(&first).expect("contains"));
+        assert!(fx.chunks.contains(&second).expect("contains"));
+        assert!(fx.chunks.remove(&first).expect_err("already gone").is_not_found());
     }
 
     #[test]

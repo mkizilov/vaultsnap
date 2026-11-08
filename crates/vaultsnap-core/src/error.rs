@@ -5,12 +5,6 @@ use std::path::{Path, PathBuf};
 /// Errors returned by `vaultsnap-core`.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The operation is specified but its storage behavior has not been built yet.
-    #[error("{operation} is not implemented yet: repository storage has not been built")]
-    NotImplemented {
-        /// Name of the requested operation.
-        operation: &'static str,
-    },
     /// A snapshot identifier was not 64 lowercase hexadecimal characters.
     #[error("invalid snapshot id {0:?}: expected 64 lowercase hexadecimal characters")]
     InvalidSnapshotId(String),
@@ -248,6 +242,54 @@ pub enum Error {
         /// The first affected path.
         first: PathBuf,
     },
+    /// Prune cannot tell which chunks are in use because some snapshots cannot be read.
+    #[error(
+        "{count} snapshot(s) cannot be read, so it is not known which chunks they need (first: \
+         {first}: {reason}); nothing was changed. Run `check`, put an intact copy of the file \
+         back, or, if the snapshot is lost for good, move its file out of snapshots/; then \
+         prune again"
+    )]
+    UnreadableSnapshots {
+        /// How many snapshots could not be read.
+        count: usize,
+        /// The id of the first one.
+        first: String,
+        /// Why it could not be read.
+        reason: String,
+    },
+    /// A snapshot that prune would keep is already missing chunks.
+    #[error(
+        "a snapshot that would be kept needs {count} chunk(s) that do not exist (first: \
+         {first}); removing other snapshots could destroy the last intact copy of that data, so \
+         nothing was changed. Run `check`, repair the repository, and prune again"
+    )]
+    KeptSnapshotsDamaged {
+        /// How many distinct chunks are missing.
+        count: usize,
+        /// The id of the first one.
+        first: String,
+    },
+    /// The snapshots changed between the plan a person confirmed and the prune.
+    #[error(
+        "the repository changed since the plan was made (snapshots were added or removed); \
+         nothing was changed. Look at the new plan and confirm again"
+    )]
+    PlanChanged,
+    /// A prune was cancelled.
+    #[error(
+        "cancelled: the prune was stopped; what was deleted so far is gone, but nothing that a \
+         kept snapshot needs was touched. Run prune again to finish"
+    )]
+    PruneCancelled,
+    /// After pruning, a chunk that a kept snapshot needs was not there.
+    #[error(
+        "after pruning, a chunk that a kept snapshot needs is missing ({first}); this should be \
+         impossible. Run `check --read-data` and keep any copy of the repository"
+    )]
+    RetainedChunkLost {
+        /// The id of the first missing chunk.
+        first: String,
+    },
     /// A repository check was cancelled.
     #[error("cancelled: the check was stopped before it finished, so there is no report; nothing was changed")]
     CheckCancelled,
@@ -318,11 +360,6 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
-    pub(crate) fn not_implemented(operation: &'static str) -> Self {
-        tracing::debug!(operation, "operation requested before storage is implemented");
-        Self::NotImplemented { operation }
-    }
-
     pub(crate) fn io(operation: &'static str, path: &Path, source: std::io::Error) -> Self {
         Self::Io {
             operation,
@@ -339,12 +376,6 @@ impl Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn not_implemented_names_the_operation() {
-        let message = Error::not_implemented("backup").to_string();
-        assert!(message.starts_with("backup is not implemented"), "{message}");
-    }
 
     #[test]
     fn invalid_snapshot_id_quotes_the_input() {

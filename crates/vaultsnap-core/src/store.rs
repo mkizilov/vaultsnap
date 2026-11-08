@@ -234,6 +234,12 @@ impl LocalStore {
         sync_dir(dir)
     }
 
+    /// Makes the directory `dir` durable: after this returns, the creations and removals in it
+    /// that happened before are on disk, so a crash cannot bring a removed file back.
+    pub fn sync_directory(&self, dir: &str) -> Result<()> {
+        sync_dir(&self.resolve(dir)?)
+    }
+
     /// Removes the file `name`.
     pub fn remove(&self, name: &str) -> Result<()> {
         let path = self.resolve(name)?;
@@ -368,6 +374,17 @@ mod tests {
         assert_eq!(described, expected);
         assert!(store.list_entries("data").expect("list").is_empty());
         assert!(store.list_entries("missing").is_err());
+    }
+
+    #[test]
+    fn removals_can_be_made_durable_and_a_missing_directory_is_an_error() {
+        let (_dir, store) = store();
+        store.create_dir("snapshots").expect("mkdir");
+        store.write_new("snapshots/a", b"x").expect("write");
+        store.remove("snapshots/a").expect("remove");
+        store.sync_directory("snapshots").expect("sync");
+        assert!(!store.exists("snapshots/a").expect("exists"));
+        assert!(store.sync_directory("missing").is_err());
     }
 
     #[test]

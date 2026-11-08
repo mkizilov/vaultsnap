@@ -6,8 +6,8 @@ an Argon2id-derived key, and per-purpose keys are derived with HKDF. The encrypt
 exists: chunks are named by a keyed hash, compressed when beneficial, and sealed with
 XChaCha20-Poly1305, and snapshot manifests (every file name, path, host, tag, attribute, and the
 chunk lists) are encrypted and authenticated together with their snapshot id, and committed
-atomically. Nothing yet connects the scanner to these stores (backup does not exist). The
-`config` file is plaintext by design and holds no secret. This document defines what the
+atomically. `backup`, the inspection commands, `restore`, `check`, and `prune` are built on these
+stores. The `config` file is plaintext by design and holds no secret. This document defines what the
 implementation must guarantee, and what it deliberately does not. See `FORMAT.md` for the data
 layout.
 
@@ -323,6 +323,50 @@ holds what it should. Its security-relevant properties:
   chunk (plus one per object for the inventory), and a chunk is read whole but one at a time per
   thread (at most 64 MiB each). A hostile repository cannot make the check allocate more than
   the format's own limits allow.
+
+## Retention and deletion (`prune`; built)
+
+`vaultsnap prune` ([`PRUNE.md`](PRUNE.md)) is the only operation that deletes repository data, so
+its security properties are about not deleting what must stay.
+
+- **It fails closed.** If any snapshot cannot be read, or a snapshot that would be kept is already
+  missing chunks, it changes nothing and says so. It never guesses which chunks are in use, and it
+  never removes the other copy of data a damaged snapshot might need.
+- **Kept snapshots cannot lose a chunk to the sweep.** The set of chunks to keep is computed from
+  the authenticated manifests of the kept snapshots before anything is deleted; snapshot files are
+  deleted and made durable before any chunk; the objects deleted are exactly those not in the set;
+  and every chunk in the set is checked again afterwards. A crash or cancellation at any point
+  leaves every snapshot complete.
+- **It deletes only what its names say it may.** A snapshot file by its 64-digit id, and a chunk
+  object that is a regular file named by 64 lowercase hexadecimal digits in the `data/xx/`
+  directory its first two digits name. Strays, temporary files, symbolic links, key files, `config`,
+  and locks are never listed for deletion. Every deletion goes through the store, which refuses
+  unsafe names and does not follow symbolic links.
+- **Deleting is never the default and is confirmed against what was shown.** The library defaults
+  to a dry run. The command asks for the word `yes`, refuses to delete when nobody can be asked
+  unless `--yes` was given, and executes a confirmed plan only if the snapshots are still those the
+  plan was made from (a digest of who is kept and who is removed). The digest guards against
+  accidents and races; it is not a secret or a signature and protects nothing against someone who
+  can write to the repository.
+- **The clock is part of the input.** Retention uses the creation time recorded in each manifest,
+  which is authenticated but was set by the clock of the machine that made the backup. A machine
+  with a wrong clock, or a client that backs up with a forged time, can make a snapshot count as
+  newer or older than it is. The plan shows every time, and the newest snapshot by recorded time
+  is always kept.
+- **There is no append-only mode.** Anyone who has the passphrase and can write to the repository
+  can prune, and so can delete history. Protecting against a compromised client needs storage that
+  the client cannot delete from, which VaultSnap does not provide.
+- **Deleted does not mean erased.** Removing a file does not overwrite it. Copies on the storage
+  medium, in file system snapshots, or in other backups of the repository may remain. They are
+  encrypted, but every snapshot of a repository shares one master key, so anyone who gets that key
+  can read them. Pruning is for reclaiming space and following a retention policy, not for
+  destroying data.
+- **Locks are advisory** (see below): a prune that deletes takes the exclusive lock, which keeps
+  honest VaultSnap processes out, not a hostile writer.
+- **Messages and logs contain ids, counts, and repository paths, never backed-up names.** The
+  prune uses only chunk ids and creation times from the manifests.
+- **Memory** grows with the number of distinct chunks and chunk objects (a few dozen bytes each),
+  and one manifest is held at a time.
 
 ## Concurrency
 

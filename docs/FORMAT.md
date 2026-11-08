@@ -5,7 +5,7 @@ management (master key, key files, derived keys, authenticated encryption) exist
 *built*, as are chunking, the encrypted, deduplicated chunk store, the filesystem scanner, and
 encrypted snapshot manifests. Packs and indexes are still *planned*. `backup`, the commands
 that inspect snapshots (`snapshots`, `show`, `ls`, `diff`), and `restore` are built on top of
-these, as is `check`; only `prune` returns "not implemented". Code that lands later must follow this
+these, as are `check` and `prune`. Code that lands later must follow this
 document, and changes to the format must update it first and bump `FORMAT_VERSION`
 (`crates/vaultsnap-core/src/repository.rs`).
 
@@ -502,6 +502,10 @@ it at any moment leaves no snapshot. See [`BACKUP.md`](BACKUP.md).
 Readers only trust snapshots, so a crash between steps leaves unreferenced chunks that `prune`
 later removes. Existing objects are never modified in place.
 
+`prune` runs the same order backwards: it deletes snapshot files first, makes that durable, and
+only then deletes the chunk objects that no remaining snapshot needs, so a snapshot file that
+exists always has all of its chunks. See [`PRUNE.md`](PRUNE.md).
+
 ## Locking
 
 `backup`, `restore`, `snapshots`, `show`, `ls`, `diff`, and `check` take shared locks; `prune`
@@ -510,6 +514,8 @@ Locks are advisory and carry a timestamp for diagnostics. Locking protects again
 VaultSnap runs, not against a hostile writer (see `SECURITY.md`). A backup holds its shared lock
 until it has finished or been cancelled; a process that is killed leaves its lock file behind,
 which blocks `prune` until it is removed by hand (stale locks are never removed automatically).
+A `prune` that only plans (`--dry-run`) takes a shared lock; one that deletes takes the exclusive
+lock for its whole run.
 
 ## Command semantics
 
@@ -527,7 +533,7 @@ targets. Fields it does not use yet: owners, the creation, change, and device/in
 | `snapshots`, `show`, `ls`, `diff` | snapshots, chunk object sizes | nothing              |
 | `restore`   | snapshot, chunks   | files under the target directory only    |
 | `check`     | everything*        | nothing (its own lock file, removed)     |
-| `prune`     | snapshots, index   | removes snapshots, rewrites packs/index  |
+| `prune`     | snapshots, chunk object names and sizes | removes snapshot files, then unreferenced chunk objects |
 
 \* `check` reads every snapshot (authenticating it) and the first 12 bytes of every chunk object;
 with `--read-data` it reads every chunk object completely and authenticates it. It never repairs
@@ -545,7 +551,12 @@ that for a compressed one).
 
 `prune` keeps a snapshot if any retention rule selects it, refuses an empty policy, and supports
 `--dry-run`. Pruning uses mark-and-sweep: mark every chunk reachable from kept snapshots, then
-rewrite or delete packs with unreachable chunks.
+delete the chunk objects that are not marked. It reads the manifests (authenticated) and lists
+`data/`; it never opens a chunk object. Because every chunk is its own file there is nothing to
+rewrite; a future pack format would have to add that step to `prune` and to this document. It
+refuses to run if any snapshot cannot be read or a kept snapshot is missing chunks. Retention,
+the sweep order, and the failure behavior are specified in [`PRUNE.md`](PRUNE.md). It adds no
+on-disk structure.
 
 ## Versioning
 

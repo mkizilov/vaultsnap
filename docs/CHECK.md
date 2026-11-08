@@ -99,7 +99,7 @@ full check before relying on a repository to recover data.
 ### Next to other operations
 
 A check holds a **shared** lock: it runs next to a backup, a restore, or another check, and refuses
-to run while something holds an exclusive lock (a prune, when there is one). Snapshot files are
+to run while something holds an exclusive lock (a `prune` that deletes). Snapshot files are
 listed before objects are, so a backup that commits while the check runs can show up as orphans,
 never as missing objects. A backup in progress also shows up as a `lock_present` warning and as
 `.tmp-…` files; those are expected.
@@ -325,7 +325,9 @@ the check again. This kind says nothing about the repository itself.
 *Meaning.* Harmless data that costs space. Normal after an interrupted or cancelled backup (the
 chunks were stored, the snapshot never was) and after a snapshot file was removed.
 
-*Do.* Nothing. A future `prune` will remove orphans; the check never does. If you expected the
+*Do.* Nothing, or run [`prune`](PRUNE.md) to reclaim the space: it removes every chunk object
+that no kept snapshot refers to, orphans included (even with a policy that keeps every snapshot,
+e.g. `--keep-last 1000000`). The check never does. If you expected the
 object to belong to a snapshot, and `snapshots_damaged` is above zero, it probably does: the
 report says so (`orphans_exact: false`). Fix the damaged snapshot first.
 

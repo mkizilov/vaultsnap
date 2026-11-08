@@ -208,9 +208,13 @@ pub struct PruneArgs {
     #[arg(long, value_name = "N")]
     pub keep_yearly: Option<u32>,
 
-    /// Report what would be removed without removing anything
+    /// Show what would be removed and change nothing
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Delete without asking for confirmation (required when standard input is not a terminal)
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[cfg(test)]
@@ -391,6 +395,25 @@ mod tests {
             args.extend(bad);
             assert!(parse(&args).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn prune_asks_for_confirmation_unless_told_not_to() {
+        let Command::Prune(args) = parse(&["prune", "--keep-last", "2"]).expect("valid").command
+        else {
+            panic!("expected prune");
+        };
+        assert!(!args.yes && !args.dry_run);
+        let cli = parse(&["prune", "--keep-daily", "7", "--keep-weekly", "4", "--yes"])
+            .expect("valid");
+        let Command::Prune(args) = cli.command else {
+            panic!("expected prune");
+        };
+        assert!(args.yes && !args.dry_run);
+        assert_eq!((args.keep_daily, args.keep_weekly, args.keep_last), (Some(7), Some(4), None));
+        assert!(parse(&["prune", "--keep-last", "-1"]).is_err());
+        assert!(parse(&["prune", "--keep-last", "many"]).is_err());
+        assert!(parse(&["prune", "--keep-last", "1", "--yes=maybe"]).is_err());
     }
 
     #[test]

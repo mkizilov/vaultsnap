@@ -173,8 +173,9 @@ to complete and normalize.
 
 ## Locking
 
-A restore holds a **shared** repository lock, so it can run next to a `backup`, and `prune` (which
-will take the exclusive lock) cannot delete chunks while a restore reads them. It never writes to
+A restore holds a **shared** repository lock, so it can run next to a `backup`, and a `prune` that
+deletes (which takes the exclusive lock, see [`PRUNE.md`](PRUNE.md)) cannot delete chunks while a
+restore reads them. It never writes to
 the repository. A lock left behind by a killed process must be removed by hand; the error names
 the file.
 

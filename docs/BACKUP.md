@@ -63,7 +63,8 @@ when `stderr` is not a terminal there is no progress output and no terminal cont
    published in one no-overwrite step (`FORMAT.md`, "Atomic commit").
 
 The whole run holds a **shared** repository lock, so backups can run side by side but not during
-`prune`, which takes the exclusive lock.
+a `prune` that deletes, which takes the exclusive lock (a dry run takes a shared one and can run
+next to a backup).
 
 ## Skipping unchanged files
 
@@ -96,7 +97,7 @@ A snapshot becomes visible only in the last step, after everything else succeede
 |-------|--------|
 | Error reading the repository or writing a chunk, bad arguments, wrong passphrase | No snapshot. |
 | Ctrl-C or SIGTERM | The workers stop between chunks, the lock is released, and no snapshot is created. Exit 130. |
-| Process killed (SIGKILL, power loss) | No snapshot. At worst a `.tmp-` file (ignored by readers), unreferenced chunks (reused by the next run; `prune` will remove them once it is built), and a **stale shared lock file** in `locks/` that blocks `prune` until it is removed by hand; the error names the file. |
+| Process killed (SIGKILL, power loss) | No snapshot. At worst a `.tmp-` file (ignored by readers), unreferenced chunks (reused by the next run, or removed by the next `prune`), and a **stale shared lock file** in `locks/` that blocks a `prune` that deletes until it is removed by hand; the error names the file. |
 | Unreadable files | A snapshot, flagged incomplete (exit 3), listing them. |
 
 Chunks already stored by an unsuccessful run are valid and are not wasted: the next run finds them
@@ -144,15 +145,16 @@ chunk lengths are required to add up to each file's size. The tests rebuild ever
 completed snapshot from its chunk list, through the real encrypted store, and compare it with the
 source bytes, after repeated runs and after modified, inserted, deleted, and added files; other
 tests check that cancelled and failed runs leave no snapshot, release the lock, and (for
-cancellation) leave earlier snapshots intact. Restoring files to disk
-is not built yet, so this is the only end-to-end proof that a snapshot is complete; the tests have
-not been run (see the README, "Known gaps").
+cancellation) leave earlier snapshots intact. `restore` ([`RESTORE.md`](RESTORE.md)) rebuilds
+files from a snapshot the same way for users, and the `prune` tests restore every kept snapshot
+after pruning; the tests have not been run (see the README, "Known gaps").
 
 ## Limitations
 
-- No `prune` yet. The snapshots a backup creates can be listed, shown, and compared with
-  `snapshots`, `show`, `ls`, and `diff`, restored with `restore`, and verified with `check`
-  ([`CLI.md`](CLI.md), [`RESTORE.md`](RESTORE.md), [`CHECK.md`](CHECK.md)).
+- Backups only add. Snapshots are removed, and the chunks nothing needs any more are collected,
+  by `prune` ([`PRUNE.md`](PRUNE.md)). The snapshots a backup creates can be listed, shown, and
+  compared with `snapshots`, `show`, `ls`, and `diff`, restored with `restore`, and verified with
+  `check` ([`CLI.md`](CLI.md), [`RESTORE.md`](RESTORE.md), [`CHECK.md`](CHECK.md)).
 - A backup trusts an object that exists: it never re-reads it. So a damaged chunk object that is
   left in place is reused by later backups. `check --read-data` finds such objects; the response
   to each is in [`CHECK.md`](CHECK.md) (move the damaged object out, then back up again).

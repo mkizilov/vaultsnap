@@ -10,7 +10,8 @@
 //! inspection of snapshot history: listing, details, file listings, and comparison ([`history`]),
 //! and the safe restore of snapshots into a directory ([`restore`], [`Repository::restore`]).
 //! The repository check ([`check`], [`Repository::check`]) reports damage without ever changing
-//! anything. Prune validates its arguments and then returns [`Error::NotImplemented`].
+//! anything, and retention with mark-and-sweep garbage collection ([`prune`],
+//! [`Repository::prune`]), the only operation that deletes data.
 
 pub mod backup;
 mod blocking;
@@ -25,6 +26,7 @@ pub mod keys;
 mod kv;
 pub mod lock;
 pub mod ops;
+pub mod prune;
 pub mod repository;
 pub mod restore;
 pub mod retention;
@@ -51,13 +53,16 @@ pub use error::{Error, Result};
 pub use history::{Diff, SnapshotDetails, SnapshotList, SnapshotSizes};
 pub use keys::RepositoryKeys;
 pub use lock::{LockKind, RepositoryLock};
-pub use ops::{PruneOptions, PruneReport};
+pub use prune::{
+    PlanDigest, PruneEvent, PruneFailure, PruneMode, PruneObserver, PruneOptions, PrunePhase,
+    PruneReport,
+};
 pub use repository::{Repository, RepositoryLayout};
 pub use restore::{
     ConflictPolicy, RestoreEvent, RestoreObserver, RestoreOptions, RestoreProblem, RestoreReport,
     RestoreSymlinks,
 };
-pub use retention::RetentionPolicy;
+pub use retention::{Candidate, Decision, KeepReason, RetentionPolicy};
 pub use scan::{ScanOptions, Scanner};
 pub use secret::Passphrase;
 pub use snapshot::{
