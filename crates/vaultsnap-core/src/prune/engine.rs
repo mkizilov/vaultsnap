@@ -232,7 +232,7 @@ mod tests {
     use crate::scan::Timestamp;
     use crate::snapshot::testing::{file, minimal, REPO_ID};
     use crate::snapshot::ChunkRef;
-    use crate::store::LocalStore;
+    use crate::store::Store;
 
     /// A repository of hand-made snapshots at chosen times over real chunks, so that retention can
     /// be exercised on calendar dates and chunks can be shared in exact, known ways.
@@ -246,7 +246,7 @@ mod tests {
     impl Fx {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("create temporary directory");
-            let local = LocalStore::new(dir.path());
+            let local = Store::local(dir.path());
             local.create_dir("data").expect("mkdir");
             local.create_dir("snapshots").expect("mkdir");
             let keys = RepositoryKeys::generate().expect("generate");

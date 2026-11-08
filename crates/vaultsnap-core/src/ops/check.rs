@@ -6,11 +6,11 @@ use crate::keys::RepositoryKeys;
 use crate::lock::{LockKind, RepositoryLock};
 use crate::repository::{read_config, Repository};
 use crate::snapshot::SnapshotStore;
-use crate::store::LocalStore;
+use crate::store::Store;
 
 /// Takes the shared lock a check holds. A repository whose `locks` directory is missing or
 /// unusable gets no lock, because the check reports that itself; a conflicting lock is an error.
-fn lock_if_possible(store: &LocalStore) -> Result<Option<RepositoryLock>> {
+fn lock_if_possible(store: &Store) -> Result<Option<RepositoryLock>> {
     match RepositoryLock::acquire(store, LockKind::Shared) {
         Ok(lock) => Ok(Some(lock)),
         Err(err @ Error::Locked { .. }) => Err(err),

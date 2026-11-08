@@ -3,7 +3,7 @@
 use crate::error::{Error, Result};
 use crate::kv;
 use crate::repository::{RepositoryLayout, FORMAT_VERSION};
-use crate::store::LocalStore;
+use crate::store::Store;
 
 const MAGIC: &str = "vaultsnap-repository";
 const REPOSITORY_ID_LEN: usize = 32;
@@ -79,7 +79,7 @@ impl RepositoryConfig {
     /// Reads and parses the `config` file of the repository in `store`.
     ///
     /// A missing file is reported as an I/O error for which `Error::is_not_found` is true.
-    pub fn load(store: &LocalStore) -> Result<Self> {
+    pub fn load(store: &Store) -> Result<Self> {
         Self::parse(&store.read(RepositoryLayout::CONFIG_FILE, MAX_CONFIG_BYTES)?)
     }
 }

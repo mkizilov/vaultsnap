@@ -8,7 +8,7 @@
 
 use crate::error::{Error, Result};
 use crate::repository::RepositoryLayout;
-use crate::store::LocalStore;
+use crate::store::Store;
 use crate::util::{random_hex, unix_now};
 
 const LOCK_SUFFIX: &str = ".lock";
@@ -65,13 +65,13 @@ pub(crate) fn describe_lock(data: &[u8]) -> LockInfo {
 /// A held repository lock; the lock file is removed when this value is dropped.
 #[derive(Debug)]
 pub struct RepositoryLock {
-    store: LocalStore,
+    store: Store,
     name: String,
     kind: LockKind,
 }
 
 impl RepositoryLock {
-    pub(crate) fn acquire(store: &LocalStore, kind: LockKind) -> Result<Self> {
+    pub(crate) fn acquire(store: &Store, kind: LockKind) -> Result<Self> {
         let file_name = format!("{}{LOCK_SUFFIX}", random_hex(16)?);
         let name = format!("{}/{file_name}", RepositoryLayout::LOCKS_DIR);
         let content = format!(
@@ -135,14 +135,14 @@ mod tests {
 
     use super::*;
 
-    fn store() -> (TempDir, LocalStore) {
+    fn store() -> (TempDir, Store) {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        let store = LocalStore::new(dir.path());
+        let store = Store::local(dir.path());
         store.create_dir(RepositoryLayout::LOCKS_DIR).expect("mkdir");
         (dir, store)
     }
 
-    fn lock_files(store: &LocalStore) -> usize {
+    fn lock_files(store: &Store) -> usize {
         store.list(RepositoryLayout::LOCKS_DIR).expect("list").len()
     }
 

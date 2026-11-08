@@ -15,7 +15,7 @@ use crate::chunking::test_util::pseudo_random;
 use crate::keys::RepositoryKeys;
 use crate::snapshot::testing::{attributes, dir as fixture_dir, file as fixture_file, minimal};
 use crate::snapshot::Root;
-use crate::store::LocalStore;
+use crate::store::Store;
 
 struct Fx {
     dir: TempDir,
@@ -27,9 +27,9 @@ impl Fx {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let repo = dir.path().join("repo");
         fs::create_dir(&repo).expect("mkdir");
-        LocalStore::new(&repo).create_dir("data").expect("mkdir");
+        Store::local(&repo).create_dir("data").expect("mkdir");
         let keys = RepositoryKeys::generate().expect("generate");
-        let chunks = ChunkStore::new(LocalStore::new(&repo), &keys).expect("chunk store");
+        let chunks = ChunkStore::new(Store::local(&repo), &keys).expect("chunk store");
         Self { dir, chunks }
     }
 
@@ -59,7 +59,7 @@ impl Fx {
     }
 
     fn run(&self, manifest: &Manifest, options: &RestoreOptions) -> Result<RestoreReport> {
-        run(manifest, &self.chunks, &self.repo(), options)
+        run(manifest, &self.chunks, Some(self.repo().as_path()), options)
     }
 
     fn object_path(&self, chunk: &ChunkRef) -> PathBuf {

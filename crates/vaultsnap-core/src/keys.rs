@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 use crate::kv;
 use crate::repository::RepositoryLayout;
 use crate::secret::Passphrase;
-use crate::store::LocalStore;
+use crate::store::Store;
 use crate::util::{fill_random, hex, random_bytes, random_hex};
 
 const MAGIC: &str = "vaultsnap-key";
@@ -175,7 +175,7 @@ impl KeySlot {
 /// Wraps `keys` under `passphrase` and stores the result as a new file in `keys/`, never
 /// overwriting an existing one. Returns the store name of the new file.
 pub(crate) fn write_key_slot(
-    store: &LocalStore,
+    store: &Store,
     repository_id: &str,
     keys: &RepositoryKeys,
     passphrase: &Passphrase,
@@ -190,7 +190,7 @@ pub(crate) fn write_key_slot(
 /// Parses the key file `name` (a file in `keys/`) without trying to open it, which would need a
 /// passphrase, and describes what is wrong with it, if anything. The description never contains
 /// key material.
-pub(crate) fn key_file_problem(store: &LocalStore, name: &str) -> Option<String> {
+pub(crate) fn key_file_problem(store: &Store, name: &str) -> Option<String> {
     let path = format!("{}/{name}", RepositoryLayout::KEYS_DIR);
     match store.read(&path, MAX_KEY_FILE_BYTES) {
         Ok(bytes) => KeySlot::parse(&bytes).err().map(|err| err.to_string()),
@@ -205,13 +205,13 @@ pub(crate) fn key_file_problem(store: &LocalStore, name: &str) -> Option<String>
 /// that cannot be parsed is an error. If no slot opens, the passphrase is reported as wrong; a
 /// modified slot is indistinguishable from a wrong passphrase by design.
 pub(crate) fn unlock(
-    store: &LocalStore,
+    store: &Store,
     repository_id: &str,
     passphrase: &Passphrase,
 ) -> Result<RepositoryKeys> {
     let mut slots = 0_usize;
     for name in store.list(RepositoryLayout::KEYS_DIR)? {
-        if LocalStore::is_temp_name(&name) {
+        if Store::is_temp_name(&name) {
             continue;
         }
         let path = format!("{}/{name}", RepositoryLayout::KEYS_DIR);
@@ -240,14 +240,14 @@ mod tests {
 
     struct Fixture {
         _dir: TempDir,
-        store: LocalStore,
+        store: Store,
         keys: RepositoryKeys,
         slot: String,
     }
 
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        let store = LocalStore::new(dir.path());
+        let store = Store::local(dir.path());
         store.create_dir(RepositoryLayout::KEYS_DIR).expect("mkdir");
         let keys = RepositoryKeys::generate().expect("generate");
         let slot = write_key_slot(&store, REPO_ID, &keys, &passphrase(), fast_kdf()).expect("slot");
@@ -304,7 +304,7 @@ mod tests {
         let f = fixture();
         let purpose = KeyPurpose::DataEncryption;
         let sealed = f.keys.seal(purpose, b"pack-1", b"chunk data").expect("seal");
-        let reopened = LocalStore::new(f.store.root());
+        let reopened = Store::local(f.store.root());
         let unlocked = unlock(&reopened, REPO_ID, &passphrase()).expect("unlock");
         let opened = unlocked.open(purpose, b"pack-1", &sealed).expect("open");
         assert_eq!(opened.as_slice(), b"chunk data");
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn a_repository_without_key_files_is_reported() {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        let store = LocalStore::new(dir.path());
+        let store = Store::local(dir.path());
         store.create_dir(RepositoryLayout::KEYS_DIR).expect("mkdir");
         let result = unlock(&store, REPO_ID, &passphrase());
         assert!(matches!(result, Err(Error::Corrupt(_))), "{result:?}");
@@ -460,7 +460,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let f = fixture();
-        let path = f.store.resolve(&f.slot).expect("resolve");
+        let path = f.store.root().join(&f.slot);
         let mode = std::fs::metadata(path).expect("metadata").permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }

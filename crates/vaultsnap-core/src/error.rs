@@ -2,6 +2,21 @@
 
 use std::path::{Path, PathBuf};
 
+/// How a failure reported by a storage backend should be handled (see
+/// [`Error::Backend`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendErrorKind {
+    /// The object (or directory) does not exist.
+    NotFound,
+    /// The operation may succeed if it is tried again: a timeout, a dropped connection, a server
+    /// error, throttling. The retry layer retries exactly these.
+    Transient,
+    /// The backend refused: bad credentials, no permission. Trying again will not help.
+    Permission,
+    /// Any other failure; not worth retrying.
+    Other,
+}
+
 /// Errors returned by `vaultsnap-core`.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -79,6 +94,32 @@ pub enum Error {
         /// The limit that was exceeded.
         max_len: u64,
     },
+    /// A storage backend that is not the local file system failed. The local backend reports
+    /// [`Error::Io`] instead.
+    #[error("storage backend could not {operation} {name}: {message}")]
+    Backend {
+        /// What was being attempted, e.g. `get`.
+        operation: &'static str,
+        /// The object name, or the directory being listed.
+        name: String,
+        /// How the failure should be handled.
+        kind: BackendErrorKind,
+        /// What the backend said.
+        message: String,
+    },
+    /// A conditional write found the object changed or missing; nothing was written.
+    #[error(
+        "{} was changed by someone else since it was read, or no longer exists; nothing was \
+         written",
+        .path.display()
+    )]
+    PreconditionFailed {
+        /// The object the write was meant to replace.
+        path: PathBuf,
+    },
+    /// The storage backend lacks a guarantee the repository format depends on.
+    #[error("this storage backend cannot hold a repository: {0}")]
+    UnsupportedBackend(String),
     /// Another process holds a conflicting repository lock.
     #[error(
         "repository is locked by {holder}; if no other VaultSnap process is running, remove \
@@ -368,8 +409,50 @@ impl Error {
         }
     }
 
-    pub(crate) fn is_not_found(&self) -> bool {
-        matches!(self, Self::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
+    /// A failure reported by a storage backend that is not an I/O error of the local file
+    /// system. Backends outside this crate use this to report their errors.
+    pub fn backend(
+        operation: &'static str,
+        name: &str,
+        kind: BackendErrorKind,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::Backend {
+            operation,
+            name: name.to_owned(),
+            kind,
+            message: message.into(),
+        }
+    }
+
+    /// True if the object or directory that was asked for does not exist.
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
+            Self::Backend { kind, .. } => *kind == BackendErrorKind::NotFound,
+            _ => false,
+        }
+    }
+
+    /// True if trying the same operation again may succeed (a timeout, an interrupted call, a
+    /// busy or throttling server).
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Io { source, .. } => matches!(
+                source.kind(),
+                std::io::ErrorKind::Interrupted
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::WouldBlock
+            ),
+            Self::Backend { kind, .. } => *kind == BackendErrorKind::Transient,
+            _ => false,
+        }
+    }
+
+    /// True if a write was refused because of what already exists: the object exists (create) or
+    /// is not in the state the caller expected (conditional replace).
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, Self::AlreadyExists { .. } | Self::PreconditionFailed { .. })
     }
 }
 
@@ -396,6 +479,39 @@ mod tests {
         let cause = std::io::Error::from(std::io::ErrorKind::NotFound);
         assert!(Error::io("open", Path::new("x"), cause).is_not_found());
         assert!(!Error::InvalidPath("x".to_owned()).is_not_found());
+    }
+
+    #[test]
+    fn backend_errors_are_classified_by_their_kind() {
+        let error = |kind| Error::backend("get", "config", kind, "boom");
+        assert!(error(BackendErrorKind::NotFound).is_not_found());
+        assert!(!error(BackendErrorKind::Transient).is_not_found());
+        assert!(error(BackendErrorKind::Transient).is_transient());
+        for kind in [BackendErrorKind::Permission, BackendErrorKind::Other, BackendErrorKind::NotFound] {
+            assert!(!error(kind).is_transient(), "{kind:?}");
+        }
+        assert_eq!(
+            error(BackendErrorKind::Other).to_string(),
+            "storage backend could not get config: boom"
+        );
+    }
+
+    #[test]
+    fn only_interruptions_and_timeouts_are_transient_io_errors() {
+        let io = |kind| Error::io("read", Path::new("x"), std::io::Error::from(kind));
+        assert!(io(std::io::ErrorKind::TimedOut).is_transient());
+        assert!(io(std::io::ErrorKind::Interrupted).is_transient());
+        assert!(!io(std::io::ErrorKind::PermissionDenied).is_transient());
+        assert!(!io(std::io::ErrorKind::NotFound).is_transient());
+        assert!(!Error::InvalidPath("x".to_owned()).is_transient());
+    }
+
+    #[test]
+    fn conflicts_are_the_refusals_of_conditional_writes() {
+        let path = PathBuf::from("x");
+        assert!(Error::AlreadyExists { path: path.clone() }.is_conflict());
+        assert!(Error::PreconditionFailed { path }.is_conflict());
+        assert!(!Error::InvalidPath("x".to_owned()).is_conflict());
     }
 
     #[test]

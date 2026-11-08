@@ -179,7 +179,7 @@ mod tests {
     use crate::scan::Timestamp;
     use crate::snapshot::testing::{file, minimal, REPO_ID};
     use crate::snapshot::ChunkRef;
-    use crate::store::LocalStore;
+    use crate::store::Store;
 
     struct Fixture {
         dir: TempDir,
@@ -190,7 +190,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("create temporary directory");
-            let local = LocalStore::new(dir.path());
+            let local = Store::local(dir.path());
             local.create_dir("data").expect("mkdir");
             local.create_dir("snapshots").expect("mkdir");
             let keys = RepositoryKeys::generate().expect("generate");

@@ -235,6 +235,9 @@ The design is specified before the code that implements it:
   the report, and how to respond to each failure.
 - [`docs/PRUNE.md`](docs/PRUNE.md): retention rules, what `prune` deletes and in which order, why
   a kept snapshot cannot lose a chunk, confirmation, locking, and interruption.
+- [`docs/STORAGE.md`](docs/STORAGE.md): the storage backend interface, what every backend must
+  guarantee, retries and conditional writes, the contract tests, and the design of an
+  S3-compatible backend.
 - [`docs/CLI.md`](docs/CLI.md): every command with examples, exit statuses, size definitions,
   and the JSON output.
 - [`docs/SECURITY.md`](docs/SECURITY.md): threat model, secrets handling, restore safety.
@@ -270,7 +273,7 @@ no way to recover a lost passphrase.
 
 | Crate             | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `vaultsnap-core`  | Library: repository handle and layout, `config`, local store, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot manifests, the backup engine, retention and garbage collection, operations |
+| `vaultsnap-core`  | Library: repository handle and layout, `config`, the storage backend interface (local directory, in-memory object store, retries) and its contract tests, locks, keys and crypto, chunking, encrypted chunk store, filesystem scanner, snapshot manifests, the backup engine, retention and garbage collection, operations |
 | `vaultsnap-cli`   | Binary `vaultsnap`: `clap` argument parsing and output          |
 
 Libraries: `clap` (CLI), `tracing` + `tracing-subscriber` (diagnostics), `thiserror` (errors),
@@ -360,6 +363,12 @@ Tests:
   `crates/vaultsnap-core/tests/prune.rs`; the binary is exercised in
   `crates/vaultsnap-cli/tests/prune.rs`, and the exact text and the confirmation rules are unit
   tests in `crates/vaultsnap-cli/src/prune/tests.rs`.
+- Storage tests: the backend contract (`crates/vaultsnap-core/src/storage/contract.rs`, 22 cases)
+  is run against the local directory, the in-memory object store, and the in-memory store behind
+  retries over storage that fails every few calls; unit tests sit beside each backend, the retry
+  layer, and the fault injector; `crates/vaultsnap-core/tests/storage.rs` runs a whole repository
+  (init, backups, restore, check, prune) on each, moves a repository between backends object by
+  object, and checks that backends without the needed guarantees are refused.
 - CLI integration tests are in `crates/vaultsnap-cli/tests/`. They run the compiled binary and use
   helpers in `tests/common/` that create scratch directories via `TMPDIR`.
 
@@ -408,6 +417,11 @@ is compiled by `clippy --all-targets` but not run).
   reasoned about but not observed; on non-Unix platforms the link-related tests are skipped. A
   quick check cannot see damage inside a chunk's payload, and nothing can see a deleted snapshot
   (`docs/CHECK.md`).
+- The storage refactor is unverified like everything else, and touched most of the core. The
+  concurrency cases of the contract (racing creators and updaters, readers against a replacement)
+  and the retry-over-faults runs are the least certain. There is no S3 backend; the design in
+  `docs/STORAGE.md` has not been exercised against any store. The command line still accepts only
+  a directory for `--repo`.
 - `prune` is unverified like everything else. Specifically: the interactive question (`Type
   "yes"`) needs a terminal, so only its logic is unit tested and the flow around it is not tested
   end to end; Ctrl-C and SIGTERM through the binary are not tested; the race tests (a prune

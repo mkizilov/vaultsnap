@@ -14,7 +14,7 @@ use crate::crypto::{KeyPurpose, SecretKey};
 use crate::error::{Error, Result};
 use crate::keys::RepositoryKeys;
 use crate::repository::RepositoryLayout;
-use crate::store::LocalStore;
+use crate::store::Store;
 
 /// One snapshot in a listing: its id and either its summary or the reason it could not be read.
 /// A damaged snapshot is reported, never silently left out and never presented as good.
@@ -41,7 +41,7 @@ pub struct SnapshotListing {
 /// The store is cheap to clone and safe to share between threads.
 #[derive(Clone)]
 pub struct SnapshotStore {
-    store: LocalStore,
+    store: Store,
     key: Arc<SecretKey>,
     chunks: ChunkStore,
     repository_id: String,
@@ -50,7 +50,7 @@ pub struct SnapshotStore {
 impl SnapshotStore {
     /// A snapshot store over the repository directory of `store` for the repository
     /// `repository_id`, using keys derived from the unlocked repository keys. Performs no I/O.
-    pub fn new(store: LocalStore, keys: &RepositoryKeys, repository_id: &str) -> Result<Self> {
+    pub fn new(store: Store, keys: &RepositoryKeys, repository_id: &str) -> Result<Self> {
         Ok(Self {
             chunks: ChunkStore::new(store.clone(), keys)?,
             key: Arc::new(keys.derive(KeyPurpose::MetadataEncryption)?),
@@ -140,7 +140,7 @@ impl SnapshotStore {
         let names = self.store.list(RepositoryLayout::SNAPSHOTS_DIR)?;
         Ok(names
             .iter()
-            .filter(|name| !LocalStore::is_temp_name(name))
+            .filter(|name| !Store::is_temp_name(name))
             .filter_map(|name| name.parse::<SnapshotId>().ok())
             .collect())
     }
@@ -150,7 +150,7 @@ impl SnapshotStore {
         self.store.remove(&id.object_name())
     }
 
-    /// Makes the removal of snapshot files durable (see [`LocalStore::sync_directory`]).
+    /// Makes the removal of snapshot files durable (see [`Store::sync_directory`]).
     pub(crate) fn sync_removals(&self) -> Result<()> {
         self.store.sync_directory(RepositoryLayout::SNAPSHOTS_DIR)
     }
@@ -264,7 +264,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("create temporary directory");
-            let local = LocalStore::new(dir.path());
+            let local = Store::local(dir.path());
             local.create_dir("data").expect("mkdir");
             local.create_dir("snapshots").expect("mkdir");
             let keys = RepositoryKeys::generate().expect("generate");
@@ -507,7 +507,7 @@ mod tests {
         let fx = Fixture::new();
         let manifest = fx.committed();
         let intruder_keys = RepositoryKeys::generate().expect("generate");
-        let intruder = SnapshotStore::new(LocalStore::new(fx.dir.path()), &intruder_keys, REPO_ID)
+        let intruder = SnapshotStore::new(Store::local(fx.dir.path()), &intruder_keys, REPO_ID)
             .expect("store");
         assert!(matches!(intruder.load(&manifest.id), Err(Error::CorruptSnapshot { .. })));
     }

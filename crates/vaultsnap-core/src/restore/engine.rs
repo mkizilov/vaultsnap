@@ -33,11 +33,13 @@ use crate::error::{Error, Result};
 use crate::snapshot::{Attributes, ChunkRef, Manifest, ManifestEntry, NodeKind};
 
 /// Restores `manifest` as `options` say. The manifest must come from an authenticated snapshot;
-/// it is validated again, and its paths are checked again, regardless.
+/// it is validated again, and its paths are checked again, regardless. `repository_root` is the
+/// directory the repository occupies on this machine, if it is a directory here; the target may
+/// not be inside it.
 pub(crate) fn run(
     manifest: &Manifest,
     chunks: &ChunkStore,
-    repository_root: &Path,
+    repository_root: Option<&Path>,
     options: &RestoreOptions,
 ) -> Result<RestoreReport> {
     let started = Instant::now();
@@ -81,7 +83,7 @@ struct Target {
 /// Finds the directory to restore into. Symbolic links in the part that exists are resolved (the
 /// user named this path, so they are trusted); the part that does not exist yet must be plain
 /// names. The result may not be inside the repository.
-fn resolve_target(target: &Path, repository_root: &Path) -> Result<Target> {
+fn resolve_target(target: &Path, repository_root: Option<&Path>) -> Result<Target> {
     let invalid = |reason: &str| Error::InvalidTarget(reason.to_owned());
     if target.as_os_str().is_empty() {
         return Err(invalid("the path is empty"));
@@ -124,10 +126,12 @@ fn resolve_target(target: &Path, repository_root: &Path) -> Result<Target> {
     let mut path = base;
     path.extend(&missing);
 
-    let repository = fs::canonicalize(repository_root)
-        .map_err(|err| Error::io("resolve", repository_root, err))?;
-    if path.starts_with(&repository) {
-        return Err(invalid("it is inside the repository"));
+    if let Some(repository_root) = repository_root {
+        let repository = fs::canonicalize(repository_root)
+            .map_err(|err| Error::io("resolve", repository_root, err))?;
+        if path.starts_with(&repository) {
+            return Err(invalid("it is inside the repository"));
+        }
     }
     Ok(Target {
         path,

@@ -23,7 +23,10 @@ implemented by VaultSnap itself.
   little and cannot undetectably alter content.
 - Crash-safe: an interrupted operation never makes existing snapshots unreadable.
 - Append-mostly: objects are immutable once written; only `prune` deletes.
-- Plain files on a local filesystem first; the layout maps onto object stores later.
+- Plain files on a local filesystem first; every file is reached through a storage backend
+  interface ([`STORAGE.md`](STORAGE.md)), so the same layout maps onto object stores unchanged.
+  The format is the same on every backend: a repository can be copied object by object from one
+  backend to another and opened there.
 
 ## Directory layout
 
@@ -40,8 +43,13 @@ implemented by VaultSnap itself.
 These names are the constants on `RepositoryLayout`. `init` creates `config`, `data/`,
 `snapshots/`, `locks/`, `keys/`, and one key file. `index/` is created by the stage that
 introduces the index. Object names are lowercase hexadecimal (`[0-9a-f]`), 64 characters long,
-and are validated before being turned into paths. The store (below) accepts only `/`-separated
-segments of `[A-Za-z0-9._-]` that do not start with `.`.
+and are validated before being turned into paths or object keys. Every backend accepts only
+`/`-separated segments of `[A-Za-z0-9._-]` that do not start with `.`.
+
+On a backend without directories (an object store) `data/`, `snapshots/`, `locks/`, and `keys/`
+are prefixes: they exist exactly as long as an object is stored below them, `init` has nothing to
+create, and `check` does not report an empty one as missing. A repository copied from such a
+backend onto a directory needs the four directories created first (`init` does this).
 
 ## The `config` file (built)
 
@@ -84,22 +92,37 @@ fails to authenticate under the new id and is ignored when unlocking. Concurrent
 the same path produce exactly one repository; the others fail with *already initialized* and
 remove the key file they wrote.
 
-## Local store (built)
+## Storage (built)
 
-All repository file access goes through `LocalStore`:
+All repository file access goes through a `Store`, a handle on a storage backend
+([`STORAGE.md`](STORAGE.md) defines the interface, what every backend must guarantee, and the
+contract tests). The format relies on four guarantees, and a backend that does not provide them is
+refused before anything is read or written: a completed write or delete is visible to every later
+read and listing; creating an object only if it does not exist is atomic for all clients; an
+object becomes visible whole or not at all; and, for the local backend, writes are flushed to disk
+before they are reported done.
+
+### The local backend
+
+The reference backend, a directory (`LocalBackend`):
 
 - **Names** are validated (see above); absolute paths, `..`, hidden names, and empty segments are
   rejected before touching the filesystem.
 - **Symlinks** found at any component below the repository root are refused, never followed. (The
   root itself may be a symlink chosen by the user.)
 - **Atomic commit**: a write is staged in `.tmp-<random>` in the destination directory, flushed
-  with `fsync`, and published in one step: `write_new` hard-links it to the final name (fails if the
-  name exists, so nothing is ever overwritten); `write_replace` renames it over the old file. The
-  directory is then `fsync`ed. Readers see the old state or the complete new file.
+  with `fsync`, and published in one step: a create (`PutMode::Create`) hard-links it to the final
+  name (fails if the name exists, so nothing is ever overwritten); an overwrite
+  (`PutMode::Overwrite`) renames it over the old file. The directory is then `fsync`ed. Readers see
+  the old state or the complete new file.
+- **Conditional replace** (`PutMode::Update`) compares the version of the file (device, inode,
+  modification time, size) under a lock inside the process. A file system has no compare-and-swap,
+  so this excludes other updates in the same process and nothing else; other processes are kept
+  out by the repository lock.
 - **Permissions**: directories `0700`, files `0600` (subject to umask, which can only tighten them).
-- `read` takes a maximum size and refuses larger files.
+- A read takes a maximum size and refuses larger files.
 
-The store needs a filesystem that supports hard links (any local Unix filesystem does).
+The local backend needs a filesystem that supports hard links (any local Unix filesystem does).
 
 ## Locks (built)
 
@@ -109,6 +132,10 @@ anything, or a file it cannot recognize) it removes its own file and fails namin
 racing exclusive requests may both fail but never both succeed. The lock is removed when the guard
 is dropped. Stale locks left by a crashed process are never removed automatically; the error names
 the file so an operator can delete it after confirming no VaultSnap process is running.
+
+The scan right after creating the lock file is why a backend must be read-after-write consistent:
+on storage where a just-created file may be missing from a listing, two processes could each miss
+the other's lock and both proceed. Such a backend is refused (see *Storage*).
 
 ## Identifiers
 
@@ -501,6 +528,11 @@ it at any moment leaves no snapshot. See [`BACKUP.md`](BACKUP.md).
 
 Readers only trust snapshots, so a crash between steps leaves unreferenced chunks that `prune`
 later removes. Existing objects are never modified in place.
+
+The ordering uses only what every backend provides: an object appears whole or not at all, a
+create that finds the name taken fails, and a completed write or delete is visible to the next
+read. It uses no rename, no hard link, and no directory, so it holds unchanged on an object store
+([`STORAGE.md`](STORAGE.md)).
 
 `prune` runs the same order backwards: it deletes snapshot files first, makes that durable, and
 only then deletes the chunk objects that no remaining snapshot needs, so a snapshot file that

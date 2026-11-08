@@ -1,6 +1,3 @@
-use std::fs;
-use std::io::ErrorKind;
-
 use crate::blocking::blocking;
 use crate::config::RepositoryConfig;
 use crate::crypto::KdfParams;
@@ -8,7 +5,8 @@ use crate::error::{Error, Result};
 use crate::keys::{write_key_slot, RepositoryKeys};
 use crate::repository::{Repository, RepositoryLayout, REQUIRED_DIRS};
 use crate::secret::Passphrase;
-use crate::store::LocalStore;
+use crate::storage::LocationState;
+use crate::store::Store;
 use crate::util::{random_hex, unix_now};
 
 impl Repository {
@@ -41,22 +39,18 @@ impl Repository {
 }
 
 fn init_repository(
-    store: &LocalStore,
+    store: &Store,
     passphrase: &Passphrase,
     kdf: KdfParams,
 ) -> Result<RepositoryConfig> {
-    let root = store.root();
-    if root.as_os_str().is_empty() {
+    if store.root().as_os_str().is_empty() {
         return Err(Error::InvalidPath("the path is empty".to_owned()));
     }
-    match fs::metadata(root) {
-        Ok(meta) if meta.is_dir() => check_existing(store)?,
-        Ok(_) => {
-            let message = format!("{} exists and is not a directory", root.display());
-            return Err(Error::InvalidPath(message));
-        }
-        Err(err) if err.kind() == ErrorKind::NotFound => store.create_root()?,
-        Err(err) => return Err(Error::io("inspect", root, err)),
+    store.capabilities().require_repository_support()?;
+    match store.probe()? {
+        LocationState::Available => check_existing(store)?,
+        LocationState::Unusable(reason) => return Err(Error::InvalidPath(reason)),
+        LocationState::Absent => store.create_root()?,
     }
 
     for dir in REQUIRED_DIRS {
@@ -68,8 +62,17 @@ fn init_repository(
     match store.write_new(RepositoryLayout::CONFIG_FILE, &config.to_bytes()) {
         Ok(()) => Ok(config),
         Err(err) => {
-            if let Err(cleanup) = store.remove(&key_file) {
-                tracing::warn!(file = %key_file, error = %cleanup, "failed to remove unused key file");
+            // After a failure that may have been a lost answer (a timeout) the config may exist
+            // after all, and then this key file is the one that opens it. An unused key file is
+            // harmless: unlocking skips it, and so does the next `init`.
+            if !err.is_transient() {
+                if let Err(cleanup) = store.remove(&key_file) {
+                    tracing::warn!(
+                        file = %key_file,
+                        error = %cleanup,
+                        "failed to remove unused key file"
+                    );
+                }
             }
             match err {
                 Error::AlreadyExists { .. } => Err(already_initialized(store)),
@@ -81,7 +84,7 @@ fn init_repository(
 
 /// Ok if `store.root()` may be initialized: it is empty or holds only the leftovers of an
 /// interrupted `init`.
-fn check_existing(store: &LocalStore) -> Result<()> {
+fn check_existing(store: &Store) -> Result<()> {
     match RepositoryConfig::load(store) {
         Ok(_) => return Err(already_initialized(store)),
         Err(err) if err.is_not_found() => {}
@@ -98,10 +101,10 @@ fn check_existing(store: &LocalStore) -> Result<()> {
 }
 
 fn is_leftover(name: &str) -> bool {
-    REQUIRED_DIRS.contains(&name) || LocalStore::is_temp_name(name)
+    REQUIRED_DIRS.contains(&name) || Store::is_temp_name(name)
 }
 
-fn already_initialized(store: &LocalStore) -> Error {
+fn already_initialized(store: &Store) -> Error {
     Error::AlreadyInitialized {
         path: store.root().to_path_buf(),
     }
@@ -109,11 +112,14 @@ fn already_initialized(store: &LocalStore) -> Error {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::Path;
+    use std::sync::Arc;
 
     use tempfile::TempDir;
 
     use super::*;
+    use crate::storage::{Fault, FlakyBackend, MemoryBackend};
     use crate::testing::{fast_kdf, init, passphrase};
 
     fn temp() -> TempDir {
@@ -372,10 +378,50 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn a_repository_can_be_created_in_any_backend() {
+        let repo = Repository::with_backend(Arc::new(MemoryBackend::new()));
+        let config = init(&repo).await.expect("init");
+        assert_eq!(repo.load_config().await.expect("loads"), config);
+        let names = repo.store().list("").expect("list");
+        assert_eq!(names, ["config", "keys"], "object stores keep objects, not empty directories");
+        repo.unlock(&passphrase()).await.expect("unlocks");
+        let err = init(&repo).await.expect_err("must fail");
+        assert!(matches!(err, Error::AlreadyInitialized { .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_lost_answer_for_the_config_does_not_cost_the_repository_its_key() {
+        let memory = Arc::new(MemoryBackend::new());
+        // The first put is the key file, the second the config, whose answer is lost.
+        let flaky = FlakyBackend::scripted_for(memory.clone(), &["put"], [Fault::After]).skipping(1);
+        let repo = Repository::with_backend(Arc::new(flaky));
+
+        let err = init(&repo).await.expect_err("the answer was lost");
+        assert!(err.is_transient(), "{err}");
+        assert!(memory.object_names().contains(&"config".to_owned()), "but the config was written");
+        repo.load_config().await.expect("the repository opens");
+        repo.unlock(&passphrase()).await.expect("and its key file is still there");
+    }
+
+    #[tokio::test]
+    async fn a_config_that_was_never_written_leaves_a_key_file_that_the_next_init_ignores() {
+        let memory = Arc::new(MemoryBackend::new());
+        let flaky = FlakyBackend::scripted_for(memory.clone(), &["put"], [Fault::Before]).skipping(1);
+        let repo = Repository::with_backend(Arc::new(flaky));
+
+        let err = init(&repo).await.expect_err("the request was lost");
+        assert!(err.is_transient(), "{err}");
+        assert!(!memory.object_names().contains(&"config".to_owned()));
+
+        init(&repo).await.expect("init can simply be run again");
+        repo.unlock(&passphrase()).await.expect("unlocks");
+    }
+
     #[test]
     fn concurrent_init_has_exactly_one_winner_and_a_usable_repository() {
         let dir = temp();
-        let store = LocalStore::new(dir.path().join("repo"));
+        let store = Store::local(dir.path().join("repo"));
         let pass = passphrase();
         let results: Vec<Result<RepositoryConfig>> = std::thread::scope(|scope| {
             let mut handles = Vec::new();

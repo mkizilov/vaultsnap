@@ -17,7 +17,7 @@ use crate::keys;
 use crate::lock::{describe_lock, LockKind, MAX_LOCK_BYTES};
 use crate::repository::RepositoryLayout;
 use crate::snapshot::SnapshotId;
-use crate::store::{DirEntryInfo, DirEntryKind, LocalStore};
+use crate::store::{DirEntryInfo, DirEntryKind, Store};
 
 /// The directories every repository has.
 const REQUIRED: [&str; 4] = [
@@ -62,7 +62,7 @@ fn subject(dir: &str, name: &str) -> String {
 /// Reports an entry that is not what its place allows: a leftover temporary file, or something
 /// that does not belong.
 fn unexpected(findings: &mut Findings, dir: &str, entry: &DirEntryInfo, why: &str) {
-    let leftover = LocalStore::is_temp_name(&entry.name) && entry.kind == DirEntryKind::File;
+    let leftover = Store::is_temp_name(&entry.name) && entry.kind == DirEntryKind::File;
     let (kind, detail) = if leftover {
         (
             FindingKind::LeftoverTempFile,
@@ -82,7 +82,7 @@ fn unexpected(findings: &mut Findings, dir: &str, entry: &DirEntryInfo, why: &st
 }
 
 /// Lists `dir`. A directory that cannot be listed is a finding, not a failure of the check.
-fn entries_of(store: &LocalStore, dir: &str, findings: &mut Findings) -> Vec<DirEntryInfo> {
+fn entries_of(store: &Store, dir: &str, findings: &mut Findings) -> Vec<DirEntryInfo> {
     match store.list_entries(dir) {
         Ok(entries) => entries,
         Err(err) => {
@@ -103,27 +103,32 @@ fn entries_of(store: &LocalStore, dir: &str, findings: &mut Findings) -> Vec<Dir
 /// has stored its chunks, so a backup running at the same time can add objects that no listed
 /// snapshot refers to (orphans), but never a listed snapshot whose objects are missing.
 pub(super) fn scan(
-    store: &LocalStore,
+    store: &Store,
     own_lock: Option<&str>,
     findings: &mut Findings,
 ) -> Result<Inventory> {
     let mut inventory = Inventory::default();
     let root = store.list_entries("")?;
 
+    // A backend without directories (an object store) has no empty ones: a directory with no
+    // objects in it is simply not listed, which is not damage.
+    let directories = store.capabilities().directories;
     let present_dir = |name: &str| {
-        root.iter()
-            .any(|entry| entry.name == name && entry.kind == DirEntryKind::Directory)
+        !directories
+            || root
+                .iter()
+                .any(|entry| entry.name == name && entry.kind == DirEntryKind::Directory)
     };
-    for name in REQUIRED {
-        match root.iter().find(|entry| entry.name == name) {
+    for name in REQUIRED.iter().filter(|_| directories) {
+        match root.iter().find(|entry| entry.name == *name) {
             None => findings.add(Finding {
                 kind: FindingKind::MissingDirectory,
-                subject: name.to_owned(),
+                subject: (*name).to_owned(),
                 detail: "the directory does not exist".to_owned(),
             }),
             Some(entry) if entry.kind != DirEntryKind::Directory => findings.add(Finding {
                 kind: FindingKind::MissingDirectory,
-                subject: name.to_owned(),
+                subject: (*name).to_owned(),
                 detail: format!("{} where a directory is required", describe(entry.kind)),
             }),
             Some(_) => {}
@@ -153,7 +158,7 @@ pub(super) fn scan(
     Ok(inventory)
 }
 
-fn scan_keys(store: &LocalStore, findings: &mut Findings, inventory: &mut Inventory) {
+fn scan_keys(store: &Store, findings: &mut Findings, inventory: &mut Inventory) {
     let dir = RepositoryLayout::KEYS_DIR;
     for entry in entries_of(store, dir, findings) {
         if entry.kind == DirEntryKind::File && is_hex_name(&entry.name, 32) {
@@ -171,7 +176,7 @@ fn scan_keys(store: &LocalStore, findings: &mut Findings, inventory: &mut Invent
     }
 }
 
-fn scan_locks(store: &LocalStore, own_lock: Option<&str>, findings: &mut Findings) {
+fn scan_locks(store: &Store, own_lock: Option<&str>, findings: &mut Findings) {
     let dir = RepositoryLayout::LOCKS_DIR;
     let own = own_lock.and_then(|name| name.strip_prefix("locks/"));
     for entry in entries_of(store, dir, findings) {
@@ -214,7 +219,7 @@ fn scan_locks(store: &LocalStore, own_lock: Option<&str>, findings: &mut Finding
     }
 }
 
-fn scan_snapshots(store: &LocalStore, findings: &mut Findings, inventory: &mut Inventory) {
+fn scan_snapshots(store: &Store, findings: &mut Findings, inventory: &mut Inventory) {
     let dir = RepositoryLayout::SNAPSHOTS_DIR;
     for entry in entries_of(store, dir, findings) {
         let id = (entry.kind == DirEntryKind::File)
@@ -227,7 +232,7 @@ fn scan_snapshots(store: &LocalStore, findings: &mut Findings, inventory: &mut I
     }
 }
 
-fn scan_data(store: &LocalStore, findings: &mut Findings, inventory: &mut Inventory) {
+fn scan_data(store: &Store, findings: &mut Findings, inventory: &mut Inventory) {
     let dir = RepositoryLayout::DATA_DIR;
     for shard in entries_of(store, dir, findings) {
         if shard.kind == DirEntryKind::Directory && is_hex_name(&shard.name, 2) {
@@ -238,7 +243,7 @@ fn scan_data(store: &LocalStore, findings: &mut Findings, inventory: &mut Invent
     }
 }
 
-fn scan_shard(store: &LocalStore, shard: &str, findings: &mut Findings, inventory: &mut Inventory) {
+fn scan_shard(store: &Store, shard: &str, findings: &mut Findings, inventory: &mut Inventory) {
     let dir = format!("{}/{shard}", RepositoryLayout::DATA_DIR);
     for entry in entries_of(store, &dir, findings) {
         let object = (entry.kind == DirEntryKind::File && is_hex_name(&entry.name, 64))
@@ -273,16 +278,16 @@ mod tests {
     const CHUNK: &str = "ab0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
 
     /// A skeleton repository: the four directories and nothing in them.
-    fn skeleton() -> (TempDir, LocalStore) {
+    fn skeleton() -> (TempDir, Store) {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        let store = LocalStore::new(dir.path());
+        let store = Store::local(dir.path());
         for name in REQUIRED {
             store.create_dir(name).expect("mkdir");
         }
         (dir, store)
     }
 
-    fn scanned(store: &LocalStore, own_lock: Option<&str>) -> (Inventory, Vec<Finding>) {
+    fn scanned(store: &Store, own_lock: Option<&str>) -> (Inventory, Vec<Finding>) {
         let mut findings = Findings::new(0);
         let inventory = scan(store, own_lock, &mut findings).expect("scan");
         (inventory, findings.finish().findings)
@@ -305,7 +310,7 @@ mod tests {
     #[test]
     fn missing_or_wrongly_typed_required_directories_are_errors_and_the_walk_goes_on() {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        let store = LocalStore::new(dir.path());
+        let store = Store::local(dir.path());
         store.create_dir("keys").expect("mkdir");
         fs::write(dir.path().join("snapshots"), b"a file").expect("write");
         fs::write(dir.path().join("locks"), b"a file").expect("write");
@@ -460,7 +465,7 @@ mod tests {
     #[test]
     fn an_unreadable_root_is_an_error_of_the_check_itself() {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        let store = LocalStore::new(dir.path().join("missing"));
+        let store = Store::local(dir.path().join("missing"));
         let mut findings = Findings::new(0);
         assert!(scan(&store, None, &mut findings).is_err());
     }

@@ -45,8 +45,14 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
 - `crates/vaultsnap-core`: library. `error` (thiserror `Error`), `snapshot` (`SnapshotId`),
   `retention` (`RetentionPolicy`, `select` = a pure function from snapshot times to `Decision`s,
   UTC calendar, no clock), `repository` (`Repository`, `RepositoryLayout`, open/verify),
-  `config` (strict `config` file parser/writer), `store` (`LocalStore`: validated names, symlink
-  refusal, atomic `write_new`/`write_replace`, private permissions), `lock` (`RepositoryLock`),
+  `config` (strict `config` file parser/writer), `storage` (the `Backend` trait every repository
+  read and write goes through, `Capabilities`, `PutMode`/`Version` conditional writes, name
+  validation; `LocalBackend` = the reference directory implementation with symlink refusal,
+  atomic create/replace, private permissions; `MemoryBackend` = object-store semantics;
+  `RetryingBackend`/`RetryPolicy`; `FlakyBackend` = fault injection; `contract` = the cases every
+  backend must pass; specification in `docs/STORAGE.md`), `store` (`Store`: the cheap handle on a
+  backend that all repository code holds, plus `Store::update`, the transactional
+  read-modify-write), `lock` (`RepositoryLock`),
   `ops/*` (one file per operation, each an `async` method on `Repository`), `blocking` (runs the
   synchronous store on Tokio's blocking pool), `util` (randomness, hex, time), `kv` (strict
   `key=value` parser shared by `config` and key files), `secret` (`Passphrase`), `crypto` (Argon2id
@@ -77,8 +83,9 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   checked; `dest` = the file system operations: nothing followed, exclusive creation, temporary
   file plus rename, attributes through open handles; `engine` = the pipeline; the
   `Repository::restore` entry point is `ops/restore.rs`; the specification is `docs/RESTORE.md`).
-  No CLI or terminal concerns here. All repository file access goes through `LocalStore`; do not
-  use `std::fs` directly on repository paths elsewhere. (The restore writes to the *target*, not
+  No CLI or terminal concerns here. All repository file access goes through `Store`; do not
+  use `std::fs` directly on repository paths elsewhere, and do not assume a repository is a
+  directory (`Backend::local_path` says when it is). (The restore writes to the *target*, not
   the repository, and uses `std::fs` in `restore/dest.rs` for that on purpose.) `check`
   (`CheckOptions`, `CheckReport`, `Finding`, `FindingKind`; `scan` = the directory walk and
   inventory, `engine` = snapshots, chunk comparison, the verification pool, affected snapshots;
@@ -125,7 +132,7 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   cancellation.
 - Check invariants (do not break them without updating `docs/CHECK.md`, `docs/SECURITY.md`, and
   the tests): a check **never repairs, moves, rewrites, or deletes** anything: it uses only
-  `LocalStore` read operations and its own lock file; damage is a `Finding`, never an `Err`
+  `Store` read operations and its own lock file; damage is a `Finding`, never an `Err`
   (an `Err` means the check could not run); `FindingKind` names, the order of its variants, and
   the JSON `counts` fields are a contract (add a kind in all of: the enum, `ALL`, `name`,
   `severity`, `advice`, the JSON `CountsView`, `docs/CHECK.md`, and the tests that list them);
@@ -146,6 +153,19 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   `--yes`; a deleting run holds the exclusive lock, a dry run the shared one; the newest snapshot
   is never removed; retention uses the manifest's `created` time, UTC, never file times or the
   clock; a cancelled or failed run leaves every remaining snapshot complete.
+- Storage invariants (do not break them without updating `docs/STORAGE.md`, `docs/SECURITY.md`,
+  and the contract): repository code reaches files only through `Store`/`Backend`, never
+  `std::fs` (tests may damage a directory repository directly); code above the trait assumes no
+  rename, hard link, directory, permission, or listing order beyond what `Backend` documents, and
+  asks `capabilities()` before relying on directories; "does not exist" is tested with
+  `Error::is_not_found()`, never by matching `Error::Io`, and a delete or a listing of a missing
+  prefix must tolerate both outcomes the contract allows; `Create` must stay exclusive for all
+  clients and a backend that cannot guarantee that, read-after-write consistency, or atomic
+  visibility is refused (`Capabilities::require_repository_support`); a backend never claims more
+  than it provides and verifies claims the other side can fake; every backend validates every
+  name; a change to the trait, a new `Capabilities` field, or a new backend adds or updates
+  contract cases, and every backend runs the whole contract; retries repeat only transient errors
+  and resolve a conditional write whose answer was lost by comparing bytes, never by assuming.
 - Implemented so far: `init`, config, store, locks, key management (`init`, `unlock`), the
   chunking engine, the encrypted chunk store, the filesystem scanner, encrypted snapshot
   manifests, `backup`, the inspection commands `snapshots`, `show`, `ls`, `diff`, `restore`,
@@ -176,8 +196,8 @@ Cargo workspace (`Cargo.toml`), Rust edition 2021, toolchain pinned in `rust-too
   for names, `ls`-style modes), `passphrase` (including `unlock`), `logging` (tracing setup,
   stderr only). `serde`/`serde_json` are for CLI output only; the core does not depend on them.
 - `docs/`: `FORMAT.md`, `SECURITY.md`, `SCANNING.md`, `BACKUP.md`, `RESTORE.md`, `CHECK.md`,
-  `PRUNE.md`, and `CLI.md` (the command reference; every new or changed command, option, or output
-  goes there with an example).
+  `PRUNE.md`, `STORAGE.md`, and `CLI.md` (the command reference; every new or changed command,
+  option, or output goes there with an example).
 
 Conventions: `unsafe` is forbidden; no `unwrap()` outside tests (`clippy::unwrap_used`); errors
 are typed in core and converted at the CLI boundary; user-supplied identifiers are validated

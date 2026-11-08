@@ -215,6 +215,11 @@ be. Missing `data` means every chunk is missing; missing `snapshots` means the h
 *Cause.* Deleted by hand, a failed disk or sync tool, a restore of only part of a backup of the
 repository.
 
+*Not on an object store.* A repository kept on a storage backend without directories (see
+[`STORAGE.md`](STORAGE.md)) has no empty directories: one that holds no objects is simply not
+there, so this finding is never reported for such a backend, and an empty `snapshots` or `data`
+is seen through the counts (no snapshots, no objects) instead.
+
 *Do.* Put the directory back, with its contents, from a copy of the repository. If you have none,
 look in the trash, in the file system's snapshots or the cloud provider's history. Creating an empty
 directory only hides the loss. A missing `locks` directory alone is harmless to recreate (empty).

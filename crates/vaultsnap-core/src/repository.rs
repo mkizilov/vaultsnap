@@ -1,8 +1,7 @@
 //! Repository handle and on-disk layout (specified in `docs/FORMAT.md`).
 
-use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::blocking::blocking;
 use crate::chunk_store::ChunkStore;
@@ -11,7 +10,8 @@ use crate::error::{Error, Result};
 use crate::keys::RepositoryKeys;
 use crate::lock::{LockKind, RepositoryLock};
 use crate::snapshot::{SnapshotId, SnapshotStore};
-use crate::store::LocalStore;
+use crate::storage::{Backend, LocalBackend, LocationState};
+use crate::store::Store;
 
 /// Repository format version written to the `config` file.
 pub const FORMAT_VERSION: u32 = 1;
@@ -94,13 +94,21 @@ impl RepositoryLayout {
 #[derive(Debug, Clone)]
 pub struct Repository {
     layout: RepositoryLayout,
+    backend: Arc<dyn Backend>,
 }
 
 impl Repository {
-    /// Refers to the repository rooted at `root`.
+    /// Refers to the repository in the directory `root` of the local file system.
     pub fn at(root: impl Into<PathBuf>) -> Self {
+        Self::with_backend(Arc::new(LocalBackend::new(root)))
+    }
+
+    /// Refers to the repository stored in `backend`. The layout's paths are then labels for
+    /// messages (see [`Backend::root`]), not places on disk, unless the backend is a directory.
+    pub fn with_backend(backend: Arc<dyn Backend>) -> Self {
         Self {
-            layout: RepositoryLayout::new(root),
+            layout: RepositoryLayout::new(backend.root()),
+            backend,
         }
     }
 
@@ -109,9 +117,15 @@ impl Repository {
         &self.layout
     }
 
-    /// The local store backing this repository.
-    pub fn store(&self) -> LocalStore {
-        LocalStore::new(self.layout.root())
+    /// The storage backend this repository is kept in.
+    pub fn backend(&self) -> &Arc<dyn Backend> {
+        &self.backend
+    }
+
+    /// A handle on the storage backing this repository. Every read and write of repository
+    /// files goes through it.
+    pub fn store(&self) -> Store {
+        Store::new(Arc::clone(&self.backend))
     }
 
     /// The encrypted chunk store of this repository, using keys derived from `keys` (obtained
@@ -147,19 +161,17 @@ impl Repository {
     }
 }
 
-/// Checks that the location is a directory with a valid `config` and returns it. Nothing else
-/// about the repository is required, which is what `check` needs to describe a repository whose
-/// other parts are damaged.
-pub(crate) fn read_config(store: &LocalStore) -> Result<RepositoryConfig> {
-    let root = store.root();
+/// Checks that the storage can hold a repository and has a valid `config`, and returns it.
+/// Nothing else about the repository is required, which is what `check` needs to describe a
+/// repository whose other parts are damaged.
+pub(crate) fn read_config(store: &Store) -> Result<RepositoryConfig> {
+    store.capabilities().require_repository_support()?;
     let not_a_repository = || Error::NotARepository {
-        path: root.to_path_buf(),
+        path: store.root().to_path_buf(),
     };
-    match fs::metadata(root) {
-        Ok(meta) if meta.is_dir() => {}
-        Ok(_) => return Err(not_a_repository()),
-        Err(err) if err.kind() == ErrorKind::NotFound => return Err(not_a_repository()),
-        Err(err) => return Err(Error::io("inspect", root, err)),
+    match store.probe()? {
+        LocationState::Available => {}
+        LocationState::Absent | LocationState::Unusable(_) => return Err(not_a_repository()),
     }
     RepositoryConfig::load(store).map_err(|err| {
         if err.is_not_found() {
@@ -170,11 +182,14 @@ pub(crate) fn read_config(store: &LocalStore) -> Result<RepositoryConfig> {
     })
 }
 
-pub(crate) fn open_repository(store: &LocalStore) -> Result<RepositoryConfig> {
+pub(crate) fn open_repository(store: &Store) -> Result<RepositoryConfig> {
     let config = read_config(store)?;
-    for dir in REQUIRED_DIRS {
-        if !store.resolve(dir)?.is_dir() {
-            return Err(Error::Corrupt(format!("missing directory `{dir}`")));
+    // Object stores have no empty directories, so there is nothing to be missing there.
+    if store.capabilities().directories {
+        for dir in REQUIRED_DIRS {
+            if !store.dir_exists(dir)? {
+                return Err(Error::Corrupt(format!("missing directory `{dir}`")));
+            }
         }
     }
     Ok(config)
@@ -182,7 +197,10 @@ pub(crate) fn open_repository(store: &LocalStore) -> Result<RepositoryConfig> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
+    use crate::storage::MemoryBackend;
     use crate::testing::init;
 
     #[test]
@@ -269,6 +287,40 @@ mod tests {
         assert!(matches!(err, Error::UnsupportedVersion { found: 7, .. }), "{err}");
         let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
         assert!(matches!(err, Error::UnsupportedVersion { found: 7, .. }), "{err}");
+    }
+
+    #[test]
+    fn a_repository_can_live_in_any_backend_and_its_paths_are_then_labels() {
+        let repo = Repository::with_backend(Arc::new(MemoryBackend::new()));
+        assert_eq!(repo.layout().root(), Path::new("memory://repository"));
+        assert_eq!(repo.layout().config_file(), Path::new("memory://repository/config"));
+        assert_eq!(repo.store().root(), repo.layout().root());
+        assert!(Arc::ptr_eq(repo.backend(), repo.store().backend()));
+    }
+
+    #[tokio::test]
+    async fn a_backend_that_cannot_hold_a_repository_is_refused_before_anything_is_read() {
+        use crate::storage::{Capabilities, Guarantee};
+
+        let weak = Capabilities {
+            read_after_write: true,
+            create_if_absent: Guarantee::None,
+            replace_if_unchanged: Guarantee::None,
+            atomic_put: true,
+            directories: false,
+        };
+        let repo = Repository::with_backend(Arc::new(MemoryBackend::with_capabilities(weak)));
+        let err = repo.load_config().await.expect_err("must fail");
+        assert!(matches!(err, Error::UnsupportedBackend(_)), "{err}");
+        let err = repo.lock(LockKind::Shared).await.expect_err("must fail");
+        assert!(matches!(err, Error::UnsupportedBackend(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_empty_object_store_is_not_a_repository() {
+        let repo = Repository::with_backend(Arc::new(MemoryBackend::new()));
+        let err = repo.load_config().await.expect_err("must fail");
+        assert!(matches!(err, Error::NotARepository { .. }), "{err}");
     }
 
     #[tokio::test]

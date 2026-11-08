@@ -11,7 +11,10 @@
 //! and the safe restore of snapshots into a directory ([`restore`], [`Repository::restore`]).
 //! The repository check ([`check`], [`Repository::check`]) reports damage without ever changing
 //! anything, and retention with mark-and-sweep garbage collection ([`prune`],
-//! [`Repository::prune`]), the only operation that deletes data.
+//! [`Repository::prune`]), the only operation that deletes data. All repository files are
+//! reached through a storage backend ([`storage`], [`Backend`]): the local directory is the
+//! reference implementation, and the interface is designed so that an S3-compatible object store
+//! can follow without changing the format or the code above it.
 
 pub mod backup;
 mod blocking;
@@ -33,6 +36,7 @@ pub mod retention;
 pub mod scan;
 pub mod secret;
 pub mod snapshot;
+pub mod storage;
 pub mod store;
 #[cfg(test)]
 mod testing;
@@ -49,7 +53,7 @@ pub use chunk_store::{ChunkId, ChunkStore, Compression, PutOutcome, PutResult};
 pub use chunking::{Chunker, ChunkerConfig};
 pub use config::RepositoryConfig;
 pub use crypto::{KdfParams, KeyPurpose, SecretKey};
-pub use error::{Error, Result};
+pub use error::{BackendErrorKind, Error, Result};
 pub use history::{Diff, SnapshotDetails, SnapshotList, SnapshotSizes};
 pub use keys::RepositoryKeys;
 pub use lock::{LockKind, RepositoryLock};
@@ -69,4 +73,5 @@ pub use snapshot::{
     Manifest, ManifestBuilder, SnapshotId, SnapshotListing, SnapshotRef, SnapshotStore,
     SnapshotSummary,
 };
-pub use store::LocalStore;
+pub use storage::{Backend, LocalBackend, MemoryBackend, RetryPolicy, RetryingBackend};
+pub use store::Store;

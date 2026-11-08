@@ -28,7 +28,7 @@ use crate::chunk_store::{ChunkId, ChunkStore};
 use crate::config::RepositoryConfig;
 use crate::error::{Error, Result};
 use crate::snapshot::{Manifest, NodeKind, SnapshotId, SnapshotStore};
-use crate::store::LocalStore;
+use crate::store::Store;
 
 /// Collects findings: every one is counted, but at most `cap` of each severity are kept, so a
 /// repository with a million orphans does not need a million records, and errors are never
@@ -235,7 +235,7 @@ fn snapshot_finding(id: &SnapshotId, err: &Error) -> Finding {
         Error::UnsupportedSnapshotVersion { .. } | Error::UnsupportedManifestVersion { .. } => {
             FindingKind::UnsupportedVersion
         }
-        Error::Io { .. } => FindingKind::IoError,
+        Error::Io { .. } | Error::Backend { .. } => FindingKind::IoError,
         _ => FindingKind::SnapshotDamaged,
     };
     Finding {
@@ -287,7 +287,7 @@ fn affected_snapshots(
 
 /// The parts of a repository a check works with.
 pub(crate) struct Subject<'a> {
-    pub store: &'a LocalStore,
+    pub store: &'a Store,
     pub snapshots: &'a SnapshotStore,
     pub chunks: &'a ChunkStore,
     pub config: &'a RepositoryConfig,
@@ -472,9 +472,9 @@ mod tests {
     impl Fx {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("create temporary directory");
-            LocalStore::new(dir.path()).create_dir("data").expect("mkdir");
+            Store::local(dir.path()).create_dir("data").expect("mkdir");
             let keys = RepositoryKeys::generate().expect("generate");
-            let chunks = ChunkStore::new(LocalStore::new(dir.path()), &keys).expect("chunk store");
+            let chunks = ChunkStore::new(Store::local(dir.path()), &keys).expect("chunk store");
             Self { dir, chunks }
         }
 

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::blocking::blocking;
 use crate::error::Result;
 use crate::keys::RepositoryKeys;
@@ -26,12 +28,13 @@ impl Repository {
         let lock = self.lock(LockKind::Shared).await?;
         let snapshots = self.snapshot_store(keys).await?;
         let chunks = self.chunk_store(keys)?;
-        let repository_root = self.layout().root().to_path_buf();
+        // A repository that is not a directory here cannot contain the target.
+        let repository_root = self.backend().local_path().map(Path::to_path_buf);
         blocking(move || {
             let _lock = lock;
             let id = snapshots.resolve(&options.snapshot)?;
             let manifest = snapshots.load(&id)?;
-            restore::run(&manifest, &chunks, &repository_root, &options)
+            restore::run(&manifest, &chunks, repository_root.as_deref(), &options)
         })
         .await
     }

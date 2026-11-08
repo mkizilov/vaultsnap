@@ -368,6 +368,40 @@ its security properties are about not deleting what must stay.
 - **Memory** grows with the number of distinct chunks and chunk objects (a few dozen bytes each),
   and one manifest is held at a time.
 
+## Storage backends (built)
+
+All repository I/O goes through the `Backend` interface ([`STORAGE.md`](STORAGE.md)); the local
+directory is the reference implementation. What that means for security:
+
+- **A backend only ever sees ciphertext.** Chunk objects, snapshot manifests, and key files are
+  sealed before they reach it. What a backend (or the operator of an object store) can see is the
+  names of objects (random ids and fixed words), their sizes, how many there are, and when they
+  were written, which is what `Information that is not hidden` already lists for the local
+  directory. Moving a repository to another backend does not change that.
+- **Integrity does not depend on the backend.** Every object is authenticated when it is read, so a
+  buggy or hostile backend cannot make VaultSnap accept forged or altered data. It can withhold
+  data, delete it, or serve an older consistent copy of the whole repository; that is the same
+  limit as for a directory someone else can write to, and `check` reports what it can see.
+- **Safety does depend on the backend keeping its promises** about the few guarantees the format
+  relies on: a completed write is visible to every later read and listing, creating an object only
+  if absent is atomic for all clients, and an object appears whole or not at all. A backend that
+  breaks the second (an S3-compatible store that ignores `If-None-Match` and overwrites) could
+  overwrite a snapshot or a chunk, so a backend must verify what it claims and is **refused**,
+  before anything is read or written, if its declared capabilities fall short.
+- **Every backend validates every name** (segments of `[A-Za-z0-9._-]`, none starting with `.`),
+  and a contract case checks it, so no name can climb out of the repository, address a hidden or
+  temporary file, or need escaping. Refusing symbolic links and creating files `0600` and
+  directories `0700` are properties of the local directory; an object store has its own access
+  control (bucket policy, encryption at rest) that VaultSnap cannot set and the operator must.
+- **Retries never turn a failure into a success** except when the object now holds exactly the
+  bytes the failed call was writing (the earlier attempt landed). A conflict with different
+  content stays a conflict, and only errors marked transient are retried at all.
+- **Credentials for a remote backend are secrets outside VaultSnap's own encryption.** They are
+  taken from the environment or the provider's usual configuration, never from the command line,
+  and never printed or logged (the same rule as for the passphrase).
+- **The in-memory and fault-injecting backends are for tests.** They hold nothing on disk and
+  inject failures only into a backend they are given; nothing uses them unless asked.
+
 ## Concurrency
 
 Advisory locks stop two VaultSnap processes from corrupting each other. They are not a security

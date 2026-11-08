@@ -11,7 +11,7 @@ use crate::blocking::blocking;
 use crate::error::{Error, Result};
 use crate::keys::RepositoryKeys;
 use crate::repository::RepositoryLayout;
-use crate::store::{DirEntryKind, LocalStore};
+use crate::store::{DirEntryKind, Store};
 
 /// What `put` did with a chunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,14 +67,14 @@ impl PutResult {
 /// from async code use [`ChunkStore::put_async`] and [`ChunkStore::get_async`].
 #[derive(Clone)]
 pub struct ChunkStore {
-    store: LocalStore,
+    store: Store,
     keys: Arc<ChunkKeys>,
 }
 
 impl ChunkStore {
     /// A chunk store over the repository directory of `store`, using keys derived from the
     /// unlocked repository keys. Performs no I/O.
-    pub fn new(store: LocalStore, keys: &RepositoryKeys) -> Result<Self> {
+    pub fn new(store: Store, keys: &RepositoryKeys) -> Result<Self> {
         Ok(Self {
             store,
             keys: Arc::new(ChunkKeys::derive(keys)?),
@@ -250,15 +250,15 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("create temporary directory");
-            LocalStore::new(dir.path()).create_dir("data").expect("mkdir");
+            Store::local(dir.path()).create_dir("data").expect("mkdir");
             let keys = RepositoryKeys::generate().expect("generate");
-            let chunks = ChunkStore::new(LocalStore::new(dir.path()), &keys).expect("chunk store");
+            let chunks = ChunkStore::new(Store::local(dir.path()), &keys).expect("chunk store");
             Self { dir, keys, chunks }
         }
 
         /// Another view of the same directory, with the same keys.
         fn reopen(&self) -> ChunkStore {
-            ChunkStore::new(LocalStore::new(self.dir.path()), &self.keys).expect("chunk store")
+            ChunkStore::new(Store::local(self.dir.path()), &self.keys).expect("chunk store")
         }
 
         fn path_of(&self, id: &ChunkId) -> PathBuf {
@@ -513,7 +513,7 @@ mod tests {
         let one = Fixture::new();
         let two = Fixture::new();
         // Same keys, different directories: ids are equal, ciphertexts must not be.
-        let shared = ChunkStore::new(LocalStore::new(two.dir.path()), &one.keys).expect("store");
+        let shared = ChunkStore::new(Store::local(two.dir.path()), &one.keys).expect("store");
         let data = pseudo_random(2000, 8);
         let a = one.chunks.put(&data).expect("put");
         let b = shared.put(&data).expect("put");
@@ -599,7 +599,7 @@ mod tests {
         let fx = Fixture::new();
         let put = fx.chunks.put(&pseudo_random(1000, 13)).expect("put");
         let intruder_keys = RepositoryKeys::generate().expect("generate");
-        let intruder = ChunkStore::new(LocalStore::new(fx.dir.path()), &intruder_keys).expect("store");
+        let intruder = ChunkStore::new(Store::local(fx.dir.path()), &intruder_keys).expect("store");
         assert!(matches!(intruder.get(&put.id), Err(Error::CorruptObject { .. })));
     }
 
@@ -629,7 +629,7 @@ mod tests {
     fn a_repository_without_a_data_directory_fails_cleanly() {
         let dir = tempfile::tempdir().expect("create temporary directory");
         let keys = RepositoryKeys::generate().expect("generate");
-        let chunks = ChunkStore::new(LocalStore::new(dir.path()), &keys).expect("store");
+        let chunks = ChunkStore::new(Store::local(dir.path()), &keys).expect("store");
         assert!(chunks.put(b"data").is_err());
         assert!(fs::read_dir(dir.path()).expect("read_dir").next().is_none());
     }

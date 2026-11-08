@@ -323,7 +323,7 @@ mod tests {
     use crate::chunking::ChunkerConfig;
     use crate::keys::RepositoryKeys;
     use crate::snapshot::testing::{chunk, file, minimal, rich};
-    use crate::store::LocalStore;
+    use crate::store::Store;
 
     const DOCS: &str = "/home/me/Documents";
 
@@ -525,9 +525,9 @@ mod tests {
     #[test]
     fn a_full_comparison_measures_the_data_particular_to_each_snapshot() {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        LocalStore::new(dir.path()).create_dir("data").expect("mkdir");
+        Store::local(dir.path()).create_dir("data").expect("mkdir");
         let keys = RepositoryKeys::generate().expect("generate");
-        let store = ChunkStore::new(LocalStore::new(dir.path()), &keys).expect("chunk store");
+        let store = ChunkStore::new(Store::local(dir.path()), &keys).expect("chunk store");
         let mut stored_len = HashMap::new();
         let mut put = |seed: u64| {
             let data = pseudo_random(2000, seed);
@@ -566,9 +566,9 @@ mod tests {
     #[test]
     fn missing_objects_are_counted_not_fatal() {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        LocalStore::new(dir.path()).create_dir("data").expect("mkdir");
+        Store::local(dir.path()).create_dir("data").expect("mkdir");
         let keys = RepositoryKeys::generate().expect("generate");
-        let store = ChunkStore::new(LocalStore::new(dir.path()), &keys).expect("chunk store");
+        let store = ChunkStore::new(Store::local(dir.path()), &keys).expect("chunk store");
         let mut manifest = minimal();
         let missing: ChunkId = store.chunk_id(b"never stored");
         manifest.roots[0].entries.push(file(0, b"f", vec![ChunkRef { id: missing, len: 10 }]));

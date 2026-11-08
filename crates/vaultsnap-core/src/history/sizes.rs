@@ -147,7 +147,7 @@ mod tests {
     use crate::keys::RepositoryKeys;
     use crate::snapshot::testing::{chunk, dir, file, minimal};
     use crate::snapshot::{Manifest, ManifestEntry, Root};
-    use crate::store::LocalStore;
+    use crate::store::Store;
 
     /// A manifest with one directory holding the given files, each a list of chunk seeds.
     fn manifest_of(files: &[&[u8]]) -> Manifest {
@@ -250,9 +250,9 @@ mod tests {
     #[test]
     fn measuring_reads_object_lengths_and_notices_missing_objects() {
         let dir = tempfile::tempdir().expect("create temporary directory");
-        LocalStore::new(dir.path()).create_dir("data").expect("mkdir");
+        Store::local(dir.path()).create_dir("data").expect("mkdir");
         let keys = RepositoryKeys::generate().expect("generate");
-        let store = ChunkStore::new(LocalStore::new(dir.path()), &keys).expect("chunk store");
+        let store = ChunkStore::new(Store::local(dir.path()), &keys).expect("chunk store");
 
         let stored = pseudo_random(3000, 1);
         let put = store.put(&stored).expect("put");
