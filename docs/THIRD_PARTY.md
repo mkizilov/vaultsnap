@@ -39,21 +39,21 @@ only for crate features VaultSnap does not enable; it is not part of the binary.
 | Apache-2.0 | 25 |
 | Unicode-3.0 | 18 |
 | BSD-3-Clause | 4 |
-| Unlicense OR MIT | 3 |
-| MIT/Apache-2.0 | 3 |
 | Apache-2.0 OR ISC OR MIT | 3 |
+| MIT/Apache-2.0 | 3 |
+| Unlicense OR MIT | 3 |
 | ISC | 2 |
-| Zlib | 1 |
-| MIT OR Apache-2.0 OR LGPL-2.1-or-later | 1 |
-| ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0) | 1 |
-| ISC AND (Apache-2.0 OR ISC) | 1 |
-| CC0-1.0 OR MIT-0 OR Apache-2.0 | 1 |
-| CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | 1 |
-| Apache-2.0/MIT | 1 |
-| Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 1 |
-| Apache-2.0 OR BSL-1.0 | 1 |
-| Apache-2.0 / MIT | 1 |
 | (MIT OR Apache-2.0) AND Unicode-3.0 | 1 |
+| Apache-2.0 / MIT | 1 |
+| Apache-2.0 OR BSL-1.0 | 1 |
+| Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 1 |
+| Apache-2.0/MIT | 1 |
+| CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | 1 |
+| CC0-1.0 OR MIT-0 OR Apache-2.0 | 1 |
+| ISC AND (Apache-2.0 OR ISC) | 1 |
+| ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0) | 1 |
+| MIT OR Apache-2.0 OR LGPL-2.1-or-later | 1 |
+| Zlib | 1 |
 
 ## Crates
 
@@ -280,9 +280,9 @@ only for crate features VaultSnap does not enable; it is not part of the binary.
 | untrusted | 0.9.0 | ISC | https://github.com/briansmith/untrusted |
 | url | 2.5.8 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
 | urlencoding | 2.1.3 | MIT | https://github.com/kornelski/rust_urlencoding |
-| utf_types | 1.0.0 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf_types |
 | utf8_iter | 1.1.0 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf8_iter |
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT | https://github.com/alacritty/vte |
+| utf_types | 1.0.0 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf_types |
 | uuid | 1.29.1 | Apache-2.0 OR MIT | https://github.com/uuid-rs/uuid |
 | vsimd | 0.8.0 | MIT | https://github.com/Nugine/simd |
 | want | 0.3.2 | MIT | https://github.com/seanmonstar/want |

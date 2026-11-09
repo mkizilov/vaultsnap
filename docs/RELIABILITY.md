@@ -66,6 +66,7 @@ Everything was written without a compiler, so this is the honest account of what
 | first signal experiment | a SIGTERM "failure" (the process died from the signal) | my experiment counted objects left by the previous run, so it signalled before the handler existed | the experiment, not the product; redone with a trigger relative to a baseline. It did reveal the window before the handler is installed (roadmap item 3) |
 | Windows compile | 3 errors in `tests/backup.rs` | one test used `std::os::unix` and `MetadataExt::mtime` with no `cfg(unix)` guard | test; guarded with `#[cfg(unix)]` (it still runs, and passes, on macOS) |
 | license inventory | the first copyleft detector in `scripts/third-party-inventory.sh` flagged `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`), which has permissive alternatives | the detector could not tell "copyleft is the only option" from "copyleft is one choice" | the script (written in this project); it now classifies both, and was exercised on synthetic rows |
+| hosted CI | `scripts/third-party-inventory.sh --check` failed on every runner with "out of date" and no detail | the generated file depended on the machine in three ways, each reproduced alone with the unchanged script: (1) the workflow sets `CARGO_TERM_COLOR=always`, which makes `cargo tree` print its ` (*)` marker as escape sequences, so 84 repeated entries stopped being de-duplicated (329 rows instead of 245, counts wrong); (2) `sort` follows the locale, and the C locale orders `utf_types` and `utf8_iter` differently from en_US; (3) mawk, Ubuntu's `awk`, keeps the backslash of an unknown string escape, so ``\`r-efi\` `` was printed. The pipeline also leaned on how `sort -rn` breaks ties | the script (written in this project): `LC_ALL=C`, `cargo tree --color never`, an explicit total order for the license counts, no awk escapes, cargo's error shown when it fails, and a diff shown when `--check` fails. Checked in 17 environments, section 7 |
 | stale docs | three documents said `ring` compiles C code | `ring` has not been in the build since the SDK feature change (it is in `Cargo.lock` only for features that are off); found while checking the license inventory | documentation, corrected |
 | S3 warning | `failed to load region from IMDS` on every command when no region is configured | the default region chain asks the instance-metadata service first | product behavior; the documentation now says to set a region (any of three ways silences it); the fix is roadmap item 12 |
 
@@ -396,6 +397,22 @@ checked for build output, caches, logs, keys, and local state. Findings:
 whole test suite (section 1), the MinIO tests, the audit, both shell tests, the release package, and
 both benchmarks, each with a hard time limit so that a hang would have been diagnosed and not waited
 for. None hung.
+
+**The inventory is the same in every environment tried.** After the hosted CI failure above,
+`scripts/third-party-inventory.sh` was run, from a fresh checkout at another path, in 17 environments
+and each output was compared byte for byte with one reference: this machine's tools (BSD awk and
+sort) with the en_US, C, and C.UTF-8 locales, with and without `CARGO_TERM_COLOR=always`, under bash
+and dash; mawk 1.3.4-20240123, gawk 5.2.1, and GNU coreutils 9.9 `sort` and `uniq` (built from
+source inside the repository; Ubuntu 24.04 ships mawk 1.3.4-20240123, gawk 5.2.1, and coreutils 9.4,
+so coreutils differs by version) alone and together; and an empty environment. Before the fix 12 of
+the 17 differed (the Ubuntu-like setup with color by 108 to 110 lines); after it all 17 are
+identical. The same machine-dependence checks were not made for the other scripts, which passed on
+hosted CI. **Not verified:** the hosted runners themselves, and `cargo tree` on a Linux or Windows
+host. What was checked for host independence: on this macOS host the 245 crates of `--target all`
+include every crate used by each of seven specific targets (Linux gnu and musl, Apple, Windows gnu
+and msvc; 233 to 237 crates each) and also the ones only macOS or Windows uses (`core-foundation`,
+`security-framework`, `schannel`, `windows-sys`), so `all` is not filtered by the host. That is
+consistent with a Linux runner printing the same list, not proof of it.
 
 ## What is not verified
 

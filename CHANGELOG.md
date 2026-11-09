@@ -55,6 +55,12 @@ not verified, and [`ROADMAP.md`](ROADMAP.md) what to do next. `Cargo.lock` is co
   allowed to signal it; it now checks that the server stopped and fails otherwise.
 - Comments and documents that still said restore, check, prune, or the S3 backend were not
   implemented or not built.
+- `scripts/third-party-inventory.sh --check` failed on hosted CI because its output depended on the
+  machine: the workflow's `CARGO_TERM_COLOR=always` put escape sequences into `cargo tree` output,
+  `sort` followed the locale, and mawk kept the backslash in front of two backticks. The output is now the same in every
+  environment tried (the C locale, `cargo tree --color never`, no awk escapes, a total sort order),
+  and a failing check prints a diff. `docs/THIRD_PARTY.md` was regenerated; only the order of some
+  lines changed.
 
 ### Changed
 

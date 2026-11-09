@@ -52,6 +52,11 @@
 - **Transparent verification.** Reports list the exact commands run and their real results. Say
   plainly what could not be run (missing toolchain, no network, Docker unavailable) and mark it
   unverified. Never invent or paraphrase results.
+- **Generated files.** A script whose output CI compares with a committed file must produce the
+  same bytes on every supported runner: pin `LC_ALL=C`, pass `--color never` to cargo, give every
+  `sort` a total order, and keep awk to what BSD awk, gawk, and mawk agree on. CI sets
+  `CARGO_TERM_COLOR=always`, and runners differ in locale and in BSD or GNU tools. Show a diff
+  when the check fails.
 - **No secrets.** Never commit keys, passphrases, or real user data. Passphrases are never read
   from command-line arguments.
 

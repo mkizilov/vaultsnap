@@ -9,22 +9,38 @@
 # dependencies of the CLI with its default features, and nothing that is only used to build or
 # test. It is an inventory, not a notice file: the license texts of these crates are in their
 # packages (docs/THIRD_PARTY.md says what a binary release has to add).
+#
+# CI compares the result with the committed file on Linux and macOS, so it must not depend on the
+# machine. Three things used to: the locale (it decides how `sort` orders names, hence the C locale
+# below), CARGO_TERM_COLOR (CI sets it to `always`, which turns cargo's " (*)" marker into escape
+# sequences, hence `--color never`), and the awk and sort in use (BSD and GNU differ in how they
+# break ties and read escapes, hence a total order and plain awk).
 set -eu
+
+LC_ALL=C
+export LC_ALL
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 mode=${1:-write}
 out=docs/THIRD_PARTY.md
+tab=$(printf '\t')
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/third-party.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-cargo tree -p vaultsnap-cli -e normal --target all --prefix none --locked --format '{p}|{l}|{r}' 2>/dev/null |
-    sed -e 's/ (\*)$//' -e 's/ (proc-macro)//' |
+cargo tree --color never -p vaultsnap-cli -e normal --target all --prefix none --locked \
+    --format '{p}|{l}|{r}' > "$work/tree" 2> "$work/tree.err" || {
+    cat "$work/tree.err" >&2
+    echo "third-party-inventory.sh: cargo tree failed" >&2
+    exit 1
+}
+sed -e 's/ (\*)$//' -e 's/ (proc-macro)//' "$work/tree" |
     grep -v '^vaultsnap-' |
     sort -u > "$work/raw"
 [ -s "$work/raw" ] || {
-    echo "third-party-inventory.sh: cargo tree produced nothing" >&2
+    cat "$work/tree.err" >&2
+    echo "third-party-inventory.sh: cargo tree produced no packages" >&2
     exit 1
 }
 
@@ -38,8 +54,19 @@ awk -F'|' '{
 }' "$work/raw" > "$work/rows"
 
 crates=$(wc -l < "$work/rows" | tr -d ' ')
-awk -F'|' '{ gsub(/^ +| +$/, "", $4); print $4 }' "$work/rows" | sort | uniq -c | sort -rn |
-    awk '{ n = $1; $1 = ""; sub(/^ /, ""); printf "| %s | %d |\n", $0, n }' > "$work/counts"
+
+# Licenses by number of crates, then by name: a total order, so no sort has to break a tie.
+awk -F'|' '{
+    expr = $4
+    sub(/^ +/, "", expr)
+    sub(/ +$/, "", expr)
+    count[expr]++
+}
+END {
+    for (expr in count) printf "%d\t%s\n", count[expr], expr
+}' "$work/rows" |
+    sort -t "$tab" -k1,1nr -k2,2 |
+    awk -F "$tab" '{ printf "| %s | %d |\n", $2, $1 }' > "$work/counts"
 
 # A crate needs attention if it declares no license, or if a copyleft license is its only choice
 # (no permissive id in the expression, or permissive and copyleft joined by AND). A copyleft id
@@ -54,10 +81,15 @@ awk -F'|' '{
     else if (copyleft) print "CHOICE\t" name "\t" expr
 }' "$work/rows" > "$work/flags"
 
+# The flagged crates of one kind, as a markdown list.
+list() {
+    awk -F "$tab" -v kind="$1" '$1 == kind { printf "- `%s`: %s\n", $2, $3 }' "$work/flags"
+}
+
 if grep -q '^ATTENTION' "$work/flags"; then
     verdict="**Attention: read these before distributing; a copyleft license is the only option, or none is declared:**
 
-$(grep '^ATTENTION' "$work/flags" | awk -F'\t' '{ printf "- `%s`: %s\n", $2, $3 }')"
+$(list ATTENTION)"
 else
     verdict="None of them requires copyleft terms, and every one declares a license."
 fi
@@ -66,7 +98,7 @@ if grep -q '^CHOICE' "$work/flags"; then
 
 A copyleft license is offered only as one alternative next to permissive ones, and the permissive terms (MIT or Apache-2.0) are the ones used, by:
 
-$(grep '^CHOICE' "$work/flags" | awk -F'\t' '{ printf "- \`%s\`: %s\n", $2, $3 }')"
+$(list CHOICE)"
 fi
 
 {
@@ -120,6 +152,8 @@ if [ "$mode" = "--check" ]; then
         exit 0
     fi
     echo "$out is out of date: run scripts/third-party-inventory.sh and commit the result" >&2
+    echo "first differences (committed file, then regenerated):" >&2
+    diff -u "$out" "$work/page" | head -40 >&2
     exit 1
 fi
 cp "$work/page" "$out"
